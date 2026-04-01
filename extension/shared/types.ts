@@ -71,16 +71,23 @@ export interface DiscoverySessionState {
 export type ExtensionMessageType =
   | "START_DISCOVERY"
   | "PAUSE_DISCOVERY"
+  | "RESUME_DISCOVERY"
   | "STOP_DISCOVERY"
   | "PROFILE_EXTRACTED"
   | "PROFILE_SCORED"
   | "SESSION_UPDATE"
   | "SESSION_COMPLETED"
   | "SESSION_ERROR"
+  | "SESSION_PROGRESS"
   | "HEARTBEAT"
   | "AUTH_CHECK"
   | "AUTH_RESPONSE"
-  | "PAGE_BOOKMARKED";
+  | "PAGE_BOOKMARKED"
+  | "CHECK_RATE_LIMIT"
+  | "RECORD_SESSION_START"
+  | "RECORD_SESSION_END"
+  | "CREATE_SESSION"
+  | "SAVE_PROFILE";
 
 export interface ExtensionMessage {
   type: ExtensionMessageType;

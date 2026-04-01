@@ -1,10 +1,19 @@
 /**
- * GET  /api/conversations/[id]  — Get a single conversation
- * PUT  /api/conversations/[id]  — Update title or status
+ * GET    /api/conversations/[id]  — Get a single conversation with recent messages
+ * PUT    /api/conversations/[id]  — Update title or status
+ * DELETE /api/conversations/[id]  — Delete conversation and all its messages
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  unauthorized,
+  notFound,
+  validationError,
+  internalError,
+  parseJsonBody,
+} from "@/lib/api/helpers";
 import type {
   GetConversationResponse,
   UpdateConversationResponse,
@@ -19,22 +28,6 @@ const UpdateConversationSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   status: z.enum(["active", "archived"]).optional(),
 });
-
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_CONVERSATION: Conversation = {
-  id: "conv-contact-1",
-  user_id: "user-abc",
-  created_at: "2026-04-01T10:00:00Z",
-  updated_at: "2026-04-01T11:00:00Z",
-  type: "contact_session",
-  contact_id: "contact-123",
-  title: "Marie Chen — Sequoia",
-  status: "active",
-  summary: null,
-};
 
 // ---------------------------------------------------------------------------
 // Route params type
@@ -53,11 +46,25 @@ export async function GET(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id } = await params;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
 
-  // TODO: Implement real fetch with auth check
+  const { data: conversation, error } = await supabase
+    .from("conversations")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (error || !conversation) {
+    return notFound("Conversation");
+  }
 
   const response: GetConversationResponse = {
-    data: { ...MOCK_CONVERSATION, id },
+    data: conversation as Conversation,
     error: null,
   };
 
@@ -69,41 +76,86 @@ export async function PUT(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id } = await params;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { data: null, error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      { status: 400 }
-    );
-  }
+  const { data: body, error: parseErr } = await parseJsonBody(request);
+  if (parseErr) return parseErr;
 
   const parsed = UpdateConversationSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid request body",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid request body",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
+  // Verify ownership
+  const { data: existing } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!existing) return notFound("Conversation");
+
+  const { data: updatedConversation, error: updateError } = await supabase
+    .from("conversations")
+    .update({ ...parsed.data })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select()
+    .single();
+
+  if (updateError || !updatedConversation) {
+    console.error("conversations PUT error:", updateError);
+    return internalError("Failed to update conversation");
+  }
+
   const response: UpdateConversationResponse = {
-    data: {
-      ...MOCK_CONVERSATION,
-      id,
-      ...parsed.data,
-      updated_at: new Date().toISOString(),
-    },
+    data: updatedConversation as Conversation,
     error: null,
   };
 
   return NextResponse.json(response);
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: RouteParams
+): Promise<NextResponse> {
+  const { id } = await params;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
+
+  // Verify ownership
+  const { data: existing } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!existing) return notFound("Conversation");
+
+  // CASCADE DELETE removes messages and artifacts via FK
+  const { error } = await supabase
+    .from("conversations")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
+
+  if (error) {
+    console.error("conversations DELETE error:", error);
+    return internalError("Failed to delete conversation");
+  }
+
+  return NextResponse.json({ data: { deleted: true }, error: null });
 }

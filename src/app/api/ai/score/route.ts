@@ -1,12 +1,24 @@
 /**
  * POST /api/ai/score
  * Scores a contact against the authenticated user's profile.
- * Uses Claude Haiku (Tier 1 model) — fast and cheap for batch scoring.
+ * Uses Claude Haiku — fast and cheap for batch scoring.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { scoreContact } from "@/lib/ai/scoring";
+import { SCORING_RUBRIC } from "@/types/ai";
+import {
+  unauthorized,
+  notFound,
+  validationError,
+  internalError,
+  parseJsonBody,
+  logAiCall,
+} from "@/lib/api/helpers";
 import type { ScoreContactResponse } from "@/types/api";
+import type { Contact, User } from "@/types/database";
 
 // ---------------------------------------------------------------------------
 // Validation schema
@@ -17,76 +29,121 @@ const ScoreContactSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Mock data — realistic scoring response for frontend development
-// ---------------------------------------------------------------------------
-
-const MOCK_RESPONSE: ScoreContactResponse = {
-  data: {
-    contact_id: "contact-123",
-    overall_score: 8.2,
-    tier: 1,
-    scores: {
-      career_path_similarity: 9,
-      shared_background: 9,
-      seniority_relevance: 8,
-      industry_match: 9,
-      accessibility_signals: 7,
-      recency: 8,
-    },
-    recommendation_reason:
-      "INSEAD MBA '22, transitioned from McKinsey to Sequoia — exactly the path you are targeting.",
-    suggested_hook:
-      "We both attended INSEAD and you are following a similar consulting-to-VC path.",
-    scored_at: new Date().toISOString(),
-  },
-  error: null,
-};
-
-// ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  // TODO: Replace with real auth check
-  // const supabase = await getSupabaseServerClient();
-  // const { data: { user } } = await supabase.auth.getUser();
-  // if (!user) return NextResponse.json({ data: null, error: { code: "UNAUTHORIZED", message: "Not authenticated" } }, { status: 401 });
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { data: null, error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      { status: 400 }
-    );
-  }
+  const { data: body, error: parseErr } = await parseJsonBody(request);
+  if (parseErr) return parseErr;
 
   const parsed = ScoreContactSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid request body",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid request body",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
-  // TODO: Implement real scoring
-  // const contact = await fetchContact(parsed.data.contact_id, user.id);
-  // const userProfile = await fetchUserProfile(user.id);
-  // const scoringInput = buildScoringInput(userProfile, contact);
-  // const score = await scoreContact(scoringInput);
-  // await upsertContactScore(contact.id, user.id, score);
-  // return NextResponse.json({ data: { ...score, contact_id: contact.id, scored_at: new Date().toISOString() }, error: null });
+  // Load contact — verify ownership
+  const { data: contactData } = await supabase
+    .from("contacts")
+    .select("*")
+    .eq("id", parsed.data.contact_id)
+    .eq("user_id", user.id)
+    .single();
 
-  return NextResponse.json({
-    ...MOCK_RESPONSE,
-    data: { ...MOCK_RESPONSE.data!, contact_id: parsed.data.contact_id },
+  if (!contactData) return notFound("Contact");
+
+  const contact = contactData as Contact;
+
+  // Load user profile
+  const { data: userData } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", user.id)
+    .single();
+
+  if (!userData) return internalError("User profile not found");
+
+  const userTyped = userData as User;
+
+  // Call scoring engine
+  const start = Date.now();
+  let score;
+  try {
+    score = await scoreContact({
+      user_profile: {
+        career_history: userTyped.career_history,
+        education: userTyped.education,
+        goals: userTyped.goals,
+        networking_preferences: userTyped.networking_preferences,
+      },
+      contact_profile: {
+        name: contact.name,
+        current_role: contact.current_role,
+        company: contact.company,
+        career_history: contact.career_history ?? [],
+        education: contact.education ?? [],
+        location: contact.location,
+        profile_snapshot: contact.profile_snapshot,
+      },
+      rubric: SCORING_RUBRIC,
+    });
+  } catch (err) {
+    console.error("Scoring AI call failed:", err);
+    return internalError("Scoring failed — AI service unavailable");
+  }
+
+  logAiCall({
+    route: "POST /api/ai/score",
+    model: "claude-haiku-4-5",
+    tokensInput: 0, // scoreContact doesn't return token counts yet
+    tokensOutput: 0,
+    latencyMs: Date.now() - start,
   });
+
+  const scoredAt = new Date().toISOString();
+
+  // Persist score to contacts table
+  await supabase
+    .from("contacts")
+    .update({
+      relevance_score: score.overall_score,
+      tier: score.tier,
+      scoring_breakdown: score.scores,
+      recommendation_reason: score.recommendation_reason,
+      suggested_hook: score.suggested_hook,
+    })
+    .eq("id", contact.id)
+    .eq("user_id", user.id);
+
+  // Persist score to contact_scores audit table
+  await supabase.from("contact_scores").insert({
+    contact_id: contact.id,
+    user_id: user.id,
+    overall_score: score.overall_score,
+    tier: score.tier,
+    scores: score.scores,
+    recommendation_reason: score.recommendation_reason,
+    suggested_hook: score.suggested_hook,
+    model_used: "claude-haiku-4-5",
+    scored_at: scoredAt,
+  });
+
+  const response: ScoreContactResponse = {
+    data: {
+      ...score,
+      contact_id: contact.id,
+      scored_at: scoredAt,
+    },
+    error: null,
+  };
+
+  return NextResponse.json(response);
 }

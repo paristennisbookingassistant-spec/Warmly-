@@ -1,17 +1,27 @@
 /**
  * GET    /api/contacts/[id]  — Get a single contact
- * PUT    /api/contacts/[id]  — Update a contact
+ * PUT    /api/contacts/[id]  — Update a contact (partial update)
  * DELETE /api/contacts/[id]  — Delete a contact
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { scoreContact } from "@/lib/ai/scoring";
+import { SCORING_RUBRIC } from "@/types/ai";
+import {
+  unauthorized,
+  notFound,
+  validationError,
+  internalError,
+  parseJsonBody,
+} from "@/lib/api/helpers";
 import type {
   GetContactResponse,
   UpdateContactResponse,
   DeleteContactResponse,
 } from "@/types/api";
-import type { Contact } from "@/types/database";
+import type { Contact, User } from "@/types/database";
 
 // ---------------------------------------------------------------------------
 // Validation schema
@@ -31,46 +41,6 @@ const UpdateContactSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_CONTACT: Contact = {
-  id: "contact-123",
-  user_id: "user-abc",
-  created_at: "2026-04-01T10:00:00Z",
-  updated_at: "2026-04-01T10:00:00Z",
-  linkedin_url: "https://linkedin.com/in/marie-chen-sample",
-  name: "Marie Chen",
-  current_role: "VP of Investments",
-  company: "Sequoia Capital",
-  location: "Singapore",
-  career_history: [],
-  education: [],
-  profile_snapshot: null,
-  relevance_score: 8.2,
-  tier: 1,
-  scoring_breakdown: {
-    career_path_similarity: 9,
-    shared_background: 9,
-    seniority_relevance: 8,
-    industry_match: 9,
-    accessibility_signals: 7,
-    recency: 8,
-  },
-  recommendation_reason:
-    "INSEAD MBA '22, transitioned from McKinsey to Sequoia — exactly the path you are targeting.",
-  suggested_hook:
-    "We both went through INSEAD and you are following a similar consulting-to-VC path.",
-  source: "manual_chat",
-  status: "discovered",
-  discovered_at: "2026-04-01T10:00:00Z",
-  last_interaction_at: null,
-  user_feedback: null,
-  discovery_session_id: null,
-  notes: null,
-};
-
-// ---------------------------------------------------------------------------
 // Route params type
 // ---------------------------------------------------------------------------
 
@@ -87,16 +57,25 @@ export async function GET(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id } = await params;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
 
-  // TODO: Implement real fetch
-  // const supabase = await getSupabaseServerClient();
-  // const { data: { user } } = await supabase.auth.getUser();
-  // if (!user) return unauthorized();
-  // const { data, error } = await supabase.from('contacts').select('*').eq('id', id).eq('user_id', user.id).single();
-  // if (!data) return notFound();
+  const { data: contact, error } = await supabase
+    .from("contacts")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (error || !contact) {
+    return notFound("Contact");
+  }
 
   const response: GetContactResponse = {
-    data: { ...MOCK_CONTACT, id },
+    data: contact as Contact,
     error: null,
   };
 
@@ -108,44 +87,58 @@ export async function PUT(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id } = await params;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { data: null, error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      { status: 400 }
-    );
-  }
+  const { data: body, error: parseErr } = await parseJsonBody(request);
+  if (parseErr) return parseErr;
 
   const parsed = UpdateContactSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid request body",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid request body",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
-  // TODO: Implement real update
-  // Check stage auto-progression rules (PRD CRM-06):
-  // - outreach_draft with status 'sent' → contact status becomes 'contacted'
-  // - meeting_notes created → contact status becomes 'met'
+  // Verify the contact belongs to this user
+  const { data: existing } = await supabase
+    .from("contacts")
+    .select("id, company, current_role, career_history, education, location")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!existing) return notFound("Contact");
+
+  const { data: updatedContact, error: updateError } = await supabase
+    .from("contacts")
+    .update({ ...parsed.data })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select()
+    .single();
+
+  if (updateError || !updatedContact) {
+    console.error("contacts PUT error:", updateError);
+    return internalError("Failed to update contact");
+  }
+
+  // Re-score if significant profile fields changed
+  const significantFields = ["company", "current_role", "location"] as const;
+  const hasSignificantChange = significantFields.some(
+    (field) => parsed.data[field] !== undefined
+  );
+
+  if (hasSignificantChange) {
+    void triggerRescore(user.id, id, updatedContact as Contact, supabase);
+  }
 
   const response: UpdateContactResponse = {
-    data: {
-      ...MOCK_CONTACT,
-      id,
-      ...parsed.data,
-      updated_at: new Date().toISOString(),
-    },
+    data: updatedContact as Contact,
     error: null,
   };
 
@@ -157,12 +150,32 @@ export async function DELETE(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id } = await params;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
 
-  // TODO: Implement real delete (cascade removes artifacts and messages via FK)
-  // const supabase = await getSupabaseServerClient();
-  // await supabase.from('contacts').delete().eq('id', id).eq('user_id', user.id);
+  // Verify ownership before delete
+  const { data: existing } = await supabase
+    .from("contacts")
+    .select("id")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
 
-  void id; // used in real implementation
+  if (!existing) return notFound("Contact");
+
+  const { error } = await supabase
+    .from("contacts")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
+
+  if (error) {
+    console.error("contacts DELETE error:", error);
+    return internalError("Failed to delete contact");
+  }
 
   const response: DeleteContactResponse = {
     data: { deleted: true },
@@ -170,4 +183,72 @@ export async function DELETE(
   };
 
   return NextResponse.json(response);
+}
+
+// ---------------------------------------------------------------------------
+// Async re-scoring helper
+// ---------------------------------------------------------------------------
+
+async function triggerRescore(
+  userId: string,
+  contactId: string,
+  contact: Contact,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any
+): Promise<void> {
+  try {
+    const { data: userData } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", userId)
+      .single();
+
+    if (!userData) return;
+
+    const userTyped = userData as User;
+
+    const score = await scoreContact({
+      user_profile: {
+        career_history: userTyped.career_history,
+        education: userTyped.education,
+        goals: userTyped.goals,
+        networking_preferences: userTyped.networking_preferences,
+      },
+      contact_profile: {
+        name: contact.name,
+        current_role: contact.current_role,
+        company: contact.company,
+        career_history: contact.career_history ?? [],
+        education: contact.education ?? [],
+        location: contact.location,
+        profile_snapshot: contact.profile_snapshot,
+      },
+      rubric: SCORING_RUBRIC,
+    });
+
+    await supabase
+      .from("contacts")
+      .update({
+        relevance_score: score.overall_score,
+        tier: score.tier,
+        scoring_breakdown: score.scores,
+        recommendation_reason: score.recommendation_reason,
+        suggested_hook: score.suggested_hook,
+      })
+      .eq("id", contactId)
+      .eq("user_id", userId);
+
+    await supabase.from("contact_scores").insert({
+      contact_id: contactId,
+      user_id: userId,
+      overall_score: score.overall_score,
+      tier: score.tier,
+      scores: score.scores,
+      recommendation_reason: score.recommendation_reason,
+      suggested_hook: score.suggested_hook,
+      model_used: "claude-haiku-4-5",
+    });
+  } catch (err) {
+    console.error("Re-score failed for contact", contactId, err);
+  }
 }

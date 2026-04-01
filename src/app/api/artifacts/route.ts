@@ -1,13 +1,18 @@
 /**
  * GET  /api/artifacts  — List artifacts with optional filters
  * POST /api/artifacts  — Create a new artifact (manual creation)
- *
- * Note: Most artifacts are created via /api/ai/generate, not this endpoint.
- * This route is for manual artifact creation and bulk listing.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  unauthorized,
+  validationError,
+  internalError,
+  buildPaginatedResponse,
+  parseJsonBody,
+} from "@/lib/api/helpers";
 import type {
   ListArtifactsResponse,
   CreateArtifactResponse,
@@ -52,64 +57,58 @@ const CreateArtifactSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_ARTIFACT: Artifact = {
-  id: "artifact-456",
-  user_id: "user-abc",
-  contact_id: "contact-123",
-  conversation_id: "conv-contact-1",
-  created_at: "2026-04-01T10:01:30Z",
-  updated_at: "2026-04-01T10:01:30Z",
-  type: "connection_note",
-  content: {
-    message:
-      "Hi Marie, I came across your profile and was impressed by your transition from McKinsey to Sequoia. As a fellow INSEAD MBA targeting VC, I would love to connect.",
-    hook: "shared INSEAD background",
-    char_count: 194,
-  },
-  status: "draft",
-  version: 1,
-  artifact_outcome: null,
-  user_edit_distance: null,
-  metadata: { hook_used: "shared_alma_mater" },
-};
-
-// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
+
   const { searchParams } = new URL(request.url);
   const rawQuery = Object.fromEntries(searchParams.entries());
 
   const parsed = ListArtifactsQuerySchema.safeParse(rawQuery);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid query parameters",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid query parameters",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
-  // TODO: Implement real query
-  // Group results by type for Contact detail page display
+  const { page, per_page, contact_id, conversation_id, type, status } =
+    parsed.data;
+  const from = (page - 1) * per_page;
+  const to = from + per_page - 1;
+
+  let query = supabase
+    .from("artifacts")
+    .select("*", { count: "exact" })
+    .eq("user_id", user.id);
+
+  if (contact_id) query = query.eq("contact_id", contact_id);
+  if (conversation_id) query = query.eq("conversation_id", conversation_id);
+  if (type) query = query.eq("type", type);
+  if (status) query = query.eq("status", status);
+
+  query = query.order("created_at", { ascending: false }).range(from, to);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    console.error("artifacts GET error:", error);
+    return internalError("Failed to fetch artifacts");
+  }
 
   const response: ListArtifactsResponse = {
-    data: {
-      items: [MOCK_ARTIFACT],
-      total: 1,
-      page: parsed.data.page,
-      per_page: parsed.data.per_page,
-      has_more: false,
-    },
+    data: buildPaginatedResponse(
+      (data ?? []) as Artifact[],
+      count ?? 0,
+      page,
+      per_page
+    ),
     error: null,
   };
 
@@ -117,45 +116,69 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { data: null, error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      { status: 400 }
-    );
-  }
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
+
+  const { data: body, error: parseErr } = await parseJsonBody(request);
+  if (parseErr) return parseErr;
 
   const parsed = CreateArtifactSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid request body",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid request body",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
-  const newArtifact: Artifact = {
-    ...MOCK_ARTIFACT,
-    id: `artifact-${Date.now()}`,
-    contact_id: parsed.data.contact_id,
-    conversation_id: parsed.data.conversation_id,
-    type: parsed.data.type,
-    content: parsed.data.content,
-    metadata: parsed.data.metadata,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
+  // Verify the contact belongs to this user
+  const { data: contact } = await supabase
+    .from("contacts")
+    .select("id")
+    .eq("id", parsed.data.contact_id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!contact) {
+    return validationError("contact_id does not exist or does not belong to you");
+  }
+
+  // Verify the conversation belongs to this user
+  const { data: conversation } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("id", parsed.data.conversation_id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!conversation) {
+    return validationError("conversation_id does not exist or does not belong to you");
+  }
+
+  const { data: newArtifact, error: insertError } = await supabase
+    .from("artifacts")
+    .insert({
+      user_id: user.id,
+      contact_id: parsed.data.contact_id,
+      conversation_id: parsed.data.conversation_id,
+      type: parsed.data.type,
+      content: parsed.data.content,
+      metadata: parsed.data.metadata,
+      status: "draft",
+      version: 1,
+    })
+    .select()
+    .single();
+
+  if (insertError || !newArtifact) {
+    console.error("artifacts POST error:", insertError);
+    return internalError("Failed to create artifact");
+  }
 
   const response: CreateArtifactResponse = {
-    data: newArtifact,
+    data: newArtifact as Artifact,
     error: null,
   };
 

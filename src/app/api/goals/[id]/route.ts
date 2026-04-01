@@ -1,11 +1,19 @@
 /**
- * GET    /api/goals/[id]  — Get a single goal
- * PUT    /api/goals/[id]  — Update a goal
+ * GET    /api/goals/[id]  — Get a single goal with computed progress
+ * PUT    /api/goals/[id]  — Update goal fields
  * DELETE /api/goals/[id]  — Delete a goal
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  unauthorized,
+  notFound,
+  validationError,
+  internalError,
+  parseJsonBody,
+} from "@/lib/api/helpers";
 import type {
   GetGoalResponse,
   UpdateGoalResponse,
@@ -27,31 +35,6 @@ const UpdateGoalSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_GOAL: NetworkingGoal = {
-  id: "goal-1",
-  user_id: "user-abc",
-  created_at: "2026-04-01T00:00:00Z",
-  updated_at: "2026-04-01T00:00:00Z",
-  goal_type: "job_search",
-  description:
-    "Land an Associate or Senior Associate role at a top PE/VC fund or strategy consulting firm in Singapore or London by September 2026.",
-  target_companies: ["Sequoia", "KKR", "Blackstone", "Apollo", "BCG"],
-  target_roles: ["Associate", "Senior Associate"],
-  target_contacts_per_month: 8,
-  target_meetings_per_month: 4,
-  progress: {
-    contacts_found: 12,
-    messages_sent: 5,
-    meetings_held: 2,
-    responses_received: 3,
-  },
-  status: "active",
-};
-
-// ---------------------------------------------------------------------------
 // Route params type
 // ---------------------------------------------------------------------------
 
@@ -68,9 +51,28 @@ export async function GET(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id } = await params;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
+
+  const { data: goal, error } = await supabase
+    .from("networking_goals")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (error || !goal) {
+    return notFound("Goal");
+  }
+
+  // Recompute progress from real data
+  const progress = await computeGoalProgress(user.id, supabase);
 
   const response: GetGoalResponse = {
-    data: { ...MOCK_GOAL, id },
+    data: { ...(goal as NetworkingGoal), progress },
     error: null,
   };
 
@@ -82,39 +84,50 @@ export async function PUT(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id } = await params;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { data: null, error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      { status: 400 }
-    );
-  }
+  const { data: body, error: parseErr } = await parseJsonBody(request);
+  if (parseErr) return parseErr;
 
   const parsed = UpdateGoalSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid request body",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid request body",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
+  // Verify ownership
+  const { data: existing } = await supabase
+    .from("networking_goals")
+    .select("id")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!existing) return notFound("Goal");
+
+  const { data: updatedGoal, error: updateError } = await supabase
+    .from("networking_goals")
+    .update({ ...parsed.data })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select()
+    .single();
+
+  if (updateError || !updatedGoal) {
+    console.error("goals PUT error:", updateError);
+    return internalError("Failed to update goal");
+  }
+
+  const progress = await computeGoalProgress(user.id, supabase);
+
   const response: UpdateGoalResponse = {
-    data: {
-      ...MOCK_GOAL,
-      id,
-      ...parsed.data,
-      updated_at: new Date().toISOString(),
-    },
+    data: { ...(updatedGoal as NetworkingGoal), progress },
     error: null,
   };
 
@@ -126,7 +139,31 @@ export async function DELETE(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id } = await params;
-  void id;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
+
+  const { data: existing } = await supabase
+    .from("networking_goals")
+    .select("id")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!existing) return notFound("Goal");
+
+  const { error } = await supabase
+    .from("networking_goals")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
+
+  if (error) {
+    console.error("goals DELETE error:", error);
+    return internalError("Failed to delete goal");
+  }
 
   const response: DeleteGoalResponse = {
     data: { deleted: true },
@@ -134,4 +171,54 @@ export async function DELETE(
   };
 
   return NextResponse.json(response);
+}
+
+// ---------------------------------------------------------------------------
+// Progress computation helper — same as in goals/route.ts
+// ---------------------------------------------------------------------------
+
+async function computeGoalProgress(
+  userId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any
+): Promise<{
+  contacts_found: number;
+  messages_sent: number;
+  meetings_held: number;
+  responses_received: number;
+}> {
+  const [
+    { count: contactsFound },
+    { count: messagesSent },
+    { count: meetingsHeld },
+    { count: responsesReceived },
+  ] = await Promise.all([
+    supabase
+      .from("contacts")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId),
+    supabase
+      .from("artifacts")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .in("type", ["outreach_draft", "connection_note"])
+      .eq("status", "sent"),
+    supabase
+      .from("artifacts")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("type", "meeting_notes"),
+    supabase
+      .from("artifacts")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("artifact_outcome", "response_received"),
+  ]);
+
+  return {
+    contacts_found: contactsFound ?? 0,
+    messages_sent: messagesSent ?? 0,
+    meetings_held: meetingsHeld ?? 0,
+    responses_received: responsesReceived ?? 0,
+  };
 }

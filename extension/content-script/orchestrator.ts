@@ -2,20 +2,18 @@
  * content-script/orchestrator.ts
  * Discovery session orchestration loop.
  *
- * CRITICAL: This MUST run in the content script, NOT the service worker.
- * Manifest V3 service workers are terminated after 30s of inactivity.
+ * CRITICAL: This file runs in the CONTENT SCRIPT, NOT the service worker.
+ * Manifest V3 service workers are terminated after 30 s of inactivity.
  * Discovery sessions run for 15-20 minutes.
  * Content scripts stay alive as long as the LinkedIn tab is open.
  * See PRD Section 5.3.
  *
- * The orchestrator:
- * 1. Receives a StartDiscovery message from the service worker/popup
- * 2. Iterates through target companies
- * 3. For each company: navigates to search, collects profile URLs, visits each profile
- * 4. Extracts profile data from each profile page
- * 5. Sends extracted profiles to the service worker for API upload
- * 6. Pings the service worker every 25s (heartbeat) to keep it alive
- * 7. Persists progress to chrome.storage.local for crash recovery
+ * Architecture:
+ * - Orchestrator holds all loop state (never in SW)
+ * - SW handles only short-lived tasks: API calls, rate limit storage
+ * - Content script pings SW every 25 s (heartbeat) to keep it alive
+ * - Progress is broadcast to popup after each profile via chrome.runtime.sendMessage
+ * - State is persisted to chrome.storage.local for crash recovery
  */
 
 import type {
@@ -25,233 +23,394 @@ import type {
 } from "../shared/types";
 import { extractProfileFromDOM } from "./dom-reader";
 import {
-  navigateToCompanySearch,
+  searchLinkedIn,
   collectProfileUrlsFromSearchResults,
   navigateToProfile,
   waitForProfileLoad,
-  waitBeforeNextProfile,
   isLoginWall,
+  goToNextResultsPage,
+  type SearchFilters,
 } from "./navigator";
-import { simulateProfileReading, getSessionProfileLimit } from "./behavior-sim";
-
-/** Max profiles per session — hard limit from PRD DIS-08 */
-const MAX_PROFILES_PER_SESSION = 25;
-
-/** Heartbeat interval in ms — keeps service worker alive */
-const HEARTBEAT_INTERVAL_MS = 25_000;
-
-let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-let sessionState: DiscoverySessionState | null = null;
-let isPaused = false;
-let isStopped = false;
+import {
+  humanDelay,
+  simulateProfileReading,
+  getSessionProfileLimit,
+  naturalScroll,
+} from "./behavior-sim";
+import {
+  MAX_PROFILES_PER_SESSION,
+  HEARTBEAT_INTERVAL_MS,
+  STORAGE_KEYS,
+} from "../shared/constants";
 
 // ---------------------------------------------------------------------------
-// Entry point — called when content script receives START_DISCOVERY message
+// Session state types
 // ---------------------------------------------------------------------------
 
-export async function startDiscovery(
-  payload: StartDiscoveryPayload
-): Promise<void> {
-  isStopped = false;
-  isPaused = false;
+export type SessionState =
+  | "IDLE"
+  | "STARTING"
+  | "SEARCHING"
+  | "VISITING_PROFILE"
+  | "PROCESSING"
+  | "PAUSED"
+  | "COMPLETED"
+  | "RATE_LIMITED"
+  | "ERROR";
 
-  const actualLimit = getSessionProfileLimit(
-    Math.min(payload.max_profiles, MAX_PROFILES_PER_SESSION)
-  );
-
-  sessionState = {
-    session_id: payload.session_id,
-    user_id: "",  // populated from auth check
-    target_companies: payload.target_companies,
-    current_company_index: 0,
-    profiles_viewed: 0,
-    profiles_scored: 0,
-    profiles_saved: 0,
-    status: "running",
-    started_at: new Date().toISOString(),
-    last_heartbeat: new Date().toISOString(),
-    completed_companies: [],
-    processed_urls: [],
-  };
-
-  await persistState();
-  startHeartbeat();
-
-  try {
-    await runDiscoveryLoop(actualLimit);
-  } catch (err) {
-    console.error("[Orchestrator] Discovery loop error:", err);
-    await updateStatus("failed");
-    sendMessage({ type: "SESSION_ERROR", payload: { error: String(err) } });
-  } finally {
-    stopHeartbeat();
-  }
+export interface SessionProgress {
+  profilesVisited: number;
+  profilesDiscovered: number;
+  total: number;
+  state: SessionState;
+  sessionId: string | null;
 }
 
 // ---------------------------------------------------------------------------
-// Main discovery loop
+// DiscoveryOrchestrator
 // ---------------------------------------------------------------------------
 
-async function runDiscoveryLoop(maxProfiles: number): Promise<void> {
-  if (!sessionState) return;
+export class DiscoveryOrchestrator {
+  private state: SessionState = "IDLE";
+  private sessionId: string | null = null;
+  private profilesVisited = 0;
+  private profilesDiscovered = 0;
+  private isPaused = false;
+  private shouldStop = false;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private sessionLimit = MAX_PROFILES_PER_SESSION;
 
-  for (
-    let companyIdx = sessionState.current_company_index;
-    companyIdx < sessionState.target_companies.length;
-    companyIdx++
-  ) {
-    if (isStopped) break;
+  // -----------------------------------------------------------------------
+  // Public controls
+  // -----------------------------------------------------------------------
 
-    const company = sessionState.target_companies[companyIdx];
-    sessionState.current_company_index = companyIdx;
+  async startSession(query: string, filters?: SearchFilters): Promise<void> {
+    // 1. Check rate limit via service worker
+    const rateLimitResponse = await this.sendMessage({
+      type: "CHECK_RATE_LIMIT" as ExtensionMessage["type"],
+    });
 
-    await navigateToCompanySearch(company, ["associate", "MBA", "consulting"]);
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-
-    if (isLoginWall()) {
-      console.warn("[Orchestrator] Login wall detected — pausing discovery");
-      await updateStatus("paused");
-      sendMessage({ type: "SESSION_ERROR", payload: { error: "LinkedIn session expired" } });
-      return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- runtime message payload
+    const rl = rateLimitResponse as any;
+    if (rl && rl.allowed === false) {
+      this.transition("RATE_LIMITED");
+      throw new Error(rl.reason ?? "Rate limit exceeded");
     }
 
-    const profileUrls = collectProfileUrlsFromSearchResults();
+    this.transition("STARTING");
+    this.isPaused = false;
+    this.shouldStop = false;
+    this.profilesVisited = 0;
+    this.profilesDiscovered = 0;
+    this.sessionLimit = getSessionProfileLimit(MAX_PROFILES_PER_SESSION);
 
-    for (const url of profileUrls) {
-      if (isStopped) break;
-      if (sessionState.profiles_viewed >= maxProfiles) break;
-      if (sessionState.processed_urls.includes(url)) continue;
+    // 2. Create session record
+    const createResponse = await this.sendMessage({
+      type: "CREATE_SESSION" as ExtensionMessage["type"],
+      payload: { query, filters },
+    });
 
-      while (isPaused && !isStopped) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- runtime message payload
+    const cs = createResponse as any;
+    this.sessionId = cs?.session_id ?? crypto.randomUUID();
 
-      if (isStopped) break;
+    // 3. Record session start in rate limiter
+    await this.sendMessage({
+      type: "RECORD_SESSION_START" as ExtensionMessage["type"],
+    });
 
-      await navigateToProfile(url);
-      const loaded = await waitForProfileLoad();
+    this.startHeartbeat();
 
-      if (!loaded) {
-        console.warn(`[Orchestrator] Profile failed to load: ${url}`);
+    try {
+      this.transition("SEARCHING");
+      await searchLinkedIn(query, filters);
+      await this.discoveryLoop(query);
+    } catch (err) {
+      console.error("[Orchestrator] Discovery loop error:", err);
+      this.transition("ERROR");
+      await this.broadcastProgress();
+      throw err;
+    } finally {
+      this.stopHeartbeat();
+      await this.sendMessage({
+        type: "RECORD_SESSION_END" as ExtensionMessage["type"],
+      });
+    }
+  }
+
+  async pauseSession(): Promise<void> {
+    this.isPaused = true;
+    this.transition("PAUSED");
+    await this.persistState();
+    await this.broadcastProgress();
+  }
+
+  async resumeSession(): Promise<void> {
+    this.isPaused = false;
+    this.transition("SEARCHING");
+    await this.broadcastProgress();
+  }
+
+  async stopSession(): Promise<void> {
+    this.shouldStop = true;
+    this.isPaused = false; // Unblock any pause polling loop
+    this.stopHeartbeat();
+    this.transition("COMPLETED");
+    await this.persistState();
+    await this.broadcastProgress();
+  }
+
+  getState(): SessionState {
+    return this.state;
+  }
+
+  getProgress(): SessionProgress {
+    return {
+      profilesVisited: this.profilesVisited,
+      profilesDiscovered: this.profilesDiscovered,
+      total: this.sessionLimit,
+      state: this.state,
+      sessionId: this.sessionId,
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // Discovery loop — runs entirely in content script
+  // -----------------------------------------------------------------------
+
+  private async discoveryLoop(query: string): Promise<void> {
+    const visitedUrls = new Set<string>();
+
+    outerLoop: while (
+      this.profilesVisited < this.sessionLimit &&
+      !this.shouldStop
+    ) {
+      // Collect profile URLs from current search results page
+      const urls = collectProfileUrlsFromSearchResults().filter(
+        (u) => !visitedUrls.has(u)
+      );
+
+      if (urls.length === 0) {
+        // No unvisited URLs on this page — try next page
+        const hasNext = await goToNextResultsPage();
+        if (!hasNext) break; // No more pages — session complete
         continue;
       }
 
-      await simulateProfileReading();
+      for (const url of urls) {
+        if (this.shouldStop) break outerLoop;
+        if (this.profilesVisited >= this.sessionLimit) break outerLoop;
+        if (visitedUrls.has(url)) continue;
 
-      const profile = extractProfileFromDOM(sessionState.session_id);
+        // ---- Pause polling loop ----
+        while (this.isPaused && !this.shouldStop) {
+          await this.sleep(1000);
+        }
+        if (this.shouldStop) break outerLoop;
 
-      sessionState.profiles_viewed++;
-      sessionState.processed_urls.push(url);
+        visitedUrls.add(url);
 
-      if (profile) {
-        sendMessage({ type: "PROFILE_EXTRACTED", payload: { profile, session_id: sessionState.session_id } });
-        sessionState.profiles_saved++;
+        // -- Step 1: Scroll search page naturally before leaving --
+        this.transition("VISITING_PROFILE");
+        await naturalScroll();
+
+        // -- Step 2: Navigate to profile --
+        await navigateToProfile(url);
+        const loaded = await waitForProfileLoad();
+
+        if (!loaded) {
+          console.warn(`[Orchestrator] Profile did not load: ${url}`);
+          this.transition("SEARCHING");
+          continue;
+        }
+
+        // Check for login wall after navigation
+        if (isLoginWall()) {
+          console.warn("[Orchestrator] Login wall detected — stopping session");
+          this.transition("ERROR");
+          await this.sendMessage({
+            type: "SESSION_ERROR" as ExtensionMessage["type"],
+            payload: { error: "LinkedIn session expired — please log in again" },
+          });
+          return;
+        }
+
+        // -- Step 3: Simulate reading the profile --
+        this.transition("PROCESSING");
+        await simulateProfileReading();
+
+        // -- Step 4: Extract profile data --
+        const profile = extractProfileFromDOM(this.sessionId);
+
+        this.profilesVisited++;
+
+        if (profile) {
+          this.profilesDiscovered++;
+          await this.sendMessage({
+            type: "SAVE_PROFILE" as ExtensionMessage["type"],
+            payload: { profile, session_id: this.sessionId },
+          });
+        }
+
+        // -- Step 5: Broadcast progress to popup --
+        this.transition("SEARCHING");
+        await this.broadcastProgress();
+        await this.persistState();
+
+        // -- Step 6: Navigate back to search results --
+        window.history.back();
+        await this.sleep(2000); // brief wait for navigation
+
+        // -- Step 7: Human delay before visiting next profile --
+        if (this.profilesVisited < this.sessionLimit && !this.shouldStop) {
+          await humanDelay();
+        }
       }
 
-      sendMessage({
-        type: "SESSION_UPDATE",
-        payload: {
-          session_id: sessionState.session_id,
-          profiles_viewed: sessionState.profiles_viewed,
-          profiles_scored: sessionState.profiles_scored,
-          profiles_saved: sessionState.profiles_saved,
-          status: "running",
-          current_company: company,
-        },
+      // After exhausting all URLs on this page, try to go to the next page
+      if (!this.shouldStop && this.profilesVisited < this.sessionLimit) {
+        const hasNext = await goToNextResultsPage();
+        if (!hasNext) break;
+      }
+    }
+
+    this.transition("COMPLETED");
+    await this.persistState();
+    await this.broadcastProgress();
+
+    // Send final summary to service worker
+    await this.sendMessage({
+      type: "SESSION_COMPLETED" as ExtensionMessage["type"],
+      payload: {
+        session_id: this.sessionId,
+        profiles_saved: this.profilesDiscovered,
+      },
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // State machine
+  // -----------------------------------------------------------------------
+
+  private transition(next: SessionState): void {
+    console.debug(`[Orchestrator] ${this.state} → ${next}`);
+    this.state = next;
+  }
+
+  // -----------------------------------------------------------------------
+  // Heartbeat — keeps service worker alive
+  // -----------------------------------------------------------------------
+
+  private startHeartbeat(): void {
+    this.heartbeatTimer = setInterval(() => {
+      this.sendMessage({
+        type: "HEARTBEAT" as ExtensionMessage["type"],
+        payload: { session_id: this.sessionId },
+      }).catch(() => {
+        // Service worker may be briefly unavailable — non-fatal
       });
+    }, HEARTBEAT_INTERVAL_MS);
+  }
 
-      await persistState();
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
 
-      if (sessionState.profiles_viewed < maxProfiles) {
-        await waitBeforeNextProfile();
+  // -----------------------------------------------------------------------
+  // State persistence
+  // -----------------------------------------------------------------------
+
+  private async persistState(): Promise<void> {
+    const snapshot = {
+      session_id: this.sessionId,
+      state: this.state,
+      profiles_visited: this.profilesVisited,
+      profiles_discovered: this.profilesDiscovered,
+      session_limit: this.sessionLimit,
+    };
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.DISCOVERY_SESSION]: snapshot,
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // Progress broadcasting
+  // -----------------------------------------------------------------------
+
+  private async broadcastProgress(): Promise<void> {
+    await this.sendMessage({
+      type: "SESSION_PROGRESS" as ExtensionMessage["type"],
+      payload: this.getProgress(),
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // Messaging
+  // -----------------------------------------------------------------------
+
+  private sendMessage(message: { type: string; payload?: unknown }): Promise<unknown> {
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          if (chrome.runtime.lastError) {
+            // Service worker temporarily unavailable — resolve with null
+            resolve(null);
+            return;
+          }
+          resolve(response ?? null);
+        });
+      } catch {
+        resolve(null);
       }
-    }
-
-    sessionState.completed_companies.push(company);
+    });
   }
 
-  await updateStatus("completed");
-  sendMessage({
-    type: "SESSION_COMPLETED",
-    payload: {
-      session_id: sessionState?.session_id,
-      profiles_saved: sessionState?.profiles_saved,
-    },
-  });
-}
+  // -----------------------------------------------------------------------
+  // Utility
+  // -----------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Heartbeat — keeps service worker alive during long discovery sessions
-// ---------------------------------------------------------------------------
-
-function startHeartbeat() {
-  heartbeatTimer = setInterval(() => {
-    sendMessage({ type: "HEARTBEAT", payload: { session_id: sessionState?.session_id } });
-    if (sessionState) {
-      sessionState.last_heartbeat = new Date().toISOString();
-      persistState();
-    }
-  }, HEARTBEAT_INTERVAL_MS);
-}
-
-function stopHeartbeat() {
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 
 // ---------------------------------------------------------------------------
-// State persistence
+// Module-level instance and legacy function exports
+// (kept for backward-compat with the existing index.ts message listener)
 // ---------------------------------------------------------------------------
 
-async function persistState(): Promise<void> {
-  if (!sessionState) return;
-  await chrome.storage.local.set({ discovery_session: sessionState });
+const orchestrator = new DiscoveryOrchestrator();
+
+export async function startDiscovery(payload: StartDiscoveryPayload): Promise<void> {
+  const query = payload.target_companies.join(" OR ");
+  await orchestrator.startSession(query);
 }
-
-async function updateStatus(status: DiscoverySessionState["status"]): Promise<void> {
-  if (sessionState) {
-    sessionState.status = status;
-    await persistState();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Messaging
-// ---------------------------------------------------------------------------
-
-function sendMessage(message: ExtensionMessage): void {
-  chrome.runtime.sendMessage(message).catch(() => {
-    // Service worker may be temporarily unavailable — heartbeat will reconnect
-  });
-}
-
-// ---------------------------------------------------------------------------
-// External controls — called from message listener in index.ts
-// ---------------------------------------------------------------------------
 
 export function pauseDiscovery(): void {
-  isPaused = true;
-  if (sessionState) {
-    sessionState.status = "paused";
-    persistState();
-  }
+  orchestrator.pauseSession().catch(console.error);
 }
 
 export function resumeDiscovery(): void {
-  isPaused = false;
-  if (sessionState) {
-    sessionState.status = "running";
-    persistState();
-  }
+  orchestrator.resumeSession().catch(console.error);
 }
 
 export function stopDiscovery(): void {
-  isStopped = true;
-  stopHeartbeat();
-  if (sessionState) {
-    sessionState.status = "completed";
-    persistState();
-  }
+  orchestrator.stopSession().catch(console.error);
+}
+
+export function getOrchestratorProgress(): SessionProgress {
+  return orchestrator.getProgress();
+}
+
+// ---------------------------------------------------------------------------
+// Legacy session state helpers (used by existing orchestrator consumers)
+// ---------------------------------------------------------------------------
+
+let _legacySessionState: DiscoverySessionState | null = null;
+
+export function getLegacySessionState(): DiscoverySessionState | null {
+  return _legacySessionState;
 }

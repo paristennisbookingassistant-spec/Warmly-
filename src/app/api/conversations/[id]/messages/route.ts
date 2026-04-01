@@ -1,22 +1,47 @@
 /**
- * GET  /api/conversations/[id]/messages  — List messages in a conversation
- * POST /api/conversations/[id]/messages  — Send a message and get agent response
+ * GET  /api/conversations/[id]/messages  — Paginated message history
+ * POST /api/conversations/[id]/messages  — Main chat endpoint
  *
- * The POST handler is the primary AI interaction endpoint. It:
- * 1. Saves the user message
- * 2. Loads context (contact profile, summary, recent messages)
- * 3. Calls the coaching AI (Sonnet/Haiku based on content)
- * 4. Detects artifact triggers and generates artifacts if needed
- * 5. Returns both the agent message and any created artifacts
+ * POST flow:
+ *  1. Authenticate + verify conversation ownership
+ *  2. Save user message to DB
+ *  3. Load context (contact profile, summary, recent messages)
+ *  4. Check if rolling summarization is needed (>= 15 messages)
+ *  5. Call processCoachingMessage() (Haiku or Sonnet based on content)
+ *  6. If artifact trigger detected → call generateArtifact() and save
+ *  7. Save agent message with artifact_ids
+ *  8. Update conversation.updated_at
+ *  9. Return both messages + created artifacts
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { processCoachingMessage } from "@/lib/ai/coaching";
+import { generateArtifact } from "@/lib/ai/generation";
+import { summarizeConversation, SUMMARIZATION_THRESHOLD } from "@/lib/ai/context";
+import { searchCompanyIntel } from "@/lib/search";
+import {
+  unauthorized,
+  notFound,
+  validationError,
+  internalError,
+  buildPaginatedResponse,
+  parseJsonBody,
+  logAiCall,
+} from "@/lib/api/helpers";
 import type {
   ListMessagesResponse,
   SendMessageResponse,
 } from "@/types/api";
-import type { ConversationMessage, Artifact } from "@/types/database";
+import type {
+  ConversationMessage,
+  Artifact,
+  Conversation,
+  Contact,
+  User,
+} from "@/types/database";
+import type { ConversationSummary } from "@/types/ai";
 
 // ---------------------------------------------------------------------------
 // Validation schemas
@@ -33,41 +58,6 @@ const SendMessageSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_MESSAGES: ConversationMessage[] = [
-  {
-    id: "msg-1",
-    conversation_id: "conv-contact-1",
-    created_at: "2026-04-01T10:00:00Z",
-    role: "agent",
-    content:
-      "Marie Chen is a VP at Sequoia Capital, INSEAD '22. She transitioned from McKinsey — exactly the path you are targeting. She is active on LinkedIn and recently posted about deal sourcing in SE Asia. What would you like to work on first?",
-    artifacts_generated: [],
-  },
-  {
-    id: "msg-2",
-    conversation_id: "conv-contact-1",
-    created_at: "2026-04-01T10:01:00Z",
-    role: "user",
-    content: "Draft a connection note for her.",
-    artifacts_generated: [],
-  },
-  {
-    id: "msg-3",
-    conversation_id: "conv-contact-1",
-    created_at: "2026-04-01T10:01:30Z",
-    role: "agent",
-    content:
-      "I have drafted a LinkedIn connection note for Marie. It leads with your shared INSEAD background and her consulting-to-VC transition. The draft is 229 characters (within LinkedIn's 300-char limit). Take a look and let me know if you'd like any changes.",
-    artifacts_generated: ["artifact-456"],
-  },
-];
-
-const MOCK_AGENT_RESPONSE = "That is a great question. Based on Marie's background and your goals, I would suggest leading with the INSEAD connection. She made the same consulting-to-VC transition you are targeting, so she will likely be receptive to a peer outreach. Would you like me to draft a connection note or a longer outreach message?";
-
-// ---------------------------------------------------------------------------
 // Route params type
 // ---------------------------------------------------------------------------
 
@@ -76,7 +66,7 @@ interface RouteParams {
 }
 
 // ---------------------------------------------------------------------------
-// Handlers
+// GET handler
 // ---------------------------------------------------------------------------
 
 export async function GET(
@@ -84,147 +74,389 @@ export async function GET(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id: conversationId } = await params;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
+
+  // Verify conversation ownership
+  const { data: conversation } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("id", conversationId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!conversation) return notFound("Conversation");
+
   const { searchParams } = new URL(request.url);
   const rawQuery = Object.fromEntries(searchParams.entries());
 
   const parsed = ListMessagesQuerySchema.safeParse(rawQuery);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid query parameters",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid query parameters",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
-  // TODO: Fetch real messages from DB
-  // Sorted by created_at ASC (oldest first for display)
-  // Apply cursor-based pagination if after_id provided
+  const { page, per_page, after_id } = parsed.data;
+  const from = (page - 1) * per_page;
+  const to = from + per_page - 1;
 
-  const messages = MOCK_MESSAGES.map((m) => ({
-    ...m,
-    conversation_id: conversationId,
-  }));
+  let query = supabase
+    .from("conversation_messages")
+    .select("*", { count: "exact" })
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: true });
+
+  if (after_id) {
+    // Cursor-based: get messages after the given message's created_at
+    const { data: cursorMsg } = await supabase
+      .from("conversation_messages")
+      .select("created_at")
+      .eq("id", after_id)
+      .single();
+    if (cursorMsg) {
+      query = query.gt("created_at", cursorMsg.created_at);
+    }
+  }
+
+  query = query.range(from, to);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    console.error("messages GET error:", error);
+    return internalError("Failed to fetch messages");
+  }
 
   const response: ListMessagesResponse = {
-    data: {
-      items: messages,
-      total: messages.length,
-      page: parsed.data.page,
-      per_page: parsed.data.per_page,
-      has_more: false,
-    },
+    data: buildPaginatedResponse(
+      (data ?? []) as ConversationMessage[],
+      count ?? 0,
+      page,
+      per_page
+    ),
     error: null,
   };
 
   return NextResponse.json(response);
 }
 
+// ---------------------------------------------------------------------------
+// POST handler — main chat endpoint
+// ---------------------------------------------------------------------------
+
 export async function POST(
   request: NextRequest,
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id: conversationId } = await params;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { data: null, error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      { status: 400 }
-    );
-  }
+  const { data: body, error: parseErr } = await parseJsonBody(request);
+  if (parseErr) return parseErr;
 
   const parsed = SendMessageSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid request body",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid request body",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
-  // TODO: Implement real message handling
-  // 1. Load conversation, verify ownership
-  // 2. Load context (contact if contact_session, recent messages, summary)
-  // 3. Check if rolling summarization is needed (>15 messages)
-  // 4. Call processCoachingMessage() from lib/ai/coaching.ts
-  // 5. Detect artifact trigger → call generateArtifact() if triggered
-  // 6. Save user message, agent message, and any artifacts
-  // 7. Update conversation.updated_at
+  // 1. Load conversation + verify ownership
+  const { data: conversation } = await supabase
+    .from("conversations")
+    .select("*")
+    .eq("id", conversationId)
+    .eq("user_id", user.id)
+    .single();
 
-  const now = new Date().toISOString();
+  if (!conversation) return notFound("Conversation");
 
-  const userMessage: ConversationMessage = {
-    id: `msg-${Date.now()}-user`,
-    conversation_id: conversationId,
-    created_at: now,
-    role: "user",
-    content: parsed.data.content,
-    artifacts_generated: [],
-  };
+  const conv = conversation as Conversation;
 
-  // Detect if this message triggers an artifact (simplified for mock)
-  const triggerArtifact = parsed.data.content
-    .toLowerCase()
-    .includes("connection note");
-  const mockArtifactId = triggerArtifact ? `artifact-${Date.now()}` : null;
+  // 2. Load user profile
+  const { data: userData } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", user.id)
+    .single();
 
-  const agentMessage: ConversationMessage = {
-    id: `msg-${Date.now()}-agent`,
-    conversation_id: conversationId,
-    created_at: new Date(Date.now() + 100).toISOString(),
-    role: "agent",
-    content: MOCK_AGENT_RESPONSE,
-    artifacts_generated: mockArtifactId ? [mockArtifactId] : [],
-  };
+  if (!userData) return internalError("User profile not found");
+  const userTyped = userData as User;
 
-  // Mock artifact if triggered
-  const artifactsCreated: Artifact[] = mockArtifactId
-    ? [
-        {
-          id: mockArtifactId,
-          user_id: "user-abc",
-          contact_id: "contact-123",
-          conversation_id: conversationId,
-          created_at: now,
-          updated_at: now,
-          type: "connection_note",
-          content: {
-            message:
-              "Hi Marie, I came across your profile and was impressed by your transition from McKinsey to Sequoia. As a fellow INSEAD MBA targeting VC, I would love to connect.",
-            hook: "shared INSEAD background",
-            char_count: 194,
+  // 3. Load contact if contact_session
+  let contact: Contact | null = null;
+  if (conv.contact_id) {
+    const { data: contactData } = await supabase
+      .from("contacts")
+      .select("*")
+      .eq("id", conv.contact_id)
+      .eq("user_id", user.id)
+      .single();
+    contact = (contactData as Contact) ?? null;
+  }
+
+  // 4. Load recent messages for context
+  const { data: recentMessagesData, count: totalMessageCount } = await supabase
+    .from("conversation_messages")
+    .select("*", { count: "exact" })
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  const recentMessages = ((recentMessagesData ?? []) as ConversationMessage[]).reverse();
+  const messageCount = totalMessageCount ?? 0;
+
+  // 5. Save user message to DB
+  const { data: savedUserMessage, error: userMsgError } = await supabase
+    .from("conversation_messages")
+    .insert({
+      conversation_id: conversationId,
+      role: "user",
+      content: parsed.data.content,
+      artifacts_generated: [],
+    })
+    .select()
+    .single();
+
+  if (userMsgError || !savedUserMessage) {
+    console.error("Failed to save user message:", userMsgError);
+    return internalError("Failed to save message");
+  }
+
+  // 6. Check if rolling summarization is needed
+  let conversationSummaryText: string | null = null;
+
+  if (conv.summary) {
+    // Parse the stored JSON summary into a readable string for the prompt
+    try {
+      const summaryObj = typeof conv.summary === "string"
+        ? (JSON.parse(conv.summary) as ConversationSummary)
+        : (conv.summary as ConversationSummary);
+      conversationSummaryText = `Key decisions: ${summaryObj.key_decisions.join("; ")}. Open questions: ${summaryObj.open_questions.join("; ")}.`;
+    } catch {
+      conversationSummaryText = conv.summary as string;
+    }
+  }
+
+  if (messageCount >= SUMMARIZATION_THRESHOLD && messageCount % SUMMARIZATION_THRESHOLD === 0) {
+    // Time to summarize — compress older messages
+    void triggerSummarization(conversationId, recentMessages, conv.summary, supabase);
+  }
+
+  // 7. Load artifact metadata for context
+  const { data: artifactMeta } = await supabase
+    .from("artifacts")
+    .select("id, type, status, created_at")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  // 8. Call coaching AI
+  const aiStart = Date.now();
+  const coachingResult = await processCoachingMessage({
+    context: {
+      user_profile: {
+        career_history: userTyped.career_history,
+        education: userTyped.education,
+        goals: userTyped.goals,
+        networking_preferences: userTyped.networking_preferences,
+      },
+      user_memory: userTyped.user_memory,
+      conversation_summary: conversationSummaryText,
+      recent_messages: recentMessages.map((m) => ({
+        role: m.role as "user" | "agent",
+        content: m.content,
+      })),
+      contact_profile: contact
+        ? {
+            name: contact.name,
+            current_role: contact.current_role,
+            company: contact.company,
+            career_history: contact.career_history ?? [],
+            education: contact.education ?? [],
+            location: contact.location,
+            profile_snapshot: contact.profile_snapshot,
+          }
+        : undefined,
+    },
+    user_message: parsed.data.content,
+  });
+
+  logAiCall({
+    route: "POST /api/conversations/[id]/messages (coaching)",
+    model: coachingResult.model_used,
+    tokensInput: coachingResult.tokens_input,
+    tokensOutput: coachingResult.tokens_output,
+    latencyMs: Date.now() - aiStart,
+  });
+
+  // 9. Generate artifact if triggered
+  const artifactsCreated: Artifact[] = [];
+  const artifactIds: string[] = [];
+
+  if (coachingResult.trigger_artifact && contact) {
+    try {
+      // For meeting_prep, fetch company intel
+      let companyIntelRaw: string | undefined;
+      if (coachingResult.trigger_artifact === "meeting_prep" && contact.company) {
+        try {
+          const intel = await searchCompanyIntel(contact.company);
+          companyIntelRaw = intel.raw_context;
+        } catch {
+          // Non-fatal — continue without intel
+        }
+      }
+
+      const genStart = Date.now();
+      const genResult = await generateArtifact({
+        artifact_type: coachingResult.trigger_artifact,
+        context: {
+          user_profile: {
+            career_history: userTyped.career_history,
+            education: userTyped.education,
+            goals: userTyped.goals,
+            networking_preferences: userTyped.networking_preferences,
           },
+          user_memory: userTyped.user_memory,
+          contact_profile: {
+            name: contact.name,
+            current_role: contact.current_role,
+            company: contact.company,
+            career_history: contact.career_history ?? [],
+            education: contact.education ?? [],
+            location: contact.location,
+            profile_snapshot: contact.profile_snapshot,
+          },
+          conversation_summary: conversationSummaryText,
+          recent_messages: recentMessages.map((m) => ({
+            role: m.role as "user" | "agent",
+            content: m.content,
+          })),
+          artifact_metadata: (artifactMeta ?? []).map((a) => ({
+            id: a.id as string,
+            type: a.type as string,
+            status: a.status as string,
+            created_at: a.created_at as string,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          })) as any,
+          company_intel_raw: companyIntelRaw,
+        },
+        user_instructions: parsed.data.content,
+      });
+
+      logAiCall({
+        route: `POST /api/conversations/[id]/messages (generate:${coachingResult.trigger_artifact})`,
+        model: genResult.model_used,
+        tokensInput: genResult.tokens_input,
+        tokensOutput: genResult.tokens_output,
+        latencyMs: Date.now() - genStart,
+      });
+
+      // Save artifact to DB
+      const { data: savedArtifact, error: artifactError } = await supabase
+        .from("artifacts")
+        .insert({
+          user_id: user.id,
+          contact_id: contact.id,
+          conversation_id: conversationId,
+          type: coachingResult.trigger_artifact,
+          content: genResult.content,
           status: "draft",
           version: 1,
-          artifact_outcome: null,
-          user_edit_distance: null,
-          metadata: { hook_used: "shared_alma_mater" },
-        },
-      ]
-    : [];
+          metadata: { model_used: genResult.model_used },
+        })
+        .select()
+        .single();
+
+      if (!artifactError && savedArtifact) {
+        artifactsCreated.push(savedArtifact as Artifact);
+        artifactIds.push(savedArtifact.id as string);
+      }
+    } catch (err) {
+      console.error("Artifact generation failed:", err);
+      // Continue — return coaching response without artifact
+    }
+  }
+
+  // 10. Save agent message with artifact_ids
+  const { data: savedAgentMessage, error: agentMsgError } = await supabase
+    .from("conversation_messages")
+    .insert({
+      conversation_id: conversationId,
+      role: "agent",
+      content: coachingResult.agent_message,
+      artifacts_generated: artifactIds,
+    })
+    .select()
+    .single();
+
+  if (agentMsgError || !savedAgentMessage) {
+    console.error("Failed to save agent message:", agentMsgError);
+    return internalError("Failed to save agent response");
+  }
+
+  // 11. Touch conversation updated_at
+  await supabase
+    .from("conversations")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", conversationId)
+    .eq("user_id", user.id);
 
   const response: SendMessageResponse = {
     data: {
-      user_message: userMessage,
-      agent_message: agentMessage,
+      user_message: savedUserMessage as ConversationMessage,
+      agent_message: savedAgentMessage as ConversationMessage,
       artifacts_created: artifactsCreated,
     },
     error: null,
   };
 
   return NextResponse.json(response, { status: 201 });
+}
+
+// ---------------------------------------------------------------------------
+// Async summarization helper
+// ---------------------------------------------------------------------------
+
+async function triggerSummarization(
+  conversationId: string,
+  recentMessages: ConversationMessage[],
+  existingSummary: Conversation["summary"],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any
+): Promise<void> {
+  try {
+    let existingSummaryObj: ConversationSummary | null = null;
+    if (existingSummary) {
+      existingSummaryObj =
+        typeof existingSummary === "string"
+          ? (JSON.parse(existingSummary) as ConversationSummary)
+          : (existingSummary as ConversationSummary);
+    }
+
+    const newSummary = await summarizeConversation({
+      messages: recentMessages.map((m) => ({
+        role: m.role as "user" | "agent",
+        content: m.content,
+      })),
+      existing_summary: existingSummaryObj,
+    });
+
+    await supabase
+      .from("conversations")
+      .update({ summary: newSummary })
+      .eq("id", conversationId);
+  } catch (err) {
+    console.error("Summarization failed for conversation", conversationId, err);
+  }
 }

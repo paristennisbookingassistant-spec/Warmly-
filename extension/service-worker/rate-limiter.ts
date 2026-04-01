@@ -2,70 +2,108 @@
  * service-worker/rate-limiter.ts
  * Hard-coded rate limits for LinkedIn browsing activity.
  * Cannot be overridden by user or any other code.
- * See PRD DIS-08.
  *
- * Limits are also enforced in /api/discovery/route.ts (server-side).
- * This is a defense-in-depth approach.
+ * State is persisted in chrome.storage.local and resets at midnight.
+ * See PRD DIS-08.
  */
 
-import type { RateLimitState } from "../shared/types";
+import {
+  MAX_PROFILES_PER_SESSION,
+  MAX_SESSIONS_PER_DAY,
+  MIN_COOLDOWN_MS,
+  STORAGE_KEYS,
+} from "../shared/constants";
 
-/** Hard limits — mirrors PRD DIS-08 */
-export const MAX_PROFILES_PER_SESSION = 25;
-export const MAX_SESSIONS_PER_DAY = 2;
-/** Minimum milliseconds between sessions: 2 hours */
-export const MIN_COOLDOWN_MS = 2 * 60 * 60 * 1000;
+export { MAX_PROFILES_PER_SESSION, MAX_SESSIONS_PER_DAY, MIN_COOLDOWN_MS };
 
-const STORAGE_KEY = "rate_limit_state";
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
-/**
- * Returns the current rate limit state, initializing if needed.
- */
-async function getState(): Promise<RateLimitState> {
-  const today = new Date().toISOString().split("T")[0];
-  const result = await chrome.storage.local.get(STORAGE_KEY);
-  const stored = result[STORAGE_KEY] as RateLimitState | undefined;
+export interface RateLimitState {
+  /** ISO date string YYYY-MM-DD — used for midnight rollover detection */
+  sessionsToday: number;
+  lastSessionStart: number | null;
+  lastSessionEnd: number | null;
+  /** Canonical date for rollover detection */
+  date: string;
+}
 
+export interface RateLimitCheck {
+  allowed: boolean;
+  reason?: "daily_limit" | "cooldown";
+  waitMs?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function todayDateString(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+async function loadState(): Promise<RateLimitState> {
+  const today = todayDateString();
+  const result = await chrome.storage.local.get(STORAGE_KEYS.RATE_LIMIT_STATE);
+  const stored = result[STORAGE_KEYS.RATE_LIMIT_STATE] as RateLimitState | undefined;
+
+  // Fresh state if no record or date has rolled over (midnight)
   if (!stored || stored.date !== today) {
-    // New day — reset counters
     const fresh: RateLimitState = {
       date: today,
-      sessions_today: 0,
-      last_session_started_at: null,
-      profiles_today: 0,
+      sessionsToday: 0,
+      lastSessionStart: null,
+      lastSessionEnd: null,
     };
-    await chrome.storage.local.set({ [STORAGE_KEY]: fresh });
+    await chrome.storage.local.set({ [STORAGE_KEYS.RATE_LIMIT_STATE]: fresh });
     return fresh;
   }
 
   return stored;
 }
 
-/**
- * Checks if a new discovery session is allowed.
- * Returns an object with { allowed: boolean, reason?: string }.
- */
-export async function canStartSession(): Promise<{
-  allowed: boolean;
-  reason?: string;
-}> {
-  const state = await getState();
+async function saveState(state: RateLimitState): Promise<void> {
+  await chrome.storage.local.set({ [STORAGE_KEYS.RATE_LIMIT_STATE]: state });
+}
 
-  if (state.sessions_today >= MAX_SESSIONS_PER_DAY) {
-    return {
-      allowed: false,
-      reason: `You have reached the limit of ${MAX_SESSIONS_PER_DAY} discovery sessions today. Try again tomorrow.`,
-    };
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the current persisted rate limit state.
+ * Triggers midnight rollover automatically.
+ */
+export async function getRateLimitState(): Promise<RateLimitState> {
+  return loadState();
+}
+
+/**
+ * Checks whether a new discovery session is allowed right now.
+ * Returns { allowed: true } or { allowed: false, reason, waitMs }.
+ */
+export async function checkRateLimit(): Promise<RateLimitCheck> {
+  const state = await loadState();
+
+  // Hard daily session cap
+  if (state.sessionsToday >= MAX_SESSIONS_PER_DAY) {
+    // Compute wait until next midnight
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    const waitMs = tomorrow.getTime() - now.getTime();
+
+    return { allowed: false, reason: "daily_limit", waitMs };
   }
 
-  if (state.last_session_started_at !== null) {
-    const elapsed = Date.now() - state.last_session_started_at;
+  // Cooldown between sessions
+  if (state.lastSessionEnd !== null) {
+    const elapsed = Date.now() - state.lastSessionEnd;
     if (elapsed < MIN_COOLDOWN_MS) {
-      const minutesRemaining = Math.ceil((MIN_COOLDOWN_MS - elapsed) / 60_000);
-      return {
-        allowed: false,
-        reason: `Please wait ${minutesRemaining} more minutes before starting another session.`,
-      };
+      const waitMs = MIN_COOLDOWN_MS - elapsed;
+      return { allowed: false, reason: "cooldown", waitMs };
     }
   }
 
@@ -74,34 +112,21 @@ export async function canStartSession(): Promise<{
 
 /**
  * Records the start of a new discovery session.
+ * Must be called immediately when a session begins.
  */
 export async function recordSessionStart(): Promise<void> {
-  const state = await getState();
-  state.sessions_today += 1;
-  state.last_session_started_at = Date.now();
-  await chrome.storage.local.set({ [STORAGE_KEY]: state });
+  const state = await loadState();
+  state.sessionsToday += 1;
+  state.lastSessionStart = Date.now();
+  await saveState(state);
 }
 
 /**
- * Records that N profiles were viewed.
- * Returns the remaining profile budget for the current session.
+ * Records the end of a discovery session.
+ * Must be called when the session completes, is stopped, or errors.
  */
-export async function recordProfilesViewed(
-  count: number
-): Promise<number> {
-  const state = await getState();
-  state.profiles_today += count;
-  await chrome.storage.local.set({ [STORAGE_KEY]: state });
-  return MAX_PROFILES_PER_SESSION - count;
-}
-
-/**
- * Returns how many profiles remain viewable today.
- */
-export async function getRemainingProfiles(): Promise<number> {
-  const state = await getState();
-  return Math.max(
-    0,
-    MAX_PROFILES_PER_SESSION * MAX_SESSIONS_PER_DAY - state.profiles_today
-  );
+export async function recordSessionEnd(): Promise<void> {
+  const state = await loadState();
+  state.lastSessionEnd = Date.now();
+  await saveState(state);
 }

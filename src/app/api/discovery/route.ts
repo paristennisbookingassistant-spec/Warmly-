@@ -2,12 +2,22 @@
  * GET  /api/discovery  — List discovery sessions
  * POST /api/discovery  — Start a new discovery session
  *
- * Rate limits enforced here AND in the extension service worker.
- * Hard limits: max 25 profiles/session, max 2 sessions/day. See PRD DIS-08.
+ * Rate limits enforced server-side AND in the extension service worker.
+ * Hard limits: max 25 profiles/session, max 2 sessions/day, min 2h cooldown.
+ * See PRD DIS-08.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  unauthorized,
+  validationError,
+  internalError,
+  rateLimitError,
+  buildPaginatedResponse,
+  parseJsonBody,
+} from "@/lib/api/helpers";
 import type {
   ListDiscoverySessionsResponse,
   StartDiscoveryResponse,
@@ -49,63 +59,55 @@ const StartDiscoverySchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_SESSION: DiscoverySession = {
-  id: "disc-session-1",
-  user_id: "user-abc",
-  conversation_id: "conv-general-1",
-  started_at: "2026-04-01T09:00:00Z",
-  ended_at: null,
-  target_companies: ["Sequoia", "KKR", "Blackstone"],
-  search_strategy: {
-    companies: ["Sequoia", "KKR", "Blackstone"],
-    target_roles: ["Associate", "Senior Associate", "VP"],
-    target_seniority: ["mid", "senior"],
-    keywords: ["private equity", "venture capital", "INSEAD", "consulting"],
-    max_profiles_per_company: 8,
-    rationale:
-      "Targeting consulting-to-PE/VC transitions at top-tier firms with Singapore presence",
-  },
-  profiles_viewed: 12,
-  profiles_scored: 10,
-  profiles_saved: 7,
-  status: "running",
-  rate_limit_remaining: 13,
-};
-
-// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
+
   const { searchParams } = new URL(request.url);
   const rawQuery = Object.fromEntries(searchParams.entries());
 
   const parsed = ListDiscoveryQuerySchema.safeParse(rawQuery);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid query parameters",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid query parameters",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
+  const { page, per_page, status } = parsed.data;
+  const from = (page - 1) * per_page;
+  const to = from + per_page - 1;
+
+  let query = supabase
+    .from("discovery_sessions")
+    .select("*", { count: "exact" })
+    .eq("user_id", user.id)
+    .order("started_at", { ascending: false });
+
+  if (status) query = query.eq("status", status);
+
+  query = query.range(from, to);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    console.error("discovery GET error:", error);
+    return internalError("Failed to fetch discovery sessions");
+  }
+
   const response: ListDiscoverySessionsResponse = {
-    data: {
-      items: [MOCK_SESSION],
-      total: 1,
-      page: parsed.data.page,
-      per_page: parsed.data.per_page,
-      has_more: false,
-    },
+    data: buildPaginatedResponse(
+      (data ?? []) as DiscoverySession[],
+      count ?? 0,
+      page,
+      per_page
+    ),
     error: null,
   };
 
@@ -113,64 +115,105 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { data: null, error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      { status: 400 }
-    );
-  }
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
+
+  const { data: body, error: parseErr } = await parseJsonBody(request);
+  if (parseErr) return parseErr;
 
   const parsed = StartDiscoverySchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid request body",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid request body",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
-  // TODO: Implement real session creation
-  // 1. Check today's session count — reject if >= MAX_SESSIONS_PER_DAY
-  // 2. Check cooldown since last session — reject if < MIN_COOLDOWN_MS
-  // 3. Call AI to generate search strategy from target_companies + user profile
-  // 4. Create DiscoverySession record
-  // 5. Return session so extension can start execution
+  // Verify the conversation belongs to this user
+  const { data: conversation } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("id", parsed.data.conversation_id)
+    .eq("user_id", user.id)
+    .single();
 
-  const newSession: DiscoverySession = {
-    id: `disc-${Date.now()}`,
-    user_id: "user-abc",
-    conversation_id: parsed.data.conversation_id,
-    started_at: new Date().toISOString(),
-    ended_at: null,
-    target_companies: parsed.data.target_companies,
-    search_strategy: {
-      companies: parsed.data.target_companies,
-      target_roles: ["Associate", "Senior Associate", "VP"],
-      target_seniority: ["mid", "senior"],
-      keywords: ["consulting", "INSEAD", "MBA"],
-      max_profiles_per_company: Math.floor(
-        parsed.data.max_profiles / parsed.data.target_companies.length
-      ),
-      rationale: "AI-generated search strategy — TODO: implement",
-    },
-    profiles_viewed: 0,
-    profiles_scored: 0,
-    profiles_saved: 0,
-    status: "running",
-    rate_limit_remaining: parsed.data.max_profiles,
-  };
+  if (!conversation) {
+    return validationError("conversation_id does not exist or does not belong to you");
+  }
+
+  // Rate limit check 1: max 2 sessions per day
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const { count: todayCount } = await supabase
+    .from("discovery_sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .gte("started_at", todayStart.toISOString());
+
+  if ((todayCount ?? 0) >= MAX_SESSIONS_PER_DAY) {
+    return rateLimitError(
+      `You have reached the maximum of ${MAX_SESSIONS_PER_DAY} discovery sessions per day. Try again tomorrow.`
+    );
+  }
+
+  // Rate limit check 2: min 2h cooldown since last session
+  const { data: lastSession } = await supabase
+    .from("discovery_sessions")
+    .select("started_at")
+    .eq("user_id", user.id)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (lastSession) {
+    const lastSessionTime = new Date(lastSession.started_at as string).getTime();
+    const elapsed = Date.now() - lastSessionTime;
+    if (elapsed < MIN_COOLDOWN_MS) {
+      const remainingMinutes = Math.ceil((MIN_COOLDOWN_MS - elapsed) / 60000);
+      return rateLimitError(
+        `Please wait ${remainingMinutes} more minutes before starting another discovery session.`
+      );
+    }
+  }
+
+  // Create the discovery session
+  const maxProfiles = parsed.data.max_profiles;
+  const perCompany = Math.max(1, Math.floor(maxProfiles / parsed.data.target_companies.length));
+
+  const { data: newSession, error: insertError } = await supabase
+    .from("discovery_sessions")
+    .insert({
+      user_id: user.id,
+      conversation_id: parsed.data.conversation_id,
+      target_companies: parsed.data.target_companies,
+      search_strategy: {
+        companies: parsed.data.target_companies,
+        target_roles: ["Associate", "Senior Associate", "VP", "Manager", "Director"],
+        target_seniority: ["mid", "senior"],
+        keywords: ["MBA", "consulting", "private equity", "venture capital"],
+        max_profiles_per_company: perCompany,
+        rationale: `Targeting ${parsed.data.target_companies.join(", ")} — up to ${perCompany} profiles per company`,
+      },
+      profiles_viewed: 0,
+      profiles_scored: 0,
+      profiles_saved: 0,
+      status: "running",
+      rate_limit_remaining: maxProfiles,
+    })
+    .select()
+    .single();
+
+  if (insertError || !newSession) {
+    console.error("discovery POST error:", insertError);
+    return internalError("Failed to create discovery session");
+  }
 
   const response: StartDiscoveryResponse = {
-    data: newSession,
+    data: newSession as DiscoverySession,
     error: null,
   };
 

@@ -5,11 +5,23 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { scoreContact } from "@/lib/ai/scoring";
+import { SCORING_RUBRIC } from "@/types/ai";
+import {
+  unauthorized,
+  notFound,
+  validationError,
+  badRequest,
+  internalError,
+  buildPaginatedResponse,
+  parseJsonBody,
+} from "@/lib/api/helpers";
 import type {
   ListContactsResponse,
   CreateContactResponse,
 } from "@/types/api";
-import type { Contact } from "@/types/database";
+import type { Contact, User } from "@/types/database";
 
 // ---------------------------------------------------------------------------
 // Validation schemas
@@ -29,6 +41,7 @@ const ListContactsQuerySchema = z.object({
     .optional()
     .default("discovered_at"),
   sort_order: z.enum(["asc", "desc"]).optional().default("desc"),
+  search: z.string().optional(),
 });
 
 const CreateContactSchema = z.object({
@@ -42,104 +55,68 @@ const CreateContactSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_CONTACT: Contact = {
-  id: "contact-123",
-  user_id: "user-abc",
-  created_at: "2026-04-01T10:00:00Z",
-  updated_at: "2026-04-01T10:00:00Z",
-  linkedin_url: "https://linkedin.com/in/marie-chen-sample",
-  name: "Marie Chen",
-  current_role: "VP of Investments",
-  company: "Sequoia Capital",
-  location: "Singapore",
-  career_history: [
-    {
-      title: "VP of Investments",
-      company: "Sequoia Capital",
-      start_date: "2022-03",
-      end_date: null,
-    },
-    {
-      title: "Senior Associate",
-      company: "McKinsey & Company",
-      start_date: "2018-09",
-      end_date: "2022-02",
-    },
-  ],
-  education: [
-    {
-      school: "INSEAD",
-      degree: "MBA",
-      year: "2022",
-      campus: "Fontainebleau",
-    },
-  ],
-  profile_snapshot: null,
-  relevance_score: 8.2,
-  tier: 1,
-  scoring_breakdown: {
-    career_path_similarity: 9,
-    shared_background: 9,
-    seniority_relevance: 8,
-    industry_match: 9,
-    accessibility_signals: 7,
-    recency: 8,
-  },
-  recommendation_reason:
-    "INSEAD MBA '22, transitioned from McKinsey to Sequoia — exactly the path you are targeting.",
-  suggested_hook:
-    "We both went through INSEAD and you are following a similar consulting-to-VC path.",
-  source: "manual_chat",
-  status: "discovered",
-  discovered_at: "2026-04-01T10:00:00Z",
-  last_interaction_at: null,
-  user_feedback: null,
-  discovery_session_id: null,
-  notes: null,
-};
-
-// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
+
   const { searchParams } = new URL(request.url);
   const rawQuery = Object.fromEntries(searchParams.entries());
 
   const parsed = ListContactsQuerySchema.safeParse(rawQuery);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid query parameters",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid query parameters",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
-  // TODO: Replace with real Supabase query
-  // const supabase = await getSupabaseServerClient();
-  // const { data: { user } } = await supabase.auth.getUser();
-  // if (!user) return unauthorized();
-  // let query = supabase.from('contacts').select('*', { count: 'exact' }).eq('user_id', user.id);
-  // if (parsed.data.status) query = query.eq('status', parsed.data.status);
-  // ...apply other filters, pagination, sort...
+  const { page, per_page, status, company, tier, discovered_after, sort_by, sort_order, search } =
+    parsed.data;
+
+  const from = (page - 1) * per_page;
+  const to = from + per_page - 1;
+
+  let query = supabase
+    .from("contacts")
+    .select("*", { count: "exact" })
+    .eq("user_id", user.id);
+
+  if (status) query = query.eq("status", status);
+  if (company) query = query.ilike("company", `%${company}%`);
+  if (tier) query = query.eq("tier", tier);
+  if (discovered_after) query = query.gte("discovered_at", discovered_after);
+  if (search) {
+    query = query.or(
+      `name.ilike.%${search}%,company.ilike.%${search}%,current_role.ilike.%${search}%`
+    );
+  }
+
+  // Handle nullable sort columns — null values always go last
+  const ascending = sort_order === "asc";
+  query = query
+    .order(sort_by, { ascending, nullsFirst: false })
+    .range(from, to);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    console.error("contacts GET error:", error);
+    return internalError("Failed to fetch contacts");
+  }
 
   const response: ListContactsResponse = {
-    data: {
-      items: [MOCK_CONTACT],
-      total: 1,
-      page: parsed.data.page,
-      per_page: parsed.data.per_page,
-      has_more: false,
-    },
+    data: buildPaginatedResponse(
+      (data ?? []) as Contact[],
+      count ?? 0,
+      page,
+      per_page
+    ),
     error: null,
   };
 
@@ -147,57 +124,148 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { data: null, error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      { status: 400 }
-    );
-  }
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
+
+  const { data: body, error: parseErr } = await parseJsonBody(request);
+  if (parseErr) return parseErr;
 
   const parsed = CreateContactSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid request body",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid request body",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
-  // TODO: Implement real contact creation
-  // Check for duplicate (user_id, linkedin_url) before insert
-  // If duplicate, merge profile data and return existing contact
+  const { name, linkedin_url, current_role, company, location, source, notes } =
+    parsed.data;
 
-  const mockNewContact: Contact = {
-    ...MOCK_CONTACT,
-    id: `contact-${Date.now()}`,
-    name: parsed.data.name,
-    linkedin_url: parsed.data.linkedin_url ?? null,
-    current_role: parsed.data.current_role ?? null,
-    company: parsed.data.company ?? null,
-    location: parsed.data.location ?? null,
-    source: parsed.data.source,
-    notes: parsed.data.notes ?? null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    discovered_at: new Date().toISOString(),
-    relevance_score: null,
-    tier: null,
-    scoring_breakdown: null,
-  };
+  // Check for duplicate (user_id, linkedin_url) if URL provided
+  if (linkedin_url) {
+    const { data: existing } = await supabase
+      .from("contacts")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("linkedin_url", linkedin_url)
+      .single();
+
+    if (existing) {
+      return badRequest("A contact with this LinkedIn URL already exists");
+    }
+  }
+
+  const now = new Date().toISOString();
+  const { data: newContact, error: insertError } = await supabase
+    .from("contacts")
+    .insert({
+      user_id: user.id,
+      name,
+      linkedin_url: linkedin_url ?? null,
+      current_role: current_role ?? null,
+      company: company ?? null,
+      location: location ?? null,
+      source,
+      notes: notes ?? null,
+      status: "discovered",
+      discovered_at: now,
+      career_history: [],
+      education: [],
+    })
+    .select()
+    .single();
+
+  if (insertError || !newContact) {
+    console.error("contacts POST insert error:", insertError);
+    return internalError("Failed to create contact");
+  }
+
+  // Fire-and-forget async scoring — does not block the response
+  void triggerAsyncScoring(user.id, newContact.id as string, supabase);
 
   const response: CreateContactResponse = {
-    data: mockNewContact,
+    data: newContact as Contact,
     error: null,
   };
 
   return NextResponse.json(response, { status: 201 });
+}
+
+// ---------------------------------------------------------------------------
+// Async scoring helper — runs after contact creation
+// ---------------------------------------------------------------------------
+
+async function triggerAsyncScoring(
+  userId: string,
+  contactId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any
+): Promise<void> {
+  try {
+    const [{ data: contact }, { data: userData }] = await Promise.all([
+      supabase
+        .from("contacts")
+        .select("*")
+        .eq("id", contactId)
+        .eq("user_id", userId)
+        .single(),
+      supabase.from("users").select("*").eq("id", userId).single(),
+    ]);
+
+    if (!contact || !userData) return;
+
+    const userTyped = userData as User;
+
+    const scoringInput = {
+      user_profile: {
+        career_history: userTyped.career_history,
+        education: userTyped.education,
+        goals: userTyped.goals,
+        networking_preferences: userTyped.networking_preferences,
+      },
+      contact_profile: {
+        name: contact.name,
+        current_role: contact.current_role,
+        company: contact.company,
+        career_history: contact.career_history ?? [],
+        education: contact.education ?? [],
+        location: contact.location,
+        profile_snapshot: contact.profile_snapshot,
+      },
+      rubric: SCORING_RUBRIC,
+    };
+
+    const score = await scoreContact(scoringInput);
+
+    // Update contact with score
+    await supabase
+      .from("contacts")
+      .update({
+        relevance_score: score.overall_score,
+        tier: score.tier,
+        scoring_breakdown: score.scores,
+        recommendation_reason: score.recommendation_reason,
+        suggested_hook: score.suggested_hook,
+      })
+      .eq("id", contactId)
+      .eq("user_id", userId);
+
+    // Insert into contact_scores audit table
+    await supabase.from("contact_scores").insert({
+      contact_id: contactId,
+      user_id: userId,
+      overall_score: score.overall_score,
+      tier: score.tier,
+      scores: score.scores,
+      recommendation_reason: score.recommendation_reason,
+      suggested_hook: score.suggested_hook,
+      model_used: "claude-haiku-4-5",
+    });
+  } catch (err) {
+    // Non-critical — log and swallow
+    console.error("Async scoring failed for contact", contactId, err);
+  }
 }

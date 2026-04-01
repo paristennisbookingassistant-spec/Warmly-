@@ -3,18 +3,29 @@
  * PUT    /api/artifacts/[id]  — Update artifact content, status, or outcome
  * DELETE /api/artifacts/[id]  — Delete an artifact
  *
- * The PUT handler tracks user_edit_distance for the agent learning system.
- * When status changes to 'sent', the contact's status auto-progresses to 'contacted'.
+ * PUT side-effects:
+ * - Increments version if content changed
+ * - If status → 'sent' and type is outreach: updates contact.status to 'contacted'
+ * - If user_edit_distance provided: triggers style extraction → updates user_memory
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { extractStylePreferences } from "@/lib/ai/context";
+import {
+  unauthorized,
+  notFound,
+  validationError,
+  internalError,
+  parseJsonBody,
+} from "@/lib/api/helpers";
 import type {
   GetArtifactResponse,
   UpdateArtifactResponse,
   DeleteArtifactResponse,
 } from "@/types/api";
-import type { Artifact } from "@/types/database";
+import type { Artifact, User } from "@/types/database";
 
 // ---------------------------------------------------------------------------
 // Validation schema
@@ -28,31 +39,6 @@ const UpdateArtifactSchema = z.object({
     .optional(),
   user_edit_distance: z.number().int().min(0).optional(),
 });
-
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_ARTIFACT: Artifact = {
-  id: "artifact-456",
-  user_id: "user-abc",
-  contact_id: "contact-123",
-  conversation_id: "conv-contact-1",
-  created_at: "2026-04-01T10:01:30Z",
-  updated_at: "2026-04-01T10:01:30Z",
-  type: "connection_note",
-  content: {
-    message:
-      "Hi Marie, I came across your profile and was impressed by your transition from McKinsey to Sequoia. As a fellow INSEAD MBA targeting VC, I would love to connect.",
-    hook: "shared INSEAD background",
-    char_count: 194,
-  },
-  status: "draft",
-  version: 1,
-  artifact_outcome: null,
-  user_edit_distance: null,
-  metadata: { hook_used: "shared_alma_mater" },
-};
 
 // ---------------------------------------------------------------------------
 // Route params type
@@ -71,11 +57,25 @@ export async function GET(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id } = await params;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
 
-  // TODO: Implement real fetch
+  const { data: artifact, error } = await supabase
+    .from("artifacts")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (error || !artifact) {
+    return notFound("Artifact");
+  }
 
   const response: GetArtifactResponse = {
-    data: { ...MOCK_ARTIFACT, id },
+    data: artifact as Artifact,
     error: null,
   };
 
@@ -87,52 +87,94 @@ export async function PUT(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id } = await params;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { data: null, error: { code: "INVALID_JSON", message: "Request body must be valid JSON" } },
-      { status: 400 }
-    );
-  }
+  const { data: body, error: parseErr } = await parseJsonBody(request);
+  if (parseErr) return parseErr;
 
   const parsed = UpdateArtifactSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Invalid request body",
-          field_errors: parsed.error.flatten().fieldErrors,
-        },
-      },
-      { status: 400 }
+    return validationError(
+      "Invalid request body",
+      parsed.error.flatten().fieldErrors as Record<string, string[]>
     );
   }
 
-  // TODO: Implement real update logic:
-  // 1. Increment version if content changed
-  // 2. If status → 'sent' and type is outreach: update contact.status to 'contacted'
-  // 3. If user_edit_distance provided: trigger style extraction (lib/ai/context.ts)
-  //    to update user_memory on the Users table
-  // 4. If artifact_outcome set: check if outcome learning threshold reached (every 20 artifacts)
-  //    If so, run outcome pattern analysis → update user_memory.learned_patterns
+  // Fetch current artifact to compute version increment
+  const { data: current } = await supabase
+    .from("artifacts")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
 
-  const currentVersion = MOCK_ARTIFACT.version;
+  if (!current) return notFound("Artifact");
+
+  const currentArtifact = current as Artifact;
   const newVersion =
-    parsed.data.content !== undefined ? currentVersion + 1 : currentVersion;
+    parsed.data.content !== undefined
+      ? currentArtifact.version + 1
+      : currentArtifact.version;
+
+  const updatePayload: Record<string, unknown> = {
+    ...parsed.data,
+    version: newVersion,
+  };
+
+  const { data: updatedArtifact, error: updateError } = await supabase
+    .from("artifacts")
+    .update(updatePayload)
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select()
+    .single();
+
+  if (updateError || !updatedArtifact) {
+    console.error("artifacts PUT error:", updateError);
+    return internalError("Failed to update artifact");
+  }
+
+  // Side-effect: if status → 'sent' and outreach type, update contact status
+  const outreachTypes = ["connection_note", "outreach_draft", "follow_up_draft"];
+  if (
+    parsed.data.status === "sent" &&
+    outreachTypes.includes(currentArtifact.type)
+  ) {
+    await supabase
+      .from("contacts")
+      .update({ status: "contacted", last_interaction_at: new Date().toISOString() })
+      .eq("id", currentArtifact.contact_id)
+      .eq("user_id", user.id);
+  }
+
+  // Side-effect: if meeting_notes created → contact becomes 'met'
+  if (parsed.data.status === "sent" && currentArtifact.type === "meeting_notes") {
+    await supabase
+      .from("contacts")
+      .update({ status: "met", last_interaction_at: new Date().toISOString() })
+      .eq("id", currentArtifact.contact_id)
+      .eq("user_id", user.id);
+  }
+
+  // Side-effect: if user_edit_distance provided with content → trigger style learning
+  if (
+    parsed.data.user_edit_distance !== undefined &&
+    parsed.data.content !== undefined
+  ) {
+    void triggerStyleLearning(
+      user.id,
+      currentArtifact,
+      parsed.data.content,
+      supabase
+    );
+  }
 
   const response: UpdateArtifactResponse = {
-    data: {
-      ...MOCK_ARTIFACT,
-      id,
-      ...parsed.data,
-      version: newVersion,
-      updated_at: new Date().toISOString(),
-    },
+    data: updatedArtifact as Artifact,
     error: null,
   };
 
@@ -144,9 +186,31 @@ export async function DELETE(
   { params }: RouteParams
 ): Promise<NextResponse> {
   const { id } = await params;
-  void id;
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return unauthorized();
 
-  // TODO: Implement real delete
+  const { data: existing } = await supabase
+    .from("artifacts")
+    .select("id")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!existing) return notFound("Artifact");
+
+  const { error } = await supabase
+    .from("artifacts")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
+
+  if (error) {
+    console.error("artifacts DELETE error:", error);
+    return internalError("Failed to delete artifact");
+  }
 
   const response: DeleteArtifactResponse = {
     data: { deleted: true },
@@ -154,4 +218,54 @@ export async function DELETE(
   };
 
   return NextResponse.json(response);
+}
+
+// ---------------------------------------------------------------------------
+// Style learning helper — PRD Section 5.9
+// ---------------------------------------------------------------------------
+
+async function triggerStyleLearning(
+  userId: string,
+  originalArtifact: Artifact,
+  editedContent: Record<string, unknown>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any
+): Promise<void> {
+  try {
+    const { data: userData } = await supabase
+      .from("users")
+      .select("user_memory")
+      .eq("id", userId)
+      .single();
+
+    if (!userData) return;
+
+    const userTyped = userData as Pick<User, "user_memory">;
+
+    // Extract the text content from artifacts for comparison
+    const originalText = extractTextFromContent(originalArtifact.content);
+    const editedText = extractTextFromContent(editedContent);
+
+    if (!originalText || !editedText || originalText === editedText) return;
+
+    const result = await extractStylePreferences({
+      original_draft: originalText,
+      edited_version: editedText,
+      current_memory: userTyped.user_memory,
+    });
+
+    await supabase
+      .from("users")
+      .update({ user_memory: result.updated_memory })
+      .eq("id", userId);
+  } catch (err) {
+    console.error("Style learning failed:", err);
+  }
+}
+
+function extractTextFromContent(content: Record<string, unknown>): string {
+  // Most artifact types have a 'message' field; meeting_prep has 'person_summary'
+  if (typeof content.message === "string") return content.message;
+  if (typeof content.person_summary === "string") return content.person_summary;
+  return JSON.stringify(content);
 }

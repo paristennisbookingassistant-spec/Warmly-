@@ -1,21 +1,56 @@
 /**
  * service-worker/api-client.ts
- * Backend API calls from the extension service worker.
- * Handles profile upload, session management, and contact creation.
+ * HTTP calls to the Next.js backend API.
+ * All calls are authenticated; auth token comes from auth.ts.
+ *
+ * Only short-lived operations live here (fetch, storage read/write).
+ * Long-running orchestration stays in the content script.
  */
 
 import type { ExtractedProfile } from "../shared/types";
 import { getAuthHeader } from "./auth";
+import { DEFAULT_BACKEND_URL, STORAGE_KEYS } from "../shared/constants";
 
-/** Base URL for the web app API — must match deployment URL */
-const API_BASE_URL =
-  process.env.NODE_ENV === "production"
-    ? "https://ai-networking-coach.vercel.app"
-    : "http://localhost:3000";
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface Contact {
+  id: string;
+  name: string;
+  linkedin_url: string;
+}
+
+export interface DiscoverySession {
+  id: string;
+  query: string;
+  status: string;
+  profiles_discovered: number;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Backend URL
+// ---------------------------------------------------------------------------
 
 /**
- * Generic authenticated fetch wrapper.
+ * Returns the backend URL from storage, or falls back to localhost:3000.
+ * The user (or a setup flow) may override this via chrome.storage.local.
  */
+export async function getBackendUrl(): Promise<string> {
+  try {
+    const result = await chrome.storage.local.get(STORAGE_KEYS.BACKEND_URL);
+    const url = result[STORAGE_KEYS.BACKEND_URL] as string | undefined;
+    return url?.replace(/\/$/, "") ?? DEFAULT_BACKEND_URL;
+  } catch {
+    return DEFAULT_BACKEND_URL;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Authenticated fetch wrapper
+// ---------------------------------------------------------------------------
+
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
@@ -26,18 +61,20 @@ async function apiFetch<T>(
     return null;
   }
 
+  const baseUrl = await getBackendUrl();
+
   try {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    const response = await fetch(`${baseUrl}${path}`, {
       ...options,
       headers: {
         "Content-Type": "application/json",
         Authorization: authHeader,
-        ...options.headers,
+        ...(options.headers as Record<string, string> | undefined),
       },
     });
 
     if (!response.ok) {
-      console.error(`[API Client] Request failed: ${response.status} ${path}`);
+      console.error(`[API Client] ${response.status} ${path}`);
       return null;
     }
 
@@ -48,76 +85,85 @@ async function apiFetch<T>(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 /**
- * Uploads an extracted profile to the backend for scoring and storage.
- * Triggers the AI scoring engine via /api/contacts → /api/ai/score.
+ * Saves a discovered LinkedIn profile to the backend.
+ * Returns the created Contact record on success, null on failure.
+ */
+export async function saveDiscoveredProfile(
+  profile: ExtractedProfile,
+  sessionId: string
+): Promise<Contact | null> {
+  return apiFetch<Contact>("/api/contacts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: profile.name,
+      linkedin_url: profile.linkedin_url,
+      current_role: profile.current_role.title,
+      company: profile.current_role.company,
+      location: profile.location,
+      source: "discovery",
+      profile_snapshot: profile,
+      discovery_session_id: sessionId,
+    }),
+  });
+}
+
+/**
+ * Creates a discovery session record in the backend.
+ */
+export async function createDiscoverySession(
+  query: string,
+  filters?: Record<string, unknown>
+): Promise<DiscoverySession | null> {
+  return apiFetch<DiscoverySession>("/api/discovery", {
+    method: "POST",
+    body: JSON.stringify({ query, filters }),
+  });
+}
+
+/**
+ * Updates a discovery session (status, counts, etc.).
+ */
+export async function updateDiscoverySession(
+  sessionId: string,
+  update: Partial<DiscoverySession>
+): Promise<void> {
+  await apiFetch(`/api/discovery/${sessionId}`, {
+    method: "PATCH",
+    body: JSON.stringify(update),
+  });
+}
+
+/**
+ * Bookmarks a profile to the user's contacts (manual save from popup).
+ */
+export async function bookmarkProfile(
+  profile: ExtractedProfile
+): Promise<Contact | null> {
+  return apiFetch<Contact>("/api/contacts", {
+    method: "POST",
+    body: JSON.stringify({
+      name: profile.name,
+      linkedin_url: profile.linkedin_url,
+      current_role: profile.current_role.title,
+      company: profile.current_role.company,
+      location: profile.location,
+      source: "extension_bookmark",
+    }),
+  });
+}
+
+/**
+ * Backward-compatible alias.
  */
 export async function uploadProfile(
   profile: ExtractedProfile,
   discoverySessionId: string
 ): Promise<string | null> {
-  const result = await apiFetch<{ data: { id: string } }>(
-    "/api/contacts",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        name: profile.name,
-        linkedin_url: profile.linkedin_url,
-        current_role: profile.current_role.title,
-        company: profile.current_role.company,
-        location: profile.location,
-        source: "discovery",
-        // Profile snapshot is included for full data preservation
-        profile_snapshot: profile,
-        discovery_session_id: discoverySessionId,
-      }),
-    }
-  );
-
-  return result?.data?.id ?? null;
-}
-
-/**
- * Updates the discovery session status in the backend.
- */
-export async function updateDiscoverySession(
-  sessionId: string,
-  updates: {
-    status?: string;
-    profiles_viewed?: number;
-    profiles_scored?: number;
-    profiles_saved?: number;
-  }
-): Promise<void> {
-  // TODO: Implement PATCH /api/discovery/[id] endpoint
-  // For now, use the existing PUT-style update
-  await apiFetch(`/api/discovery/${sessionId}`, {
-    method: "PUT",
-    body: JSON.stringify(updates),
-  });
-}
-
-/**
- * Bookmarks the current LinkedIn profile to the user's contacts.
- * Called when user clicks "Save to AI Networking Coach" in the popup.
- */
-export async function bookmarkProfile(
-  profile: ExtractedProfile
-): Promise<string | null> {
-  const result = await apiFetch<{ data: { id: string } }>(
-    "/api/contacts",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        name: profile.name,
-        linkedin_url: profile.linkedin_url,
-        current_role: profile.current_role.title,
-        company: profile.current_role.company,
-        location: profile.location,
-        source: "extension_bookmark",
-      }),
-    }
-  );
-
-  return result?.data?.id ?? null;
+  const contact = await saveDiscoveredProfile(profile, discoverySessionId);
+  return contact?.id ?? null;
 }
