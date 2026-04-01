@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && npx tsc --noEmit 2>&1 | head -30 || exit 2",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && npx tsc --noEmit 2>&1 | tail -5; TSC=$?; npm run build --no-lint 2>&1 | tail -10; BUILD=$?; if [ $TSC -ne 0 ] || [ $BUILD -ne 0 ]; then echo 'VALIDATION FAILED: TypeScript or build errors remain. Fix before stopping.' >&2; exit 2; fi; echo 'All checks passed.'; exit 0",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

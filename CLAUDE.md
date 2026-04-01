@@ -150,6 +150,41 @@ ai-networking-coach/
 4. Agent learning via user_memory JSON field on Users table (see PRD Section 5.9)
 5. Manual contact entry via 3 methods: chat, URL paste, extension bookmark (PRD DIS-11)
 
+## Validation Rules (Self-Check Before Reporting Done)
+After completing ANY task, run these checks. If any fail, fix the issue and re-check. Do NOT report completion until all relevant checks pass.
+
+### Always Run (every task)
+1. `npx tsc --noEmit` — Zero TypeScript errors. No exceptions.
+2. `npm run build` — Full Next.js build must succeed.
+
+### After Backend Changes (API routes, lib/, supabase/)
+3. `npx vitest run` — All tests must pass.
+4. Verify every API route has Zod input validation (grep for `z.object` in each route file).
+5. Verify every API route returns typed responses matching `src/types/api.ts`.
+6. Verify no raw SQL — all queries go through Supabase client.
+
+### After Frontend Changes (components/, app/(views)/, hooks/)
+7. Every component that fetches data must have a loading skeleton and error state.
+8. No inline colors or font sizes — everything uses Tailwind classes from the design system.
+9. No `any` types — grep for `: any` and fix.
+
+### After Extension Changes (extension/)
+10. `manifest.json` is valid Manifest V3 (`"manifest_version": 3`).
+11. No `eval()` calls anywhere in extension code.
+12. Rate limit constants are present: `MAX_PROFILES_PER_SESSION = 25`, `MAX_SESSIONS_PER_DAY = 2`.
+13. Orchestration logic is in content script, NOT in service worker.
+
+### After Database Changes (supabase/)
+14. Every table has Row Level Security enabled.
+15. UNIQUE constraint exists on `(user_id, linkedin_url)` in contacts table.
+16. All JSON columns have a comment describing their expected structure.
+
+### Full Project Validation (run before committing)
+```bash
+npx tsc --noEmit && npm run build && npx vitest run
+```
+If this command fails, do NOT commit. Fix first.
+
 ## What NOT To Do
 - Do NOT use ChatGPT, OpenAI, or any non-Anthropic LLM in the codebase
 - Do NOT send automated messages on LinkedIn. The extension is READ-ONLY.

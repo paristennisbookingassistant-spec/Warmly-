@@ -79,3 +79,28 @@ Produce a structured review organized by priority:
 ## PRD COMPLIANCE GAPS
 - [Feature: X, Requirement: Y] What's missing
 ```
+
+## Automated Checks (run these FIRST, then do manual review)
+```bash
+# 1. TypeScript + Build + Tests — report any failures
+npx tsc --noEmit 2>&1 | tail -20
+npm run build 2>&1 | tail -20
+npx vitest run 2>&1 | tail -20
+
+# 2. Count `any` types (should be 0 or near 0)
+echo "any types found:" && grep -rn ": any" src/ --include="*.ts" --include="*.tsx" | wc -l
+
+# 3. API routes missing Zod
+echo "Routes without Zod:" && for f in $(find src/app/api -name "route.ts" 2>/dev/null); do grep -qL "z\." "$f" && echo "  $f"; done
+
+# 4. Components over 150 lines
+echo "Oversized components:" && find src/components src/app/\(views\) -name "*.tsx" 2>/dev/null -exec sh -c 'lines=$(wc -l < "$1"); [ "$lines" -gt 150 ] && echo "  $1 ($lines lines)"' _ {} \;
+
+# 5. RLS check
+echo "RLS policies:" && grep -c "ENABLE ROW LEVEL SECURITY" supabase/migrations/*.sql 2>/dev/null
+
+# 6. Extension safety
+echo "eval() in extension:" && grep -rn "eval(" extension/ --include="*.ts" 2>/dev/null | wc -l
+echo "Orchestration in SW:" && grep -c "orchestrat" extension/service-worker/*.ts 2>/dev/null || echo "0"
+```
+Include these automated results at the top of your review document.

@@ -46,3 +46,29 @@ Read the PRD at `docs/PRD_AI_Networking_Coach_v1.md` and create:
 - API stubs must return realistic mock data so the frontend can develop against them.
 - Document every non-obvious design decision with a code comment.
 - After creating all files, output a dependency map: which files import from which.
+
+## Validation (MUST pass before reporting done)
+Run these checks after completing all files. If any fail, fix and re-run until all pass.
+
+```bash
+# 1. TypeScript compiles cleanly
+npx tsc --noEmit
+
+# 2. All expected files exist
+ls src/types/database.ts src/types/artifacts.ts src/types/ai.ts src/types/api.ts
+ls supabase/migrations/*.sql supabase/seed.sql
+ls extension/manifest.json
+
+# 3. All imports resolve (no missing modules)
+npx tsc --noEmit --listFiles > /dev/null
+
+# 4. Zod is used in every API route
+grep -rL "z\." src/app/api/*/route.ts && echo "FAIL: API routes missing Zod validation" || echo "PASS"
+
+# 5. RLS is enabled on every table
+grep -c "ALTER TABLE.*ENABLE ROW LEVEL SECURITY" supabase/migrations/*.sql
+
+# 6. UNIQUE constraint on contacts
+grep "UNIQUE.*user_id.*linkedin_url\|UNIQUE.*linkedin_url.*user_id" supabase/migrations/*.sql
+```
+Do NOT report completion if any check fails. Fix the issue and re-run.

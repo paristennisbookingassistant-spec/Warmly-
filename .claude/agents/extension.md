@@ -125,3 +125,32 @@ const RATE_LIMITS = {
 - NEVER send automated messages. This extension is READ-ONLY.
 - Import shared types from `extension/shared/types.ts` only. Do not import from `src/types/`.
 - Write tests for: DOM extraction (mock DOM), rate limiter, orchestrator state machine.
+
+## Validation (MUST pass before reporting done)
+Run these checks after implementation. Fix any failures and re-run until all pass.
+
+```bash
+# 1. manifest.json is valid Manifest V3
+node -e "const m=require('./extension/manifest.json'); console.assert(m.manifest_version===3, 'FAIL: not MV3'); console.log('PASS: Manifest V3')"
+
+# 2. No eval() calls (Chrome Web Store rejects these)
+grep -rn "eval(" extension/ --include="*.ts" --include="*.tsx" && echo "FAIL: eval() found" || echo "PASS: no eval()"
+
+# 3. Rate limits are hard-coded
+grep -q "MAX_PROFILES_PER_SESSION.*25" extension/shared/constants.ts && echo "PASS: profile limit" || echo "FAIL: missing profile limit"
+grep -q "MAX_SESSIONS_PER_DAY.*2" extension/shared/constants.ts && echo "PASS: session limit" || echo "FAIL: missing session limit"
+
+# 4. Orchestration is in content script, NOT service worker
+grep -rn "orchestrat" extension/service-worker/ --include="*.ts" && echo "FAIL: orchestration in service worker!" || echo "PASS: orchestration not in SW"
+grep -q "orchestrat" extension/content-script/orchestrator.ts && echo "PASS: orchestration in content script" || echo "FAIL: no orchestration in content script"
+
+# 5. No automated message sending
+grep -rn "sendMessage\|postMessage.*linkedin\|\.send(" extension/ --include="*.ts" | grep -v "chrome.runtime\|chrome.tabs\|postMessage.*worker\|console" && echo "WARN: possible LinkedIn message sending" || echo "PASS: read-only"
+
+# 6. Content script does not import from src/types/
+grep -rn "from.*src/types\|from.*@/" extension/ --include="*.ts" && echo "FAIL: extension imports from web app" || echo "PASS: clean boundaries"
+
+# 7. TypeScript compiles
+npx tsc --noEmit --project extension/tsconfig.json 2>/dev/null || npx tsc --noEmit
+```
+Do NOT report completion if any check fails.

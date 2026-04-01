@@ -105,3 +105,33 @@ Each must have hover, focus, loading, and empty states.
 - Handle loading states with skeleton loaders, error states with friendly messages.
 - Test critical user flows: login, send message, view contact, generate artifact.
 - Make it beautiful. If a component looks generic or bland, redesign it.
+
+## Validation (MUST pass before reporting done)
+Run these checks after implementation. Fix any failures and re-run until all pass.
+
+```bash
+# 1. TypeScript compiles
+npx tsc --noEmit
+
+# 2. Next.js build succeeds (catches SSR issues, missing imports, etc.)
+npm run build
+
+# 3. No `any` types in components
+grep -rn ": any" src/components/ src/app/\(views\)/ src/app/\(auth\)/ --include="*.tsx" --include="*.ts" && echo "FAIL: found 'any' types" || echo "PASS: no any types"
+
+# 4. Every data-fetching component has loading + error states
+for f in $(grep -rl "fetch\|useEffect\|useSWR\|supabase" src/components/ --include="*.tsx"); do
+  grep -q "loading\|skeleton\|Skeleton\|isLoading" "$f" || echo "MISSING LOADING STATE: $f"
+  grep -q "error\|Error\|catch" "$f" || echo "MISSING ERROR STATE: $f"
+done
+
+# 5. No inline styles or hardcoded colors (everything through Tailwind)
+grep -rn "style={{" src/components/ src/app/\(views\)/ --include="*.tsx" && echo "WARN: inline styles found" || echo "PASS: no inline styles"
+
+# 6. All components under 150 lines
+for f in $(find src/components src/app/\(views\) src/app/\(auth\) -name "*.tsx" 2>/dev/null); do
+  lines=$(wc -l < "$f")
+  [ "$lines" -gt 150 ] && echo "TOO LONG ($lines lines): $f"
+done
+```
+Do NOT report completion if any check fails.

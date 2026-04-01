@@ -3,7 +3,7 @@
 
 **Purpose:** This file preserves the accumulated context, decisions, debates, and learnings from all working sessions on this project. Read this file at the start of every new session to restore context. Update it at the end of every session with new learnings.
 
-**Last updated:** March 31, 2026 (Session 2)
+**Last updated:** April 1, 2026 (Session 3)
 
 ---
 
@@ -176,6 +176,10 @@ The prototype is built for one user (Liyang) with his actual LinkedIn account an
 | `claude-code-setup/.claude/agents/` | 5 agent definitions: architect, backend, frontend, extension, reviewer | Ready |
 | `claude-code-setup/.claude/skills/` | Project-specific skills: project-context, conventions | Ready |
 | `claude-code-setup/SETUP_GUIDE.md` | Step-by-step guide for launching the build | Ready |
+| `.env.local` | API keys (Supabase + Anthropic) — NOT committed to git | Active |
+| `.claude/agents/` | 5 agent definitions copied into project | Active |
+| `.claude/skills/` | 2 project skills copied into project | Active |
+| `CLAUDE.md` (project root) | Master instructions for all coding agents | Active |
 
 ---
 
@@ -195,8 +199,8 @@ The prototype is built for one user (Liyang) with his actual LinkedIn account an
 3. ~~Apply pressure-test findings to PRD~~ ✅ Done (Session 2 — PRD v1.1)
 4. ~~Prepare Claude Code agent setup~~ ✅ Done (Session 2 — claude-code-setup/)
 5. **Execute the build** — Follow `claude-code-setup/SETUP_GUIDE.md`:
-   - Phase 0: Environment setup (install gstack, plugins, create Next.js project, set up Supabase)
-   - Phase 1: Run architect agent (scaffold + types + DB schema)
+   - ~~Phase 0: Environment setup~~ ✅ Done (Session 3)
+   - **Phase 1: Run architect agent** (scaffold + types + DB schema) ← YOU ARE HERE
    - Phase 2: Run backend + extension agents (parallel)
    - Phase 3: Run frontend agent (beautiful UI)
    - Phase 4: Review + QA + security audit + ship
@@ -318,3 +322,31 @@ The prototype is built for one user (Liyang) with his actual LinkedIn account an
 - Liyang gets confused by the layered file structure (user vs project, skills vs commands vs agents vs plugins) — always explain with concrete file paths
 - "I wanna a prototype that looks good" — design quality matters as much as functionality for Liyang. This is about investor/tester impression, not just technical correctness.
 - Liyang learns by asking questions, then getting clear analogies. "Skills = textbook, commands = button, agents = specialized worker" worked well.
+
+### Session 3 — April 1, 2026
+**Topics covered:**
+- Completed Phase 0: Environment Setup
+  - Verified prerequisites: Node v22.22.0, npm 10.9.4, Claude Code 2.1.45
+  - gstack installed at ~/.claude/skills/gstack/ (verified all skill folders present)
+  - Installed 3 of 5 official Anthropic plugins: code-review, frontend-design, security-guidance (typescript-lsp and supabase skipped — marketplace schema compatibility issue with Claude Code 2.1.45)
+  - Created Next.js 14 project at C:\Users\glygs\Documents\ai-networking-coach
+  - Installed all dependencies: @anthropic-ai/sdk, @supabase/supabase-js, @supabase/ssr, zod + dev deps (vitest, playwright, @types/*)
+  - Copied setup files into project: CLAUDE.md, 5 agents, 2 skills, PRD, PROJECT_MEMORY.md
+  - Created Supabase project: "Network AI" on NANO plan, West Europe/London region (URL: bdwrpfattfyyzmftmtqf.supabase.co)
+  - Explained what Supabase is and what the Anthropic API key is for (Liyang asked — he understands now)
+  - Created .env.local with all 4 keys (Project URL, anon key, service role key, Anthropic API key)
+  - Confirmed .env.local is in .gitignore (safe)
+  - Fixed corrupted .git/config (was filled with whitespace), removed stale config.lock
+  - First git commit: "feat: project setup with PRD, agent definitions, and skills" (12 files, 3,455 insertions)
+
+**Key decisions:**
+- Supabase NANO plan is sufficient for prototype (free tier equivalent)
+- West Europe/London region chosen for Supabase (closest to INSEAD Fontainebleau)
+- Git identity set to Liyang's ESSEC email
+
+**Issues encountered and resolved:**
+- Plugin install schema errors for typescript-lsp and supabase — marketplace.json format incompatibility with Claude Code 2.1.45. Not blocking; skipped.
+- .git/config file was corrupted (whitespace only) with a stale config.lock file. Fixed by rewriting config and deleting lock file.
+- Git author identity not configured — set user.email and user.name in project-level git config
+
+**Status:** Phase 0 complete. Ready for Phase 1 (architect agent).

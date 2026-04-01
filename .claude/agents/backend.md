@@ -53,3 +53,31 @@ Replace the architect's stubs with real implementations:
 - Use Anthropic SDK (`@anthropic-ai/sdk`) for Claude API calls.
 - Write at least one test per API route (happy path + error case).
 - Log AI API calls (model used, tokens consumed, latency) for cost monitoring.
+
+## Validation (MUST pass before reporting done)
+Run these checks after implementation. Fix any failures and re-run until all pass.
+
+```bash
+# 1. TypeScript compiles
+npx tsc --noEmit
+
+# 2. All tests pass
+npx vitest run
+
+# 3. Next.js build succeeds
+npm run build
+
+# 4. Every API route has Zod validation
+for f in $(find src/app/api -name "route.ts"); do
+  grep -q "z\." "$f" || echo "MISSING ZOD: $f"
+done
+
+# 5. No raw SQL in API routes (all queries through Supabase client)
+grep -rn "query\|exec\|raw" src/app/api/ --include="*.ts" | grep -v "supabase" | grep -v node_modules && echo "WARN: possible raw SQL" || echo "PASS: no raw SQL"
+
+# 6. Every route has error handling
+for f in $(find src/app/api -name "route.ts"); do
+  grep -q "catch\|try" "$f" || echo "MISSING ERROR HANDLING: $f"
+done
+```
+Do NOT report completion if any check fails.
