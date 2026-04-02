@@ -105,7 +105,7 @@ export interface UserProfileForScoring {
 
 export interface ContactProfileForScoring {
   name: string;
-  current_role: string | null;
+  current_title: string | null;
   company: string | null;
   career_history: CareerHistoryEntry[];
   education: EducationEntry[];

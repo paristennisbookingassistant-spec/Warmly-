@@ -281,7 +281,7 @@ export async function POST(
       contact_profile: contact
         ? {
             name: contact.name,
-            current_role: contact.current_role,
+            current_title: contact.current_title,
             company: contact.company,
             career_history: contact.career_history ?? [],
             education: contact.education ?? [],
@@ -331,7 +331,7 @@ export async function POST(
           user_memory: userTyped.user_memory,
           contact_profile: {
             name: contact.name,
-            current_role: contact.current_role,
+            current_title: contact.current_title,
             company: contact.company,
             career_history: contact.career_history ?? [],
             education: contact.education ?? [],

@@ -142,9 +142,9 @@ export default function ContactDetail({
                 <h1 className="text-xl font-semibold text-gray-900 tracking-tight">
                   {contact.name}
                 </h1>
-                {(contact.current_role || contact.company) && (
+                {(contact.current_title || contact.company) && (
                   <p className="text-sm text-gray-600 mt-0.5">
-                    {[contact.current_role, contact.company]
+                    {[contact.current_title, contact.company]
                       .filter(Boolean)
                       .join(" at ")}
                   </p>

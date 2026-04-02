@@ -236,8 +236,8 @@ describe("extractProfile", () => {
     expect(profile?.location).toBe("San Francisco, CA");
     expect(profile?.linkedin_url).toBe("https://www.linkedin.com/in/john-doe");
     expect(profile?.source_session_id).toBe("session-123");
-    expect(profile?.current_role.title).toBe("Senior Engineer");
-    expect(profile?.current_role.company).toBe("Google");
+    expect(profile?.current_title.title).toBe("Senior Engineer");
+    expect(profile?.current_title.company).toBe("Google");
     expect(profile?.previous_roles).toHaveLength(1);
     expect(profile?.previous_roles[0].title).toBe("Engineer");
     expect(profile?.education).toHaveLength(1);

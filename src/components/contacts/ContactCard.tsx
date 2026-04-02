@@ -76,9 +76,9 @@ export default function ContactCard({
               <h3 className="font-semibold text-gray-900 text-sm leading-tight truncate">
                 {contact.name}
               </h3>
-              {(contact.current_role || contact.company) && (
+              {(contact.current_title || contact.company) && (
                 <p className="text-xs text-gray-500 mt-0.5 leading-tight">
-                  {[contact.current_role, contact.company]
+                  {[contact.current_title, contact.company]
                     .filter(Boolean)
                     .join(" at ")}
                 </p>

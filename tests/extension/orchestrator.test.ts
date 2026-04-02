@@ -97,7 +97,7 @@ function fakeProfile(name: string): ExtractedProfile {
     linkedin_url: `https://www.linkedin.com/in/${name.toLowerCase()}`,
     name,
     headline: "Engineer",
-    current_role: { title: "Engineer", company: "Acme", duration: "2020 – Now" },
+    current_title: { title: "Engineer", company: "Acme", duration: "2020 – Now" },
     previous_roles: [],
     education: [],
     location: "London",

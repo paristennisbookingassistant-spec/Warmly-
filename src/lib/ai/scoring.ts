@@ -77,7 +77,7 @@ Networking Preferences: ${JSON.stringify(input.user_profile.networking_preferenc
 
 ## Contact Profile
 Name: ${input.contact_profile.name}
-Current Role: ${input.contact_profile.current_role ?? "Unknown"}
+Current Role: ${input.contact_profile.current_title ?? "Unknown"}
 Company: ${input.contact_profile.company ?? "Unknown"}
 Location: ${input.contact_profile.location ?? "Unknown"}
 Career History: ${JSON.stringify(input.contact_profile.career_history)}

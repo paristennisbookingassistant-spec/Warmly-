@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(npx vitest:*)",
+      "Bash(git add:*)",
+      "Bash(ls /c/Users/glygs/documents/ai-networking-coach/*.config.*)",
+      "Bash(npm run:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(find:*)",
+      "Bash(grep:*)"
+    ]
+  }
+}

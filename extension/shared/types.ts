@@ -26,7 +26,7 @@ export interface ExtractedProfile {
   linkedin_url: string;
   name: string;
   headline: string;
-  current_role: ExtractedRole;
+  current_title: ExtractedRole;
   previous_roles: ExtractedRole[];
   education: ExtractedEducation[];
   location: string;

@@ -86,7 +86,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       },
       contact_profile: {
         name: contact.name,
-        current_role: contact.current_role,
+        current_title: contact.current_title,
         company: contact.company,
         career_history: contact.career_history ?? [],
         education: contact.education ?? [],

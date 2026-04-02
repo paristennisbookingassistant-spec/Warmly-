@@ -181,7 +181,7 @@ export interface ProfileSnapshot {
   linkedin_url: string;
   name: string;
   headline: string;
-  current_role: {
+  current_title: {
     title: string;
     company: string;
     duration: string;
@@ -220,7 +220,7 @@ export interface Contact {
   /** Unique per user_id — enforced by DB UNIQUE(user_id, linkedin_url) */
   linkedin_url: string | null;
   name: string;
-  current_role: string | null;
+  current_title: string | null;
   company: string | null;
   location: string | null;
   career_history: CareerHistoryEntry[];

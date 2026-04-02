@@ -237,7 +237,7 @@ export function extractProfile(sessionId: string | null = null): ExtractedProfil
       linkedin_url,
       name,
       headline: extractText(SELECTORS.profile.headline) ?? "",
-      current_role: current,
+      current_title: current,
       previous_roles: previous,
       education: extractEducation(),
       location: extractText(SELECTORS.profile.location) ?? "",

@@ -47,7 +47,7 @@ const ListContactsQuerySchema = z.object({
 const CreateContactSchema = z.object({
   name: z.string().min(1).max(200),
   linkedin_url: z.string().url().optional(),
-  current_role: z.string().max(200).optional(),
+  current_title: z.string().max(200).optional(),
   company: z.string().max(200).optional(),
   location: z.string().max(200).optional(),
   source: z.enum(["discovery", "manual_chat", "manual_url", "extension_bookmark"]),
@@ -93,7 +93,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (discovered_after) query = query.gte("discovered_at", discovered_after);
   if (search) {
     query = query.or(
-      `name.ilike.%${search}%,company.ilike.%${search}%,current_role.ilike.%${search}%`
+      `name.ilike.%${search}%,company.ilike.%${search}%,current_title.ilike.%${search}%`
     );
   }
 
@@ -141,7 +141,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const { name, linkedin_url, current_role, company, location, source, notes } =
+  const { name, linkedin_url, current_title, company, location, source, notes } =
     parsed.data;
 
   // Check for duplicate (user_id, linkedin_url) if URL provided
@@ -165,7 +165,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       user_id: user.id,
       name,
       linkedin_url: linkedin_url ?? null,
-      current_role: current_role ?? null,
+      current_title: current_title ?? null,
       company: company ?? null,
       location: location ?? null,
       source,
@@ -227,7 +227,7 @@ async function triggerAsyncScoring(
       },
       contact_profile: {
         name: contact.name,
-        current_role: contact.current_role,
+        current_title: contact.current_title,
         company: contact.company,
         career_history: contact.career_history ?? [],
         education: contact.education ?? [],

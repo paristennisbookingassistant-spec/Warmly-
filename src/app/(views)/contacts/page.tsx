@@ -13,7 +13,7 @@ interface AddContactForm {
   name: string;
   linkedin_url: string;
   company: string;
-  current_role: string;
+  current_title: string;
 }
 
 export default function ContactsPage() {
@@ -25,7 +25,7 @@ export default function ContactsPage() {
     name: "",
     linkedin_url: "",
     company: "",
-    current_role: "",
+    current_title: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -53,7 +53,7 @@ export default function ContactsPage() {
           name: form.name,
           linkedin_url: form.linkedin_url || null,
           company: form.company || null,
-          current_role: form.current_role || null,
+          current_title: form.current_title || null,
           source: "manual_chat",
           status: "discovered",
         }),
@@ -63,7 +63,7 @@ export default function ContactsPage() {
         setFormError(json.error?.message ?? "Failed to add contact.");
       } else {
         setShowAddModal(false);
-        setForm({ name: "", linkedin_url: "", company: "", current_role: "" });
+        setForm({ name: "", linkedin_url: "", company: "", current_title: "" });
         // Reload page data — in a real app we'd update local state
         router.refresh();
       }
@@ -174,9 +174,9 @@ export default function ContactsPage() {
             />
             <Input
               label="Role"
-              value={form.current_role}
+              value={form.current_title}
               onChange={(e) =>
-                setForm((f) => ({ ...f, current_role: e.target.value }))
+                setForm((f) => ({ ...f, current_title: e.target.value }))
               }
               placeholder="Partner"
             />

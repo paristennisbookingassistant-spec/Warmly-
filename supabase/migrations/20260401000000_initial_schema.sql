@@ -217,7 +217,7 @@ CREATE TABLE public.contacts (
   linkedin_url  TEXT,
 
   name          TEXT NOT NULL,
-  current_role  TEXT,
+  current_title TEXT,
   company       TEXT,
   location      TEXT,
 
@@ -229,7 +229,7 @@ CREATE TABLE public.contacts (
 
   -- JSON: ProfileSnapshot — raw data captured from LinkedIn DOM by extension.
   -- NULL for manually-added contacts with no extension capture.
-  -- Shape: { linkedin_url, name, headline, current_role, previous_roles[],
+  -- Shape: { linkedin_url, name, headline, current_title, previous_roles[],
   --          education[], location, mutual_connections, captured_at, source_session_id }
   profile_snapshot  JSONB,
 

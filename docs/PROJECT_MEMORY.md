@@ -375,3 +375,27 @@ The prototype is built for one user (Liyang) with his actual LinkedIn account an
 - Next.js build fails in sandbox VM (no internet to download SWC compiler). Not a real issue — only affects sandboxed environment.
 
 **Status:** Phases 1-3 complete. Running Phase 4 (reviewer agent) now.
+
+### Session 3 (continued) — April 2, 2026 (Phase 4)
+**Topics covered:**
+- Ran reviewer agent (Haiku) — full codebase audit with automated checks + 7-point manual review
+- All automated checks passed: 0 tsc errors, successful build, 131 tests passing, Zod on all routes, Manifest V3 valid, no eval(), RLS on all 8 tables, no hardcoded keys
+- 15 issues found: 3 critical, 5 high, 4 medium, 3 low
+- Fixed 3 critical + 5 high priority issues:
+  - ModelTier enum updated to correct model IDs (claude-haiku-4-5-20251001 / claude-sonnet-4-6) — was showstopper for all AI calls
+  - Replaced all 8 `any` types with concrete types from database.ts
+  - Added DELETE RLS policy to contact_scores table (GDPR right-to-deletion)
+  - Fixed supabase:any in async helpers, model ID usage in scoring.ts, misleading parameter name in generation.ts, null checks in ContactCard.tsx
+- 4 medium + 3 low issues deferred (not blockers for prototype demo)
+- Discussed Playwright browser testing — already installed, will activate via gstack /qa command
+- Architecture confirmed correct on all 6 questions: chat endpoint flow, scoring dual-write, discovery orchestration (content script ✅), RLS, rolling summarization, extension rate limiter
+
+**Remaining Phase 4 steps:**
+1. Commit fixes → `git add . && git commit -m "fix: resolve reviewer findings — model IDs, any types, RLS"`
+2. Run Supabase migration → paste SQL into Supabase dashboard SQL editor
+3. Run `/qa` in Claude Code → Playwright browser-based testing
+4. Run `/cso` in Claude Code → security audit (OWASP + extension threat model)
+5. Deploy → `npx vercel --prod` in terminal
+6. Test live app end-to-end as Liyang
+
+**Status:** Phase 4 in progress — fixes done, ready to commit and deploy.

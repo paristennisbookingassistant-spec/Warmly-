@@ -139,7 +139,7 @@ export type ListContactsResponse = ApiResponse<PaginatedResponse<Contact>>;
 export interface CreateContactRequest {
   name: string;
   linkedin_url?: string;
-  current_role?: string;
+  current_title?: string;
   company?: string;
   location?: string;
   source: ContactSource;
@@ -157,7 +157,7 @@ export type GetContactResponse = ApiResponse<Contact>;
 export interface UpdateContactRequest {
   name?: string;
   linkedin_url?: string;
-  current_role?: string;
+  current_title?: string;
   company?: string;
   location?: string;
   status?: ContactStatus;

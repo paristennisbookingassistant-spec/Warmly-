@@ -30,7 +30,7 @@ import type { Contact, User } from "@/types/database";
 const UpdateContactSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   linkedin_url: z.string().url().optional(),
-  current_role: z.string().max(200).optional(),
+  current_title: z.string().max(200).optional(),
   company: z.string().max(200).optional(),
   location: z.string().max(200).optional(),
   status: z
@@ -107,7 +107,7 @@ export async function PUT(
   // Verify the contact belongs to this user
   const { data: existing } = await supabase
     .from("contacts")
-    .select("id, company, current_role, career_history, education, location")
+    .select("id, company, current_title, career_history, education, location")
     .eq("id", id)
     .eq("user_id", user.id)
     .single();
@@ -128,7 +128,7 @@ export async function PUT(
   }
 
   // Re-score if significant profile fields changed
-  const significantFields = ["company", "current_role", "location"] as const;
+  const significantFields = ["company", "current_title", "location"] as const;
   const hasSignificantChange = significantFields.some(
     (field) => parsed.data[field] !== undefined
   );
@@ -215,7 +215,7 @@ async function triggerRescore(
       },
       contact_profile: {
         name: contact.name,
-        current_role: contact.current_role,
+        current_title: contact.current_title,
         company: contact.company,
         career_history: contact.career_history ?? [],
         education: contact.education ?? [],

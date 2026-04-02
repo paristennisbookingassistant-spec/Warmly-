@@ -50,7 +50,7 @@ const baseContext = {
   user_memory: null,
   contact_profile: {
     name: "Marie Chen",
-    current_role: "VP of Investments",
+    current_title: "VP of Investments",
     company: "Sequoia Capital",
     career_history: [],
     education: [{ school: "INSEAD", degree: "MBA", year: "2022" }],

@@ -35,7 +35,7 @@ export default function ContactGrid({
         (c) =>
           c.name.toLowerCase().includes(q) ||
           c.company?.toLowerCase().includes(q) ||
-          c.current_role?.toLowerCase().includes(q)
+          c.current_title?.toLowerCase().includes(q)
       );
     }
 

@@ -49,7 +49,7 @@ const mockScoringInput = {
   },
   contact_profile: {
     name: "Marie Chen",
-    current_role: "VP of Investments",
+    current_title: "VP of Investments",
     company: "Sequoia Capital",
     career_history: [
       { title: "Senior Associate", company: "McKinsey", start_date: "2018-09", end_date: "2022-02" },

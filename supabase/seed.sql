@@ -121,7 +121,7 @@ BEGIN
     user_id,
     linkedin_url,
     name,
-    current_role,
+    current_title,
     company,
     location,
     career_history,
@@ -152,7 +152,7 @@ BEGIN
       "linkedin_url": "https://linkedin.com/in/marie-chen-sample",
       "name": "Marie Chen",
       "headline": "VP of Investments at Sequoia Capital | INSEAD MBA",
-      "current_role": {"title": "VP", "company": "Sequoia Capital", "duration": "2y"},
+      "current_title": {"title": "VP", "company": "Sequoia Capital", "duration": "2y"},
       "previous_roles": [
         {"title": "Senior Associate", "company": "McKinsey & Company", "duration": "4y"}
       ],

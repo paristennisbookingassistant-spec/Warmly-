@@ -66,7 +66,7 @@ const mockContact = {
   user_id: "user-test-123",
   name: "Marie Chen",
   company: "Sequoia Capital",
-  current_role: "VP of Investments",
+  current_title: "VP of Investments",
   location: "Singapore",
   linkedin_url: null,
   career_history: [],
@@ -280,7 +280,7 @@ describe("PUT /api/contacts/[id]", () => {
 
     // First: fetch existing contact
     const fetchChain = makeQueryChain({
-      data: { id: mockContact.id, company: "Sequoia", current_role: "VP", career_history: [], education: [], location: "SG" },
+      data: { id: mockContact.id, company: "Sequoia", current_title: "VP", career_history: [], education: [], location: "SG" },
       error: null,
     });
     // Second: update call

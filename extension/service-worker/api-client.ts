@@ -102,8 +102,8 @@ export async function saveDiscoveredProfile(
     body: JSON.stringify({
       name: profile.name,
       linkedin_url: profile.linkedin_url,
-      current_role: profile.current_role.title,
-      company: profile.current_role.company,
+      current_title: profile.current_title.title,
+      company: profile.current_title.company,
       location: profile.location,
       source: "discovery",
       profile_snapshot: profile,
@@ -149,8 +149,8 @@ export async function bookmarkProfile(
     body: JSON.stringify({
       name: profile.name,
       linkedin_url: profile.linkedin_url,
-      current_role: profile.current_role.title,
-      company: profile.current_role.company,
+      current_title: profile.current_title.title,
+      company: profile.current_title.company,
       location: profile.location,
       source: "extension_bookmark",
     }),
