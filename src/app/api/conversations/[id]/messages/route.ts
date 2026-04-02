@@ -16,7 +16,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseServerClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import { processCoachingMessage } from "@/lib/ai/coaching";
 import { generateArtifact } from "@/lib/ai/generation";
 import { summarizeConversation, SUMMARIZATION_THRESHOLD } from "@/lib/ai/context";
@@ -41,6 +41,7 @@ import type {
   Contact,
   User,
 } from "@/types/database";
+import type { ArtifactType } from "@/types/artifacts";
 import type { ConversationSummary } from "@/types/ai";
 
 // ---------------------------------------------------------------------------
@@ -344,11 +345,10 @@ export async function POST(
           })),
           artifact_metadata: (artifactMeta ?? []).map((a) => ({
             id: a.id as string,
-            type: a.type as string,
+            type: a.type as ArtifactType,
             status: a.status as string,
             created_at: a.created_at as string,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          })) as any,
+          })),
           company_intel_raw: companyIntelRaw,
         },
         user_instructions: parsed.data.content,
@@ -432,8 +432,7 @@ async function triggerSummarization(
   conversationId: string,
   recentMessages: ConversationMessage[],
   existingSummary: Conversation["summary"],
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any
+  supabase: SupabaseServerClient
 ): Promise<void> {
   try {
     let existingSummaryObj: ConversationSummary | null = null;

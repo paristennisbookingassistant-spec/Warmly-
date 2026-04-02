@@ -5,9 +5,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseServerClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import { scoreContact } from "@/lib/ai/scoring";
-import { SCORING_RUBRIC } from "@/types/ai";
+import { ModelTier, SCORING_RUBRIC } from "@/types/ai";
 import {
   unauthorized,
   notFound,
@@ -201,8 +201,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 async function triggerAsyncScoring(
   userId: string,
   contactId: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any
+  supabase: SupabaseServerClient
 ): Promise<void> {
   try {
     const [{ data: contact }, { data: userData }] = await Promise.all([
@@ -262,7 +261,7 @@ async function triggerAsyncScoring(
       scores: score.scores,
       recommendation_reason: score.recommendation_reason,
       suggested_hook: score.suggested_hook,
-      model_used: "claude-haiku-4-5",
+      model_used: ModelTier.FAST,
     });
   } catch (err) {
     // Non-critical — log and swallow

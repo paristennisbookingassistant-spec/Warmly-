@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseServerClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import { extractStylePreferences } from "@/lib/ai/context";
 import {
   unauthorized,
@@ -228,8 +228,7 @@ async function triggerStyleLearning(
   userId: string,
   originalArtifact: Artifact,
   editedContent: Record<string, unknown>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any
+  supabase: SupabaseServerClient
 ): Promise<void> {
   try {
     const { data: userData } = await supabase

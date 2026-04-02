@@ -40,6 +40,9 @@ export async function getSupabaseServerClient() {
   );
 }
 
+/** Convenience type for passing the server client into helper functions */
+export type SupabaseServerClient = Awaited<ReturnType<typeof getSupabaseServerClient>>;
+
 /**
  * Service-role client for privileged server-side operations.
  * Only use this in API routes where you need to bypass RLS

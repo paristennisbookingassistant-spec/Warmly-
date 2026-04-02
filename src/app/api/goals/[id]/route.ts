@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseServerClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import {
   unauthorized,
   notFound,
@@ -179,8 +179,7 @@ export async function DELETE(
 
 async function computeGoalProgress(
   userId: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any
+  supabase: SupabaseServerClient
 ): Promise<{
   contacts_found: number;
   messages_sent: number;

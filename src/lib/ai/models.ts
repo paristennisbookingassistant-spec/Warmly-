@@ -58,9 +58,9 @@ export function getModelId(tier: ModelTier): string {
  */
 export function getModelForArtifact(
   artifactType: ArtifactType,
-  hasMeetingContext = false
+  forceReasoningModel = false
 ): ModelTier {
-  if (artifactType === "follow_up_draft" && hasMeetingContext) {
+  if (artifactType === "follow_up_draft" && forceReasoningModel) {
     // Follow-up with meeting context needs Sonnet for nuanced references
     return ModelTier.REASONING;
   }

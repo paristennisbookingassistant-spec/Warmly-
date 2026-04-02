@@ -21,9 +21,9 @@ import type {
 
 export enum ModelTier {
   /** Claude Haiku — fast, cheap, used for scoring and simple tasks */
-  FAST = "claude-haiku-4-5",
+  FAST = "claude-haiku-4-5-20251001",
   /** Claude Sonnet — complex reasoning, used for coaching and long-form gen */
-  REASONING = "claude-sonnet-4-5",
+  REASONING = "claude-sonnet-4-6",
 }
 
 /**

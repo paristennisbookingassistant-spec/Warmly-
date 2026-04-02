@@ -541,6 +541,10 @@ CREATE POLICY "contact_scores: insert own"
   ON public.contact_scores FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
+CREATE POLICY "contact_scores: delete own"
+  ON public.contact_scores FOR DELETE
+  USING (auth.uid() = user_id);
+
 -- Indexes
 CREATE INDEX contact_scores_contact_id_idx ON public.contact_scores (contact_id);
 CREATE INDEX contact_scores_user_id_idx    ON public.contact_scores (user_id);

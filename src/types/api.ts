@@ -10,6 +10,7 @@ import type {
   ArtifactOutcome,
   ArtifactStatus,
   ArtifactType,
+  CareerHistoryEntry,
   Contact,
   ContactFeedback,
   ContactSource,
@@ -19,10 +20,13 @@ import type {
   ConversationStatus,
   ConversationType,
   DiscoverySession,
+  EducationEntry,
   GoalStatus,
   GoalType,
   NetworkingGoal,
+  NetworkingPreferences,
   User,
+  UserGoals,
 } from "./database";
 import type { ScoringResponse, GenerationResponse } from "./ai";
 
@@ -344,14 +348,10 @@ export type GetUserResponse = ApiResponse<User>;
 
 export interface UpdateUserRequest {
   name?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  career_history?: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  education?: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  goals?: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  networking_preferences?: any;
+  career_history?: CareerHistoryEntry[];
+  education?: EducationEntry[];
+  goals?: UserGoals;
+  networking_preferences?: NetworkingPreferences;
 }
 
 export type UpdateUserResponse = ApiResponse<User>;

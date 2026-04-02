@@ -9,7 +9,7 @@ import type {
   ScoringPromptInput,
   ScoringResponse,
 } from "@/types/ai";
-import { anthropic, MAX_TOKENS } from "./models";
+import { anthropic, getModelId, MAX_TOKENS } from "./models";
 
 /**
  * Scores a contact against the user's profile using the PRD scoring rubric.
@@ -24,7 +24,7 @@ export async function scoreContact(
   const prompt = buildScoringPrompt(input);
 
   const response = await anthropic.messages.create({
-    model: ModelTier.FAST,
+    model: getModelId(ModelTier.FAST),
     max_tokens: MAX_TOKENS[ModelTier.FAST],
     system: SCORING_SYSTEM_PROMPT,
     messages: [{ role: "user", content: prompt }],
