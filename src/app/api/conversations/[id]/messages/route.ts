@@ -26,6 +26,7 @@ import {
   notFound,
   validationError,
   internalError,
+  rateLimitError,
   buildPaginatedResponse,
   parseJsonBody,
   logAiCall,
@@ -184,7 +185,25 @@ export async function POST(
 
   const conv = conversation as Conversation;
 
-  // 2. Load user profile
+  // 2. Rate limit — max 10 user messages per minute across all conversations
+  const windowStart = new Date(Date.now() - 60_000).toISOString();
+  const { data: userConvIds } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("user_id", user.id);
+  const convIds = (userConvIds ?? []).map((c) => c.id as string);
+  const { count: recentCount } = await supabase
+    .from("conversation_messages")
+    .select("id", { count: "exact", head: true })
+    .in("conversation_id", convIds.length > 0 ? convIds : [""])
+    .eq("role", "user")
+    .gte("created_at", windowStart);
+
+  if ((recentCount ?? 0) >= 10) {
+    return rateLimitError("Too many requests — please wait before sending another message");
+  }
+
+  // 3. Load user profile
   const { data: userData } = await supabase
     .from("users")
     .select("*")
