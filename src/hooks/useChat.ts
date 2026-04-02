@@ -16,6 +16,7 @@ export function useChat() {
   const [isLoadingConversations, setIsLoadingConversations] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Load conversations on mount
   useEffect(() => {
@@ -65,6 +66,7 @@ export function useChat() {
   }, [conversations]);
 
   const createConversation = useCallback(async () => {
+    setCreateError(null);
     const res = await fetch("/api/conversations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -75,6 +77,8 @@ export function useChat() {
       setConversations((prev) => [json.data, ...prev]);
       setActiveConversation(json.data);
       setMessages([]);
+    } else if (json.error) {
+      setCreateError(json.error.message ?? "Failed to create conversation");
     }
   }, []);
 
@@ -149,6 +153,7 @@ export function useChat() {
     isLoadingConversations,
     isLoadingMessages,
     isSending,
+    createError,
     selectConversation,
     createConversation,
     sendMessage,

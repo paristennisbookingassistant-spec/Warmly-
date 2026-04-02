@@ -22,6 +22,7 @@ export default function ChatPage() {
     isLoadingConversations,
     isLoadingMessages,
     isSending,
+    createError,
     selectConversation,
     createConversation,
     sendMessage,
@@ -179,7 +180,7 @@ export default function ChatPage() {
             </div>
           </>
         ) : (
-          <EmptyState onNewConversation={createConversation} />
+          <EmptyState onNewConversation={createConversation} error={createError} />
         )}
       </div>
     </div>
@@ -188,8 +189,10 @@ export default function ChatPage() {
 
 function EmptyState({
   onNewConversation,
+  error,
 }: {
   onNewConversation: () => void;
+  error?: string | null;
 }) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8 bg-gray-50/30">
@@ -241,6 +244,10 @@ function EmptyState({
       >
         New conversation
       </button>
+
+      {error && (
+        <p className="mt-3 text-sm text-red-500">{error}</p>
+      )}
     </div>
   );
 }
