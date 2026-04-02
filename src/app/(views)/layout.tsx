@@ -33,7 +33,7 @@ export default function ViewsLayout({
   const pathname = usePathname();
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#0f172a]">
+    <div className="flex h-screen overflow-x-auto bg-[#0f172a] min-w-[768px]">
       {/* Sidebar */}
       <aside className="w-60 flex-shrink-0 flex flex-col h-full bg-[#0f172a] border-r border-white/5">
         {/* Logo area */}
