@@ -200,10 +200,11 @@ The prototype is built for one user (Liyang) with his actual LinkedIn account an
 4. ~~Prepare Claude Code agent setup~~ ✅ Done (Session 2 — claude-code-setup/)
 5. **Execute the build** — Follow `claude-code-setup/SETUP_GUIDE.md`:
    - ~~Phase 0: Environment setup~~ ✅ Done (Session 3)
-   - **Phase 1: Run architect agent** (scaffold + types + DB schema) ← YOU ARE HERE
-   - Phase 2: Run backend + extension agents (parallel)
-   - Phase 3: Run frontend agent (beautiful UI)
-   - Phase 4: Review + QA + security audit + ship
+   - ~~Phase 1: Run architect agent~~ ✅ Done (Session 3 — 65 files, 0 tsc errors after encoding fix)
+   - ~~Phase 2: Run backend agent~~ ✅ Done (Session 3 — API routes, AI engine, Supabase helpers, tests)
+   - ~~Phase 2b: Run extension agent~~ ✅ Done (Session 3 — Chrome extension with content scripts, service worker, popup)
+   - ~~Phase 3: Run frontend agent~~ ✅ Done (Session 3 — Chat, Contacts, Goals views + all components)
+   - **Phase 4: Review + QA + security audit + ship** ← YOU ARE HERE
 6. **Update the UI wireframe** (low priority — agents build from PRD/CLAUDE.md, not the old wireframe)
 
 ### Future Workstreams
@@ -350,3 +351,27 @@ The prototype is built for one user (Liyang) with his actual LinkedIn account an
 - Git author identity not configured — set user.email and user.name in project-level git config
 
 **Status:** Phase 0 complete. Ready for Phase 1 (architect agent).
+
+### Session 3 (continued) — April 2, 2026
+**Topics covered:**
+- Added validation rules to CLAUDE.md (16 checks by category) and all 5 agent files (agent-specific bash checks)
+- Created .claude/settings.json with hooks:
+  - PostToolUse hook: auto-runs `tsc --noEmit` after every file edit
+  - Stop hook: blocks Claude from stopping until `tsc + build` pass (self-correction loop)
+- Researched Claude Code hooks vs /loop — hooks are the relevant feature for validation, /loop is for scheduled polling
+- Executed Phase 1 (architect agent with Opus): 65 files generated, all types/migrations/stubs/extension scaffold. Fixed 2 file encoding issues (trailing null bytes on layout.tsx and page.tsx). 0 tsc errors after fix. RLS on all 8 tables, Zod in all 13 API routes, UNIQUE constraint present, Manifest V3 confirmed.
+- Executed Phase 2 (backend agent with Sonnet): Implemented all API routes, AI engine (5 files), Supabase helpers, web search, tests
+- Executed Phase 2b (extension agent with Sonnet): Built Chrome extension — content scripts, service worker, popup, DOM reader, orchestrator, behavior simulation
+- Executed Phase 3 (frontend agent with Sonnet): Built all 3 views (Chat, Contacts, Goals), auth pages, all shared components, root layout with sidebar
+- All phases committed to git
+
+**Key decisions:**
+- Skip /plan-eng-review after architect (manual review sufficient, saves tokens)
+- Skip piecemeal code reviews between phases (one combined review at end is more efficient)
+- Hooks provide 3-layer quality assurance: real-time (PostToolUse), end-of-task (agent validation), final audit (reviewer agent)
+
+**Issues encountered:**
+- File encoding: layout.tsx and page.tsx had trailing null bytes from Windows file system. Fixed by rewriting clean files.
+- Next.js build fails in sandbox VM (no internet to download SWC compiler). Not a real issue — only affects sandboxed environment.
+
+**Status:** Phases 1-3 complete. Running Phase 4 (reviewer agent) now.
