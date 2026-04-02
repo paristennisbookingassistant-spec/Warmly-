@@ -14,7 +14,7 @@ import type { ApiError } from "@/types/api";
 export function unauthorized(): NextResponse {
   const body: ApiError = {
     data: null,
-    error: { code: "UNAUTHORIZED", message: "Authentication required" },
+    error: { code: "UNAUTHORIZED", message: "Please sign in to continue" },
   };
   return NextResponse.json(body, { status: 401 });
 }
