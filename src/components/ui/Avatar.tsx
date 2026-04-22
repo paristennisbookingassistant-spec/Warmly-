@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { getInitials, cn } from "@/lib/utils";
 
 type AvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
@@ -46,7 +47,9 @@ export default function Avatar({
   size = "md",
   className,
 }: AvatarProps) {
-  const imageSrc = src ?? imageUrl;
+  const [imgError, setImgError] = useState(false);
+  const rawSrc = src ?? imageUrl;
+  const imageSrc = !imgError ? rawSrc : null;
 
   if (imageSrc) {
     return (
@@ -54,6 +57,7 @@ export default function Avatar({
       <img
         src={imageSrc}
         alt={name}
+        onError={() => setImgError(true)}
         className={cn(
           "rounded-full object-cover flex-shrink-0",
           sizeStyles[size],

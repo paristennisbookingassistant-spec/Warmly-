@@ -29,6 +29,7 @@ import {
   waitForProfileLoad,
   isLoginWall,
   goToNextResultsPage,
+  getCompanyId,
   type SearchFilters,
 } from "./navigator";
 import {
@@ -385,8 +386,29 @@ export class DiscoveryOrchestrator {
 const orchestrator = new DiscoveryOrchestrator();
 
 export async function startDiscovery(payload: StartDiscoveryPayload): Promise<void> {
-  const query = payload.target_companies.join(" OR ");
-  await orchestrator.startSession(query);
+  const companyName = payload.target_companies[0] ?? "";
+  const filters: SearchFilters = {};
+
+  // If we have a company name but no ID, look it up first
+  if (companyName && !payload.company_id) {
+    console.debug("[Discovery] Looking up company ID for:", companyName);
+    // Navigate to company search to find the company page
+    const slug = companyName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    const companyId = await getCompanyId(slug);
+    if (companyId) {
+      filters.companyId = companyId;
+      console.debug("[Discovery] Found company ID:", companyId);
+    } else {
+      console.warn("[Discovery] Could not find company ID for:", companyName, "— falling back to keyword search");
+    }
+  } else if (payload.company_id) {
+    filters.companyId = payload.company_id;
+  }
+
+  if (payload.school_id) filters.schoolId = payload.school_id;
+
+  const query = companyName;
+  await orchestrator.startSession(query, filters);
 }
 
 export function pauseDiscovery(): void {

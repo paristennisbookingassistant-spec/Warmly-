@@ -13,7 +13,8 @@ import type {
 } from "@/types/ai";
 import type { UserMemory } from "@/types/database";
 import { ModelTier } from "@/types/ai";
-import { anthropic, MAX_TOKENS } from "./models";
+import { MAX_TOKENS } from "./models";
+import { callMiniMax } from "./minimax";
 
 /**
  * Number of messages in a conversation before triggering summarization.
@@ -42,10 +43,15 @@ export async function summarizeConversation(
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n");
 
-  const response = await anthropic.messages.create({
-    model: ModelTier.FAST,
-    max_tokens: MAX_TOKENS[ModelTier.FAST],
-    system: `You are summarizing a networking coaching conversation. Return ONLY a valid JSON object with this structure:
+  const response = await callMiniMax(
+    [
+      {
+        role: "user",
+        content: `Summarize these messages into the structured JSON format.${existingSummaryText}\n\nMessages to process:\n${messagesText}`,
+      },
+    ],
+    {
+      systemPrompt: `You are summarizing a networking coaching conversation. Return ONLY a valid JSON object with this structure:
 {
   "key_decisions": string[],
   "user_preferences_expressed": string[],
@@ -53,16 +59,11 @@ export async function summarizeConversation(
   "open_questions": string[],
   "relationship_stage_changes": string[]
 }`,
-    messages: [
-      {
-        role: "user",
-        content: `Summarize these messages into the structured JSON format.${existingSummaryText}\n\nMessages to process:\n${messagesText}`,
-      },
-    ],
-  });
+      maxTokens: MAX_TOKENS[ModelTier.FAST],
+    }
+  );
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "{}";
+  const text = response.content || "{}";
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     throw new Error("Summarization model returned non-JSON response");
@@ -80,20 +81,20 @@ export async function summarizeConversation(
 export async function extractStylePreferences(
   request: StyleExtractionRequest
 ): Promise<StyleExtractionResponse> {
-  const response = await anthropic.messages.create({
-    model: ModelTier.FAST,
-    max_tokens: MAX_TOKENS[ModelTier.FAST],
-    system: `You analyze the differences between an AI-generated draft and a user's edited version to extract writing style preferences. Return ONLY valid JSON.`,
-    messages: [
+  const response = await callMiniMax(
+    [
       {
         role: "user",
         content: `Original AI draft:\n${request.original_draft}\n\nUser's edited version:\n${request.edited_version}\n\nCurrent user memory:\n${JSON.stringify(request.current_memory, null, 2)}\n\nAnalyze the edits and return an updated user_memory JSON plus a brief learning_summary string. Format: {"updated_memory": {...}, "learning_summary": "..."}`,
       },
     ],
-  });
+    {
+      systemPrompt: `You analyze the differences between an AI-generated draft and a user's edited version to extract writing style preferences. Return ONLY valid JSON.`,
+      maxTokens: MAX_TOKENS[ModelTier.FAST],
+    }
+  );
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "{}";
+  const text = response.content || "{}";
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     throw new Error("Style extraction model returned non-JSON response");

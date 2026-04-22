@@ -7,7 +7,8 @@
 
 import type { CoachingRequest, CoachingResponse } from "@/types/ai";
 import type { ArtifactType } from "@/types/artifacts";
-import { anthropic, getModelForConversation, MAX_TOKENS } from "./models";
+import { getModelForConversation, MAX_TOKENS } from "./models";
+import { callMiniMax } from "./minimax";
 
 /**
  * Determines whether a user message requires strategic coaching (Sonnet)
@@ -51,22 +52,19 @@ export async function processCoachingMessage(
   const systemPrompt = buildCoachingSystemPrompt(request);
   const userPrompt = buildCoachingUserPrompt(request);
 
-  const response = await anthropic.messages.create({
-    model,
-    max_tokens: MAX_TOKENS[model],
-    system: systemPrompt,
-    messages: [{ role: "user", content: userPrompt }],
-  });
+  const response = await callMiniMax(
+    [{ role: "user", content: userPrompt }],
+    { systemPrompt, maxTokens: MAX_TOKENS[model] }
+  );
 
-  const agentMessage =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const agentMessage = response.content;
 
   return {
     agent_message: agentMessage,
     trigger_artifact: triggerArtifact ?? undefined,
     model_used: model,
-    tokens_input: response.usage.input_tokens,
-    tokens_output: response.usage.output_tokens,
+    tokens_input: response.usage?.prompt_tokens ?? 0,
+    tokens_output: response.usage?.completion_tokens ?? 0,
   };
 }
 

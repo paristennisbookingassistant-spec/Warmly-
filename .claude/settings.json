@@ -23,5 +23,10 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(cd C:/Users/glygs/documents/ai-networking-coach && npx tsc --noEmit 2>&1 && cd extension && node build.mjs 2>&1)"
+    ]
   }
 }

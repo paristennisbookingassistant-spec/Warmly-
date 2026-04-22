@@ -16,6 +16,8 @@ const PUBLIC_ROUTES = [
   "/login",
   "/signup",
   "/auth/callback",
+  "/onboarding",
+  "/api/discovery",
 ];
 
 /** Route prefix for the authenticated app — redirect here after login */
@@ -53,8 +55,8 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
   const isPublicRoute = PUBLIC_ROUTES.some(
-    (route) => pathname === route || pathname.startsWith("/auth/")
-  );
+    (route) => pathname === route || pathname.startsWith(route + "/")
+  ) || pathname.startsWith("/auth/");
 
   // Redirect unauthenticated users to login
   if (!user && !isPublicRoute) {

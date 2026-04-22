@@ -50,8 +50,14 @@ const CreateContactSchema = z.object({
   current_title: z.string().max(200).optional(),
   company: z.string().max(200).optional(),
   location: z.string().max(200).optional(),
+  avatar_url: z.string().url().nullish(),
   source: z.enum(["discovery", "manual_chat", "manual_url", "extension_bookmark"]),
   notes: z.string().max(2000).optional(),
+  // Extension-populated fields
+  profile_snapshot: z.record(z.string(), z.unknown()).nullish(),
+  career_history: z.array(z.record(z.string(), z.unknown())).nullish(),
+  education: z.array(z.record(z.string(), z.unknown())).nullish(),
+  discovery_session_id: z.string().uuid().nullish(),
 });
 
 // ---------------------------------------------------------------------------
@@ -141,8 +147,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const { name, linkedin_url, current_title, company, location, source, notes } =
-    parsed.data;
+  const {
+    name,
+    linkedin_url,
+    current_title,
+    company,
+    location,
+    avatar_url,
+    source,
+    notes,
+    profile_snapshot,
+    career_history,
+    education,
+    discovery_session_id,
+  } = parsed.data;
 
   // Check for duplicate (user_id, linkedin_url) if URL provided
   if (linkedin_url) {
@@ -168,12 +186,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       current_title: current_title ?? null,
       company: company ?? null,
       location: location ?? null,
+      avatar_url: avatar_url ?? null,
       source,
       notes: notes ?? null,
       status: "discovered",
       discovered_at: now,
-      career_history: [],
-      education: [],
+      profile_snapshot: profile_snapshot ?? null,
+      career_history: career_history ?? [],
+      education: education ?? [],
+      discovery_session_id: discovery_session_id ?? null,
     })
     .select()
     .single();

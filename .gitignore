@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+**/node_modules
 /.pnp
 .pnp.*
 .yarn/*
@@ -39,3 +40,28 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.gstack/
+
+.vercel
+
+# extension build output
+extension/dist/
+
+# test artifacts
+/test-results/
+/playwright-report/
+
+# personal research files (not shared with team)
+/Pasted image *.png
+/*.png
+/*LinkedIn*.html
+/DEX competitive analyses.md
+/docs/startup-crm/
+/docs/MEETING_PREP_*
+/docs/AI_Networking_Coach_Brief.html
+/docs/LINKEDIN_REFERENCE_IDS.md
+
+# personal claude skills (not shared with team)
+.claude/skills/design-references/
+.claude/skills/frontend-slides/
+.claude/skills/LinkedIn*.md

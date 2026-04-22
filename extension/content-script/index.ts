@@ -61,20 +61,85 @@ chrome.runtime.onMessage.addListener(
           sendResponse({ ok: false, reason: "not_a_profile_page" });
           break;
         }
-        const profile = extractProfileFromDOM(null);
-        if (!profile) {
-          sendResponse({ ok: false, reason: "extraction_failed" });
-          break;
-        }
-        // Forward to service worker for API upload
-        chrome.runtime
-          .sendMessage({
-            type: "SAVE_PROFILE",
-            payload: { profile, session_id: null },
+
+        // Scroll to trigger LinkedIn's lazy-loaded Experience/Education sections
+        const scrollAndCollect = async () => {
+          const scrollStep = 600;
+          for (let i = 0; i < 8; i++) {
+            window.scrollBy(0, scrollStep);
+            await new Promise<void>((r) => setTimeout(r, 400));
+          }
+          window.scrollTo(0, 0);
+          await new Promise<void>((r) => setTimeout(r, 500));
+
+          // Collect raw page text + avatar + URL for MiniMax extraction
+          const main = document.querySelector("main");
+          if (!main) return null;
+
+          const fullText = main.innerText;
+          const lines = fullText.split("\n");
+
+          // Extract header + Experience + Education sections (same as CDP flow)
+          const header = lines.slice(0, 30).join("\n");
+          function getSection(startHeading: string, stopHeadings: string[]): string {
+            const startIdx = lines.findIndex((l) => l.trim() === startHeading);
+            if (startIdx === -1) return "";
+            const result = [startHeading];
+            for (let i = startIdx + 1; i < lines.length; i++) {
+              if (stopHeadings.includes(lines[i].trim())) break;
+              result.push(lines[i]);
+            }
+            return result.join("\n");
+          }
+          const expSection = getSection("Experience", ["Education", "Skills", "Languages", "Licenses & certifications", "Certifications", "Courses", "Projects", "Volunteering"]);
+          const eduSection = getSection("Education", ["Skills", "Languages", "Licenses & certifications", "Certifications", "Courses", "Projects", "Volunteering"]);
+          const pageText = [header, expSection, eduSection].filter(Boolean).join("\n\n---\n\n");
+
+          // Avatar
+          let avatar: string | null = null;
+          const photoAnchor = document.querySelector('[aria-label="Profile photo"]');
+          if (photoAnchor) {
+            const img = photoAnchor.querySelector<HTMLImageElement>("img")
+              ?? photoAnchor.closest("div")?.querySelector<HTMLImageElement>("img")
+              ?? photoAnchor.parentElement?.querySelector<HTMLImageElement>("img");
+            if (img?.src?.includes("media.licdn.com")) avatar = img.src;
+          }
+          if (!avatar) {
+            const mainImgs = main.querySelectorAll<HTMLImageElement>('img[src*="media.licdn.com"]');
+            avatar = mainImgs[0]?.src ?? null;
+          }
+
+          return {
+            pageText,
+            avatar,
+            linkedinUrl: window.location.href.split("?")[0],
+          };
+        };
+
+        scrollAndCollect()
+          .then((data) => {
+            if (!data?.pageText || data.pageText.length < 50) {
+              console.warn("[AI Networking Coach] Could not extract page text");
+              sendResponse({ ok: false, reason: "extraction_failed" });
+              return;
+            }
+            console.debug("[AI Networking Coach] Sending page text to MiniMax extraction:", data.pageText.length, "chars");
+            // Send raw page text to service worker for MiniMax extraction + save
+            chrome.runtime
+              .sendMessage({ type: "EXTRACT_AND_SAVE", payload: data })
+              .then((swResponse: { ok?: boolean; reason?: string } | undefined) => {
+                sendResponse({ ok: swResponse?.ok === true, reason: swResponse?.ok ? undefined : (swResponse?.reason ?? "save_failed") });
+              })
+              .catch((err: unknown) => {
+                console.error("[AI Networking Coach] EXTRACT_AND_SAVE failed:", err);
+                sendResponse({ ok: false, reason: "save_failed" });
+              });
           })
-          .catch(console.error);
-        sendResponse({ ok: true, profile });
-        break;
+          .catch((err) => {
+            console.error("[AI Networking Coach] scrollAndCollect error:", err);
+            sendResponse({ ok: false, reason: "extraction_failed" });
+          });
+        return true; // keep message channel open for async sendResponse
       }
 
       default:

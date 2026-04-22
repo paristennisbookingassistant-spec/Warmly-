@@ -29,31 +29,46 @@ export const HEARTBEAT_INTERVAL_MS = 25_000;
 export const SELECTORS = {
   profile: {
     name: [
-      "h1.text-heading-xlarge",
-      "h1[data-generated-suggestion-target]",
+      ".artdeco-card .t-24",                              // Dex — artdeco name heading
+      ".text-heading-xlarge",
+      "[data-anonymize='person-name']",
+      ".artdeco-entity-lockup__title",
+      ".top-card-layout__title",
+      ".pv-text-details__left-panel .text-heading-xlarge",
       ".pv-top-card--list .text-heading-xlarge",
-      "h1.inline",
-      ".pv-text-details__left-panel h1",
       "h1",
     ],
     headline: [
+      ".artdeco-card .text-body-medium",                  // Dex — headline in card
       ".text-body-medium.break-words",
+      ".top-card-layout__headline",
+      ".artdeco-entity-lockup__subtitle",
       ".pv-top-card--list .text-body-medium",
       "div[data-field='headline']",
       "[data-generated-suggestion-target*='headline']",
       ".pv-text-details__left-panel .text-body-medium",
     ],
     location: [
+      ".mt2 div:nth-of-type(2) span.text-body-small",    // Dex
       ".text-body-small.inline.t-black--light.break-words",
       "span[data-field='location']",
       ".pv-top-card--list-bullet .text-body-small",
       "[class*='pv-text-details__left-panel'] span.text-body-small",
     ],
     company: [
+      '[aria-label^="Current company:"] > span',          // Dex — aria-label (most stable)
       "div[data-field='experience_company_name']",
       ".pv-top-card--experience-list .hoverable-link-text",
       "button[aria-label*='Current company']",
       ".experience-item:first-child .pv-entity__secondary-title",
+    ],
+    // Header-level aria-label selectors (Dex approach — accessibility attributes)
+    headerCompany: [
+      '[aria-label^="Current company:"] > span',
+      "button[aria-label*='Current company'] span",
+    ],
+    headerEducation: [
+      '[aria-label^="Education:"] > span',
     ],
     connectionDegree: [
       ".dist-value",
@@ -68,10 +83,12 @@ export const SELECTORS = {
       ".pv-about-section p",
     ],
     avatar: [
+      "img.pv-top-card-profile-picture__image--show",     // Dex — note --show suffix
+      ".pv-top-card-profile-picture__image",
+      ".top-card-layout__entity-image",
       ".pv-top-card__photo img",
       "img.profile-photo-edit__preview",
       ".presence-entity__image",
-      ".pv-top-card-profile-picture__image",
     ],
     mutualConnections: [
       "[data-test-id*='mutual-connections']",
@@ -129,4 +146,9 @@ export const STORAGE_KEYS = {
 // Default backend URL
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_BACKEND_URL = "http://localhost:3000";
+// Injected at build time by build.mjs. Run `npm run build:prod` for production.
+declare const __BACKEND_URL__: string;
+export const DEFAULT_BACKEND_URL: string =
+  typeof __BACKEND_URL__ !== "undefined"
+    ? __BACKEND_URL__
+    : "http://localhost:3000";

@@ -17,6 +17,9 @@
 import { useState, useEffect, useCallback } from "react";
 import type { DiscoverySessionState } from "../shared/types";
 
+// Injected at build time by esbuild — see build.mjs
+declare const __BACKEND_URL__: string;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -287,6 +290,12 @@ export default function Popup() {
   });
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [companyName, setCompanyName] = useState("");
+  const [schoolId, setSchoolId] = useState("5176"); // INSEAD default
+  const [cdpTestResult, setCdpTestResult] = useState<string | null>(null);
+  const [testCompany, setTestCompany] = useState("");
+  const [companyIdResult, setCompanyIdResult] = useState<string | null>(null);
+  const [discoverResult, setDiscoverResult] = useState<string | null>(null);
 
   // ---- Load state on mount ----
   useEffect(() => {
@@ -328,13 +337,18 @@ export default function Popup() {
           });
         });
 
-        // Check if on a LinkedIn profile page
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-          const url = tabs[0]?.url ?? "";
-          setPs((prev) => ({
-            ...prev,
-            isOnLinkedInProfile: url.includes("linkedin.com/in/"),
-          }));
+        // Check if any LinkedIn profile tab is open.
+        // In real Chrome the active tab behind the popup is returned first;
+        // the fallback to all tabs handles Playwright E2E tests and edge cases.
+        chrome.tabs.query({ active: true, currentWindow: true }, (activeTabs) => {
+          const activeUrl = activeTabs[0]?.url ?? "";
+          if (activeUrl.includes("linkedin.com/in/")) {
+            setPs((prev) => ({ ...prev, isOnLinkedInProfile: true }));
+          } else {
+            chrome.tabs.query({ url: "*://www.linkedin.com/in/*" }, (linkedinTabs) => {
+              setPs((prev) => ({ ...prev, isOnLinkedInProfile: linkedinTabs.length > 0 }));
+            });
+          }
         });
       }
     });
@@ -378,10 +392,59 @@ export default function Popup() {
   }, []);
 
   // ---- Handlers ----
-  const handleStartDiscovery = useCallback(() => {
-    // Open the web app to start a configured discovery session
-    chrome.tabs.create({ url: `${getWebAppUrl()}/chat` });
-  }, []);
+  const handleStartDiscovery = useCallback(async () => {
+    if (!companyName.trim()) return;
+
+    // Find the LinkedIn tab to send the message to
+    const tabs = await chrome.tabs.query({ url: "*://www.linkedin.com/*" });
+    const linkedInTab = tabs[0];
+    if (!linkedInTab?.id) {
+      setSavedMsg("Open LinkedIn first");
+      setTimeout(() => setSavedMsg(null), 3000);
+      return;
+    }
+
+    // Send discovery command to content script
+    chrome.tabs.sendMessage(
+      linkedInTab.id,
+      {
+        type: "START_DISCOVERY",
+        payload: {
+          session_id: crypto.randomUUID(),
+          target_companies: [companyName.trim()],
+          max_profiles: 25,
+          school_id: schoolId,
+        },
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          setSavedMsg("Refresh LinkedIn page first");
+          setTimeout(() => setSavedMsg(null), 3000);
+          return;
+        }
+        if (response?.ok) {
+          setPs((prev) => ({
+            ...prev,
+            view: "active",
+            session: {
+              session_id: crypto.randomUUID(),
+              user_id: "",
+              status: "running",
+              profiles_viewed: 0,
+              profiles_scored: 0,
+              profiles_saved: 0,
+              target_companies: [companyName.trim()],
+              current_company_index: 0,
+              started_at: new Date().toISOString(),
+              last_heartbeat: new Date().toISOString(),
+              completed_companies: [],
+              processed_urls: [],
+            },
+          }));
+        }
+      }
+    );
+  }, [companyName, schoolId]);
 
   const handlePause = useCallback(() => {
     chrome.runtime.sendMessage({ type: "PAUSE_DISCOVERY" });
@@ -416,30 +479,45 @@ export default function Popup() {
 
   const handleSaveProfile = useCallback(async () => {
     setSaving(true);
-    try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(
-          tabs[0].id,
-          { type: "PAGE_BOOKMARKED" },
-          (response) => {
-            if (response?.ok) {
-              setSavedMsg("Saved to contacts!");
-            } else {
-              setSavedMsg("Could not extract profile");
-            }
-            setTimeout(() => setSavedMsg(null), 3000);
-          }
-        );
-      }
-    } finally {
+    setSavedMsg("Reading profile...");
+    // In real Chrome, the active tab behind the popup is the LinkedIn page.
+    // If the active tab isn't LinkedIn (e.g., Playwright E2E), fall back to any /in/ tab.
+    const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = activeTabs[0];
+    const targetTab = activeTab?.url?.includes("linkedin.com/in/")
+      ? activeTab
+      : (await chrome.tabs.query({ url: "*://www.linkedin.com/in/*" }))[0];
+    if (!targetTab?.id) {
       setSaving(false);
+      setSavedMsg(null);
+      return;
     }
+    // Content script may take up to 4s to extract (LinkedIn SPA timing)
+    // so we keep saving=true until the callback fires.
+    chrome.tabs.sendMessage(
+      targetTab.id,
+      { type: "PAGE_BOOKMARKED" },
+      (response) => {
+        setSaving(false);
+        if (chrome.runtime.lastError) {
+          setSavedMsg("Refresh the LinkedIn page first");
+        } else if (response?.ok) {
+          setSavedMsg("Saved to contacts!");
+        } else if (response?.reason === "not_a_profile_page") {
+          setSavedMsg("Not a profile page");
+        } else if (response?.reason === "save_failed") {
+          setSavedMsg("Sign in to the web app first");
+        } else {
+          setSavedMsg("Could not read this profile");
+        }
+        setTimeout(() => setSavedMsg(null), 4000);
+      }
+    );
   }, []);
 
   function getWebAppUrl(): string {
-    // In production this would come from chrome.storage; default to localhost for dev
-    return "http://localhost:3000";
+    // Injected at build time via esbuild define — see build.mjs
+    return typeof __BACKEND_URL__ !== "undefined" ? __BACKEND_URL__ : "http://localhost:3000";
   }
 
   // ---- Render ----
@@ -580,14 +658,67 @@ export default function Popup() {
         </div>
       )}
 
-      {/* Idle */}
+      {/* Idle — Discovery form */}
       {view === "idle" && (
         <>
-          <div>
-            <button style={S.btnFull} onClick={handleStartDiscovery}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <p style={{ fontSize: "12px", fontWeight: 600, color: "#111827" }}>
+              Find alumni at a company
+            </p>
+            <input
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              placeholder="Company name (e.g. McKinsey)"
+              style={{
+                width: "100%",
+                padding: "8px 10px",
+                fontSize: "13px",
+                border: "1.5px solid #e5e7eb",
+                borderRadius: "8px",
+                outline: "none",
+                color: "#111827",
+                boxSizing: "border-box",
+              }}
+              onKeyDown={(e) => e.key === "Enter" && handleStartDiscovery()}
+            />
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <label style={{ fontSize: "11px", color: "#6b7280", whiteSpace: "nowrap" }}>
+                School:
+              </label>
+              <select
+                value={schoolId}
+                onChange={(e) => setSchoolId(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: "5px 8px",
+                  fontSize: "12px",
+                  border: "1.5px solid #e5e7eb",
+                  borderRadius: "6px",
+                  color: "#111827",
+                  backgroundColor: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="5176">INSEAD</option>
+                <option value="1219">Harvard Business School</option>
+                <option value="1552">London Business School</option>
+                <option value="1792">Stanford GSB</option>
+                <option value="1285">Wharton</option>
+                <option value="">Any school</option>
+              </select>
+            </div>
+            <button
+              style={{
+                ...S.btnFull,
+                opacity: companyName.trim() ? 1 : 0.5,
+                cursor: companyName.trim() ? "pointer" : "not-allowed",
+              }}
+              onClick={handleStartDiscovery}
+              disabled={!companyName.trim()}
+            >
               Start Discovery
             </button>
-            <p style={{ ...S.sessionMeta, marginTop: "6px", textAlign: "center" }}>
+            <p style={{ ...S.sessionMeta, textAlign: "center" }}>
               {sessionsToday} / {maxSessionsPerDay} sessions used today
             </p>
           </div>
@@ -609,6 +740,116 @@ export default function Popup() {
               ? "Saving..."
               : "Save this profile to contacts"}
           </button>
+        </>
+      )}
+
+      {/* CDP Module 1 Test — remove after verification */}
+      {(
+        <>
+          <div style={S.divider} />
+          <button
+            style={{ ...S.linkBtn, fontSize: "10px", color: "#9ca3af" }}
+            onClick={() => {
+              setCdpTestResult("Testing CDP...");
+              chrome.runtime.sendMessage({ type: "CDP_TEST" }, (res) => {
+                if (res?.ok) {
+                  setCdpTestResult(`CDP works! Tab ${res.tabId}, title: "${res.title}"`);
+                } else {
+                  setCdpTestResult(`CDP failed: ${res?.error ?? "unknown"}`);
+                }
+              });
+            }}
+          >
+            Test CDP connection
+          </button>
+          {cdpTestResult && (
+            <p style={{ fontSize: "10px", color: cdpTestResult.includes("works") ? "#10b981" : "#ef4444", marginTop: "2px" }}>
+              {cdpTestResult}
+            </p>
+          )}
+          {/* Module 2 test: Company ID */}
+          <div style={{ display: "flex", gap: "4px", marginTop: "4px" }}>
+            <input
+              value={testCompany}
+              onChange={(e) => setTestCompany(e.target.value)}
+              placeholder="Company name..."
+              style={{ flex: 1, fontSize: "10px", padding: "3px 6px", border: "1px solid #e5e7eb", borderRadius: "4px" }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && testCompany.trim()) {
+                  setCompanyIdResult("Looking up...");
+                  chrome.runtime.sendMessage(
+                    { type: "CDP_GET_COMPANY_ID", payload: { companyName: testCompany } },
+                    (res) => {
+                      if (res?.ok) {
+                        setCompanyIdResult(`${res.companyName} → ID: ${res.companyId} (${res.method})`);
+                      } else {
+                        setCompanyIdResult(`Failed: ${res?.error ?? "unknown"}`);
+                      }
+                    }
+                  );
+                }
+              }}
+            />
+            <button
+              style={{ fontSize: "10px", color: "#6b7280", background: "none", border: "1px solid #e5e7eb", borderRadius: "4px", padding: "2px 6px", cursor: "pointer" }}
+              onClick={() => {
+                if (!testCompany.trim()) return;
+                setCompanyIdResult("Looking up...");
+                chrome.runtime.sendMessage(
+                  { type: "CDP_GET_COMPANY_ID", payload: { companyName: testCompany } },
+                  (res) => {
+                    if (res?.ok) {
+                      setCompanyIdResult(`${res.companyName} → ID: ${res.companyId} (${res.method})`);
+                    } else {
+                      setCompanyIdResult(`Failed: ${res?.error ?? "unknown"}`);
+                    }
+                  }
+                );
+              }}
+            >
+              Get ID
+            </button>
+          </div>
+          {companyIdResult && (
+            <p style={{ fontSize: "10px", color: companyIdResult.includes("ID:") ? "#10b981" : companyIdResult === "Looking up..." ? "#6b7280" : "#ef4444", marginTop: "2px" }}>
+              {companyIdResult}
+            </p>
+          )}
+          {/* Module 3 test: Full discovery (company → search → profile URLs) */}
+          <button
+            style={{ fontSize: "10px", color: "#6b7280", background: "none", border: "1px solid #e5e7eb", borderRadius: "4px", padding: "2px 6px", cursor: "pointer", marginTop: "4px", width: "100%" }}
+            onClick={() => {
+              if (!testCompany.trim()) return;
+              setDiscoverResult("Discovering... (finding company → searching alumni)");
+              chrome.runtime.sendMessage(
+                { type: "CDP_DISCOVER", payload: { companyName: testCompany, schoolId: "5176" } },
+                (res) => {
+                  if (res?.ok) {
+                    const diagList = (res.errors as string[] | undefined)?.join("\n") ?? "";
+                    setDiscoverResult(
+                      `${res.companyName}: ${res.count} found, ${res.saved} saved\n\n${diagList}`
+                    );
+                  } else {
+                    setDiscoverResult(`Failed: ${res?.error ?? "unknown"}`);
+                  }
+                }
+              );
+            }}
+          >
+            Discover INSEAD alumni
+          </button>
+          {discoverResult && (
+            <p style={{
+              fontSize: "10px",
+              color: discoverResult.includes("SAVED") ? "#10b981" : discoverResult.startsWith("Discovering") ? "#6b7280" : "#525252",
+              marginTop: "2px",
+              whiteSpace: "pre-wrap",
+              maxHeight: "200px",
+              overflow: "auto",
+            }}>
+              {discoverResult}
+            </p>
+          )}
         </>
       )}
     </div>

@@ -8,7 +8,26 @@
       "Bash(npm run:*)",
       "Bash(git commit -m ':*)",
       "Bash(find:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(npx vercel:*)",
+      "Bash(npm install:*)",
+      "Bash(BACKEND_URL=https://ai-networking-coach.vercel.app node build.mjs)",
+      "Bash(npx playwright:*)",
+      "Bash(node build.mjs)",
+      "Bash(node scripts/save-linkedin-html.mjs \"https://www.linkedin.com/in/ghassanraad/\" \"ghassan-raad\")",
+      "Bash(taskkill //F //IM chrome.exe)",
+      "Bash(ls -la \"C:/Users/glygs/Documents/ai-networking-coach/\"*V2* \"C:/Users/glygs/Documents/ai-networking-coach/\"*v2*)",
+      "Bash(ls -la \"C:/Users/glygs/Documents/ai-networking-coach/\"*.html)",
+      "Bash(sed 's/<[^>]*>//g')",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:v for k,v in {**d.get\\('devDependencies',{}\\), **d.get\\('dependencies',{}\\)}.items\\(\\) if any\\(x in k for x in ['vitest','jsdom','vite']\\)}, indent=2\\)\\)\")",
+      "Bash(node -e ':*)",
+      "Bash(node --input-type=module)",
+      "Bash(npm ls:*)",
+      "Skill(browse)",
+      "Bash(curl:*)",
+      "Bash(dd:*)",
+      "Bash(ls:*)",
+      "Bash(wc -l C:/Users/glygs/documents/ai-networking-coach/src/lib/ai/*.ts C:/Users/glygs/documents/ai-networking-coach/src/app/api/*/*.ts)"
     ]
   }
 }

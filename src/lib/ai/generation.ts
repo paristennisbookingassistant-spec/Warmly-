@@ -6,7 +6,8 @@
 
 import type { ArtifactType } from "@/types/artifacts";
 import type { GenerationRequest, GenerationResponse } from "@/types/ai";
-import { anthropic, getModelForArtifact, MAX_TOKENS } from "./models";
+import { getModelForArtifact, MAX_TOKENS } from "./models";
+import { callMiniMax } from "./minimax";
 
 /**
  * Generates an artifact for a given contact/conversation context.
@@ -22,15 +23,12 @@ export async function generateArtifact(
 
   const { systemPrompt, userPrompt } = buildGenerationPrompts(request);
 
-  const response = await anthropic.messages.create({
-    model,
-    max_tokens: MAX_TOKENS[model],
-    system: systemPrompt,
-    messages: [{ role: "user", content: userPrompt }],
-  });
+  const response = await callMiniMax(
+    [{ role: "user", content: userPrompt }],
+    { systemPrompt, maxTokens: MAX_TOKENS[model] }
+  );
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.content;
 
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
@@ -42,8 +40,8 @@ export async function generateArtifact(
   return {
     content,
     model_used: model,
-    tokens_input: response.usage.input_tokens,
-    tokens_output: response.usage.output_tokens,
+    tokens_input: response.usage?.prompt_tokens ?? 0,
+    tokens_output: response.usage?.completion_tokens ?? 0,
   };
 }
 

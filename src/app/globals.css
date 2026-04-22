@@ -1,11 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #111827;
-  --sidebar-bg: #0f172a;
-  --sidebar-hover: #1e293b;
-  --accent: #3b82f6;
+  --background: #fafafa;
+  --foreground: #171717;
+  --sidebar-bg: #111111;
+  --sidebar-hover: rgba(255, 255, 255, 0.04);
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --text-secondary: #525252;
+  --text-tertiary: #a3a3a3;
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-medium: rgba(0, 0, 0, 0.1);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  --shadow-medium: 0 4px 12px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  --shadow-warm: 0 4px 16px rgba(78, 50, 23, 0.04);
 }
 
 @theme inline {
@@ -83,4 +91,20 @@ body {
 /* Progress bar smooth fill */
 .progress-fill {
   transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Design system shadows */
+.shadow-soft {
+  box-shadow: var(--shadow-soft);
+}
+.shadow-medium {
+  box-shadow: var(--shadow-medium);
+}
+.shadow-warm {
+  box-shadow: var(--shadow-warm);
+}
+
+/* Hover shadow upgrade */
+.hover-shadow-medium:hover {
+  box-shadow: var(--shadow-medium);
 }

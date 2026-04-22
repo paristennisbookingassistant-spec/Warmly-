@@ -105,9 +105,16 @@ export async function saveDiscoveredProfile(
       current_title: profile.current_title.title,
       company: profile.current_title.company,
       location: profile.location,
-      source: "discovery",
+      avatar_url: profile.avatar ?? null,
+      career_history: profile.previous_roles.map((r) => ({
+        title: r.title,
+        company: r.company,
+        duration: r.duration,
+      })),
+      education: profile.education,
       profile_snapshot: profile,
       discovery_session_id: sessionId,
+      source: "discovery",
     }),
   });
 }
@@ -152,6 +159,14 @@ export async function bookmarkProfile(
       current_title: profile.current_title.title,
       company: profile.current_title.company,
       location: profile.location,
+      avatar_url: profile.avatar ?? null,
+      career_history: profile.previous_roles.map((r) => ({
+        title: r.title,
+        company: r.company,
+        duration: r.duration,
+      })),
+      education: profile.education,
+      profile_snapshot: profile,
       source: "extension_bookmark",
     }),
   });

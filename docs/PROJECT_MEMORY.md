@@ -3,7 +3,7 @@
 
 **Purpose:** This file preserves the accumulated context, decisions, debates, and learnings from all working sessions on this project. Read this file at the start of every new session to restore context. Update it at the end of every session with new learnings.
 
-**Last updated:** April 1, 2026 (Session 3)
+**Last updated:** April 3, 2026 (Session 4)
 
 ---
 
@@ -399,3 +399,183 @@ The prototype is built for one user (Liyang) with his actual LinkedIn account an
 6. Test live app end-to-end as Liyang
 
 **Status:** Phase 4 in progress — fixes done, ready to commit and deploy.
+
+### Session 4 — April 3-5, 2026
+**Topics covered:**
+- Completed Supabase migration (successfully applied all 8 tables with RLS)
+- Ran /qa (Playwright E2E against localhost:3000) — passed
+- Ran /cso (security audit) — 2 findings: (1) HIGH: no rate limiting on AI chat endpoint (fixed — message-count check before any Claude call), (2) MEDIUM: wrong env var name SUPABASE_SERVICE_KEY vs SUPABASE_SERVICE_ROLE_KEY in server.ts (fixed — 5 min rename)
+- Post-fix validation: `npx tsc --noEmit && npm run build` run in Claude Code terminal
+- Discussed and resolved agentic debugging strategy for post-deploy feature testing
+- Added scientific positioning (homophily, weak ties, social capital) to PRD Section 1.2a
+- Added v2 roadmap to PRD (Twitter/X + Substack monitoring, user-assisted enrichment, network structure analysis)
+- Prepared technical co-founder pitch (how to describe the stack concisely)
+- Installed VoltAgent/awesome-design-md — 50+ premium company design systems as DESIGN.md reference files
+
+**Decisions on agentic debugging:**
+- The LinkedIn extension extraction failure was a **test fidelity** problem, not a loop depth problem
+- Claude Code wrote mock tests that tested fake data — they passed but didn't catch real DOM selector failures
+- Correct fix: write Playwright tests that load a real saved LinkedIn HTML fixture, run content script extraction logic against it, and assert on real fields (name, title, photo, experience)
+- For web app features: Playwright E2E against the deployed Vercel URL is the correct approach — tell Claude Code "keep fixing and re-running until the test passes, do not stop until green"
+- Karpathy's autoresearch is a research loop, not a debugging loop — the concept of "loop until fixed" is valid and Claude Code supports it natively, but the loop is only as good as the test it's running
+- Key prompt pattern for Claude Code: give it one feature at a time, tell it to write a REAL E2E test (not mocks), run it, fix failures, and loop until green
+
+**Decisions on scientific positioning (homophily):**
+- Homophily (McPherson 2001), weak ties (Granovetter 1973), and social capital theory are the scientific underpinnings of the product's AI reasoning
+- Decision: embed science in product behavior, don't lead with it in marketing. Primary narrative stays "democratizing networking." Secondary credibility layer: "built on relationship science, not guesswork"
+- Key product feature: AI explicitly surfaces homophily signals to the user in plain language ("You both made a non-traditional pivot from consulting — that shared experience is a strong opening"). This is differentiated from competitors and grounded in the science.
+- Added Section 1.2a to PRD: Scientific Foundation — covering homophily, weak ties, and social capital principles
+
+**Decisions on Instagram / multi-platform expansion:**
+- Instagram NOT included in v2 due to: technical protection against scraping, privacy expectations mismatch (personal social ≠ professional networking), unreliable data
+- v2 roadmap added to PRD covering: Twitter/X + Substack monitoring (professional/public), user-assisted profile enrichment (opt-in), network structure analysis (bridge identification, gap analysis)
+- Right approach for personal context: user provides it ("she mentioned she loves hiking") rather than automated extraction
+
+**Technical co-founder pitch (how to describe the stack):**
+- TypeScript + Next.js 14 App Router (full-stack, one codebase, Vercel deploy)
+- Supabase (managed Postgres + auth + RLS — no DevOps needed)
+- Anthropic Claude API with model routing (Haiku for scoring, Sonnet for reasoning)
+- Chrome Extension Manifest V3 (content script only — legally defensible LinkedIn reading)
+- Architecture highlights: session-per-contact data model, 6 typed artifact schemas, rolling context summarization, Zod validation on all 13 routes
+
+**Design system setup:**
+- Installed VoltAgent/awesome-design-md (GitHub: https://github.com/VoltAgent/awesome-design-md) — 50+ DESIGN.md files extracted from premium company websites
+- Files installed at project level: `.claude/skills/design-references/` (52 files)
+- Also copied to user level: `~/.claude/skills/design-references/` (available across all projects)
+- Created unified `SKILL.md` that defines our app's design system derived from Linear (dark sidebar), Notion (content areas), Supabase (dashboards), Vercel (status UI)
+- Updated `CLAUDE.md` to instruct Claude Code to read design references before any frontend work
+- Primary references: Linear, Notion, Supabase, Vercel, Superhuman, Stripe, Figma
+- Full library available for "make it look like [Company]" prompts
+
+**Key learnings:**
+- Liyang is actively exploring cutting-edge AI dev workflows (Karpathy's autoresearch, loop skills) — stay current on these and give honest assessments of what works vs. hype
+- The mock test vs. real test distinction is critical and likely to recur — always push for E2E tests against real data/DOM, not mocked interfaces
+- Design reference files are high-leverage — they give Claude Code specific, concrete design specs instead of vague "make it professional" instructions
+
+**Status:** Build complete. Security issues fixed. Design system installed. Ready for deploy + feature debugging.
+
+### Session 5 — April 2-3, 2026
+**Topics covered:**
+- Deployed to Vercel successfully. Tested the live app.
+- Chrome extension bookmark flow ("Save this profile") — debugged extensively:
+  - LinkedIn 2025 switched to CSS-in-JS with hashed class names (`_880950ad`, `_9dd60b11`). ALL CSS selectors (`.text-heading-xlarge`, `.artdeco-card`, `section#experience`, etc.) broken.
+  - JSON-LD (`<script type="application/ld+json">`) is NOT present on logged-in LinkedIn pages. The JSON-LD fallback strategy was built on a wrong assumption.
+  - Reverse-engineered Dex Chrome extension (v2.0.13) — their selectors are also broken on 2025 LinkedIn. They work via their injected sidebar panel, not LinkedIn's native DOM.
+  - Built `extractFromTextStructure()` — parses `main.innerText` for name, headline, company, location. Works because text order is a UX pattern LinkedIn won't change.
+  - Fixed photo extraction: `aria-label="Profile photo"` as anchor, falls back to `img[src*="media.licdn"]` inside `main` (skips nav avatar).
+  - Fixed experience/education: content script scrolls page before extracting to trigger lazy-loaded sections. Parses section headings ("Experience", "Education") as delimiters.
+  - Fixed pronouns: "She/Her" was being picked as name. Added pronoun skip list.
+  - Fixed description bullet points: lines starting with "- ", "•", or >80 chars filtered out.
+  - User saved real LinkedIn HTML via DevTools `copy(document.documentElement.outerHTML)` — this captures the full rendered DOM including lazy-loaded content (unlike "Save As" which only gets initial HTML).
+  - Wrote JSDOM test against real saved HTML (`tests/extraction-real-dom.test.ts`) — 6 tests, all passing.
+- Added delete contact feature (API + UI button on contact detail page).
+- Added manual URL entry callout in add-contact modal.
+- First deploy with working extension extraction.
+
+**Key learnings:**
+- LinkedIn's 2025 DOM is fundamentally different from everything documented online. No CSS selectors work. Must use text-structure parsing or LLM extraction.
+- "Save As HTML" does NOT capture lazy-loaded DOM content. Must use `copy(document.documentElement.outerHTML)` from DevTools.
+- Playwright E2E tests against mock fixtures don't validate real LinkedIn extraction. Only real saved HTML fixtures work.
+- User wants tested, working features before shipping. Multiple rounds of "try it and see" with broken code frustrated the user. Must verify before presenting.
+- Build in small, testable modules. Quality-check each before moving to the next.
+
+### Session 6 — April 5-7, 2026
+**Topics covered:**
+
+**Frontend Design Refresh (ElevenLabs-inspired):**
+- Created `docs/DESIGN.md` based on ElevenLabs design system: near-white canvas (#fafafa), warm neutrals, pill buttons, multi-layered subtle shadows, clean Inter typography.
+- Applied design tokens to layout, sidebar (#111111), ContactCard, ContactDetail, ContactGrid, contacts page.
+- Deployed to Vercel.
+
+**Discovery Architecture Decision:**
+- Spawned 3 debate agents: Extension Orchestrator Engineer, OpenClaw-style Browser Agent, Pragmatic CTO (Proxycurl API).
+- Key findings from debate:
+  - Extension orchestrator has a fundamental navigation-death problem (content scripts die on page navigation).
+  - Proxycurl can't do school-filtered LinkedIn search — core to our use case.
+  - OpenClaw-style CDP agent runs locally on user's browser (same trust/detection profile as extension).
+- Researched Stagehand (Browserbase, 22K stars, TypeScript) — hybrid Playwright + LLM extraction.
+- User held roundtable with 5-person technical panel (systems architect, security analyst, fullstack dev, LLM architect, performance engineer).
+- **Final architecture decision: `chrome.debugger` CDP from the extension service worker.**
+  - No local Node.js process, no CLI flags, no Stagehand dependency.
+  - `chrome.debugger.attach()` keeps service worker alive (Chrome 118+).
+  - CDP `Page.navigate` for navigation, `Runtime.evaluate` for JS execution.
+  - LLM extraction on backend (Claude Haiku) — keeps API keys server-side.
+  - Same pattern as Claude Code Chrome extension and OpenClaw Browser Relay.
+  - Full architecture documented in `docs/DISCOVERY_ARCHITECTURE_FINAL.md`.
+
+**Discovery Implementation (modular build):**
+- Module 1: CDP Helper — `chrome.debugger` attach/navigate/evaluate/detach. Tested, works.
+- Module 2: Company ID Resolution — slug guess with name validation + LinkedIn search + Claude Haiku LLM fallback for disambiguation. Tested with McKinsey (slug), Jeito Capital (LLM), Bain & Company (slug).
+- Module 3: Search + Collect Profile URLs — structured LinkedIn filter URLs (`currentCompany=["ID"]&schoolFilter=["5176"]`), href-based link extraction, mutual connection filtering. Tested with Parloa → 4 correct INSEAD alumni.
+- Module 4: Visit Profiles + Extract + Save — IN PROGRESS.
+  - Built inline text parser for CDP `Runtime.evaluate` extraction.
+  - **Blocking issue:** `Runtime.evaluate("window.scrollBy()")` does NOT trigger LinkedIn's lazy loading. The page doesn't visually scroll. Experience/Education sections don't load.
+  - Root cause: `window.scrollBy()` via `evaluate` fires no input events. LinkedIn uses `wheel` event listeners and IntersectionObservers that require real input events.
+  - **Fix (researched, ready to implement):** Use CDP `Input.dispatchMouseEvent` with `type: "mouseWheel"` — same approach Playwright, Puppeteer, and Claude Code Chrome extension all use. This goes through Chrome's real input pipeline and fires native `wheel` events.
+
+**Key decisions:**
+- Discovery uses structured LinkedIn filter URLs from user's existing LinkedIn search skill (company ID + school ID), not free-text keyword search.
+- Company resolution: try slug guess first (fast for common companies), fall back to LinkedIn company search + LLM disambiguation for tricky names.
+- Profile extraction: for ≤25 results, visit all profiles. For >25, add more LinkedIn filters (location, seniority) to narrow down.
+- For MVP: all discovered contacts save to existing contacts table via `POST /api/contacts`.
+
+**Key learnings:**
+- `chrome.debugger` API is the right tool for extension-based browser automation. It keeps the service worker alive and provides full CDP access without user-facing setup steps.
+- Company slug guessing is unreliable ("Jeito Capital" → `jeito-life`, "Wonderful" → `wonderfulcx`). LinkedIn search + LLM resolution is the robust fallback.
+- Mutual connection links on LinkedIn search results are false positives. Filter by checking if grandparent element text contains "mutual connection".
+- CDP `Runtime.evaluate` can run JS and extract data, but CANNOT trigger real scroll events. Must use `Input.dispatchMouseEvent(mouseWheel)` for scrolling — this is what all major automation tools use.
+- Discuss approach before coding. The user got frustrated when code was written and rewritten multiple times for the scrolling problem without first aligning on the solution.
+
+**Status:**
+- Manual save via extension: WORKING (name, photo, headline, experience, education, location)
+- Delete contacts: WORKING
+- Discovery Modules 1-3: WORKING (CDP helper, company ID, search + URLs)
+- Discovery Module 4: mouseWheel scroll fix built, needs testing
+- Frontend design: partially applied (ElevenLabs tokens on main components)
+- Chat/scoring: NOT WORKING (needs Anthropic API key in Vercel env + user onboarding)
+
+**Immediate next steps:**
+1. Test Module 4 (mouseWheel scrolling) with Parloa
+2. If scrolling works → profiles extract with full data → contacts saved
+3. Wire the "Start Discovery" button in popup to the full chain (Modules 2→3→4)
+4. Test end-to-end: type "Parloa" + INSEAD → 4 contacts appear in web app with full details
+
+### Session 7 — April 7-8, 2026
+**Topics covered:**
+- Discovery Module 4 (visit profiles + extract + save):
+  - mouseWheel scrolling confirmed working (all 4 Parloa profiles: 15K-23K chars, Experience:true)
+  - Rule-based text parser produces too many errors on complex profiles (company headers as titles, "On-site"/"Hybrid"/"5 yrs 9 mos" as titles, descriptions slipping through)
+  - Switched to MiniMax M2.7-highspeed LLM for extraction ($0.002/profile)
+  - Anthropic API key was invalid (authentication_error) — root cause of all 500 errors
+  - Switched both discovery endpoints (`/api/discovery/extract` and `/api/discovery/resolve-company`) from Anthropic to MiniMax
+  - MiniMax API URL: `https://api.minimaxi.com/v1/chat/completions`, model: `MiniMax-M2.7-highspeed`
+  - MiniMax uses `<think>` reasoning tags — must strip before parsing JSON response
+  - Auth middleware was blocking `/api/discovery/*` routes — added to PUBLIC_ROUTES
+  - Page text truncation at 8000 chars was cutting off Experience section — fixed by extracting only relevant sections (header + Experience + Education) from innerText before sending to MiniMax
+  - CDP session drops during long MiniMax API calls — added session recovery (detach old + re-attach)
+  - Company name validation too strict — "Wonderfulcx" slug lands on correct page but name "Wonderful" doesn't match input. Fixed: accept any valid company page from slug guess without name validation.
+
+**Key decisions:**
+- MiniMax LLM extraction is the primary approach for discovery (not filters). Filters are unreliable on complex profiles.
+- Cost is acceptable: ~$0.002/profile, ~$0.05/session of 25 profiles
+- Anthropic API key needs to be fixed/replaced for chat and scoring features to work
+- MiniMax is used ONLY for discovery extraction; manual "Save this profile" button still uses the rule-based content script parser
+
+**Known issues to tackle later:**
+1. **Company slug validation** — currently accepts any valid company page from slug guess. Could match wrong company if slug is ambiguous (e.g. "jeito" matches "Jeito" instead of "Jeito Capital"). Need smarter disambiguation for ambiguous slugs while still accepting exact slugs.
+2. **MiniMax empty responses** — Dmitry's profile sometimes returns empty content (all tokens spent on `<think>` reasoning). max_tokens=4000 may need increase, or need to add retry logic.
+3. **Anthropic API key** — needs to be replaced with a valid key for chat/scoring/coaching features.
+4. **CDP session stability** — service worker restarts during long API calls cause session loss. Recovery works but adds latency. Consider keeping API calls shorter or adding heartbeat.
+
+**Status:**
+- Discovery end-to-end: WORKING (Parloa: 3/4 profiles saved with full experience + education via MiniMax, 1 had empty MiniMax response but was saved from prior run)
+- Manual save: WORKING (content script text parser)
+- Company ID resolution: WORKING (slug guess + LLM search fallback)
+- Search + URL collection: WORKING (mutual connection filtering)
+- CDP scrolling: WORKING (mouseWheel events)
+- Frontend design: Partially applied (ElevenLabs tokens on main components)
+- Chat sessions: WORKING (contact-specific naming, delete, routing from contact cards)
+- Chat messaging: NOT WORKING (still uses invalid Anthropic key — needs Module 8: switch to MiniMax)
+
+**Future feature ideas (second priority):**
+1. **LinkedIn Chat AI Assistant (Module 10)** — Inject an AI button into LinkedIn's messaging compose area (like Dex's "D AI" button). Content script uses MutationObserver to detect `.msg-form__contenteditable`, injects button, scrapes chat history from DOM (`.msg-s-event-listitem__body`), sends to backend for LLM reply generation, inserts response via `document.execCommand('insertText')`. Proven pattern used by Dex, Reepl, and multiple open-source extensions. Would allow users to get AI-drafted replies directly inside LinkedIn without switching to our web app.

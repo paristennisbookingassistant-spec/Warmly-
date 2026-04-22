@@ -23,7 +23,7 @@ export default function Button({
   ...props
 }: ButtonProps) {
   const base = [
-    "inline-flex items-center justify-center font-medium rounded-lg",
+    "inline-flex items-center justify-center font-medium",
     "transition-all duration-150",
     "focus:outline-none focus:ring-2 focus:ring-offset-2",
     "disabled:opacity-50 disabled:cursor-not-allowed",
@@ -32,34 +32,34 @@ export default function Button({
 
   const variants = {
     primary: [
-      "bg-blue-500 text-white",
-      "hover:bg-blue-600 active:bg-blue-700",
-      "focus:ring-blue-500",
-      "shadow-sm hover:shadow",
+      "bg-[#171717] text-white rounded-full",
+      "hover:bg-[#2a2a2a] active:bg-[#111111]",
+      "focus:ring-[#171717]/30",
+      "shadow-[0_1px_2px_rgba(0,0,0,0.08)]",
     ].join(" "),
     secondary: [
-      "bg-white text-gray-700 border border-gray-200",
-      "hover:bg-gray-50 hover:border-gray-300 active:bg-gray-100",
-      "focus:ring-blue-500",
-      "shadow-sm",
+      "bg-white text-[#171717] border border-[rgba(0,0,0,0.1)] rounded-full",
+      "hover:bg-[#f5f5f5] hover:border-[rgba(0,0,0,0.15)] active:bg-[#eeeeee]",
+      "focus:ring-[#171717]/10",
+      "shadow-[0_1px_2px_rgba(0,0,0,0.04),0_0_0_1px_rgba(0,0,0,0.04)]",
     ].join(" "),
     ghost: [
-      "text-gray-600 bg-transparent",
-      "hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200",
-      "focus:ring-gray-400",
+      "text-[#525252] bg-transparent rounded-lg",
+      "hover:bg-[rgba(0,0,0,0.04)] hover:text-[#171717] active:bg-[rgba(0,0,0,0.07)]",
+      "focus:ring-[#171717]/10",
     ].join(" "),
     danger: [
-      "bg-red-500 text-white",
-      "hover:bg-red-600 active:bg-red-700",
-      "focus:ring-red-500",
-      "shadow-sm hover:shadow",
+      "bg-white text-[#dc2626] border border-[rgba(220,38,38,0.2)] rounded-full",
+      "hover:bg-[#fef2f2] hover:border-[rgba(220,38,38,0.35)]",
+      "focus:ring-red-500/20",
+      "shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
     ].join(" "),
   };
 
   const sizes = {
-    sm: "text-xs px-3 py-1.5 gap-1.5 h-7",
-    md: "text-sm px-4 py-2 gap-2 h-9",
-    lg: "text-sm px-5 py-2.5 gap-2 h-11",
+    sm: "text-xs px-3.5 py-1.5 gap-1.5 h-7",
+    md: "text-[13px] px-4 py-2 gap-2 h-9",
+    lg: "text-sm px-5 py-2.5 gap-2 h-10",
   };
 
   const Spinner = () => (

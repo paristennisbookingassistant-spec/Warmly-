@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Test User - LinkedIn</title>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Person",
+    "name": "Test User",
+    "jobTitle": ["Senior Engineer", "Analyst"],
+    "worksFor": [
+      {"@type": "Organization", "name": "Acme Corp"},
+      {"@type": "Organization", "name": "Old Co"}
+    ],
+    "alumniOf": [{"@type": "EducationalOrganization", "name": "MIT"}],
+    "address": {"@type": "PostalAddress", "addressLocality": "San Francisco"},
+    "image": {"@type": "ImageObject", "contentUrl": "https://media.licdn.com/dms/image/test-photo.jpg"}
+  }
+  </script>
+</head>
+<body>
+  <!--
+    Mock LinkedIn profile page for Playwright E2E tests.
+    DOM structure matches the selector chains in extension/shared/constants.ts.
+  -->
+
+  <!-- Profile name: matches SELECTORS.profile.name[0] = "h1.text-heading-xlarge" -->
+  <h1 class="text-heading-xlarge">Test User</h1>
+
+  <!-- Headline: matches SELECTORS.profile.headline[0] = ".text-body-medium.break-words" -->
+  <div class="text-body-medium break-words">Senior Engineer at Acme Corp</div>
+
+  <!-- Location: matches SELECTORS.profile.location[0] -->
+  <span class="text-body-small inline t-black--light break-words">San Francisco, CA</span>
+
+  <!-- Avatar: matches img.pv-top-card-profile-picture__image--show (Dex selector) -->
+  <img class="pv-top-card-profile-picture__image--show" src="https://media.licdn.com/test-photo.jpg" alt="Test User" />
+
+  <!-- Company: matches [aria-label^="Current company:"] > span (Dex selector) -->
+  <button aria-label="Current company: Acme Corp"><span>Acme Corp</span></button>
+
+  <!-- Education: matches [aria-label^="Education:"] > span (Dex selector) -->
+  <button aria-label="Education: State University"><span>State University</span></button>
+
+  <!-- Experience section: matches SELECTORS.profile.experienceSection[0] = "section#experience" -->
+  <section id="experience" aria-label="Experience">
+    <ul>
+      <li class="artdeco-list__item">
+        <span aria-hidden="true">Senior Engineer</span>
+        <span class="t-14 t-normal"><span aria-hidden="true">Acme Corp</span></span>
+        <span class="t-14 t-normal t-black--light"><span aria-hidden="true">Jan 2022 – Present</span></span>
+      </li>
+      <li class="artdeco-list__item">
+        <span aria-hidden="true">Software Engineer</span>
+        <span class="t-14 t-normal"><span aria-hidden="true">Beta Inc</span></span>
+        <span class="t-14 t-normal t-black--light"><span aria-hidden="true">Jun 2020 – Dec 2021</span></span>
+      </li>
+    </ul>
+  </section>
+
+  <!-- Education section: matches SELECTORS.profile.educationSection[0] = "section#education" -->
+  <section id="education" aria-label="Education">
+    <ul>
+      <li class="artdeco-list__item">
+        <span aria-hidden="true">State University</span>
+        <span class="t-14 t-normal"><span aria-hidden="true">BSc, Computer Science</span></span>
+        <span class="t-14 t-normal t-black--light"><span aria-hidden="true">2016 – 2020</span></span>
+      </li>
+    </ul>
+  </section>
+</body>
+</html>

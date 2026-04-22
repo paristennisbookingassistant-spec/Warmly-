@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useChat } from "@/hooks/useChat";
 import SessionSidebar from "@/components/chat/SessionSidebar";
 import MessageBubble from "@/components/chat/MessageBubble";
@@ -14,7 +15,15 @@ const EXAMPLE_OPENERS = [
   { label: "Find new contacts", prompt: "Help me discover relevant contacts for my networking goals." },
 ];
 
-export default function ChatPage() {
+export default function ChatPageWrapper() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>}>
+      <ChatPage />
+    </Suspense>
+  );
+}
+
+function ChatPage() {
   const {
     conversations,
     activeConversation,
@@ -25,11 +34,27 @@ export default function ChatPage() {
     createError,
     selectConversation,
     createConversation,
+    renameConversation,
+    deleteConversation,
     sendMessage,
     artifactsForMessage,
   } = useChat();
 
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+
+  const searchParams = useSearchParams();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const contactHandled = useRef(false);
+
+  // Handle ?contact=ID param — open/create a session for this contact
+  useEffect(() => {
+    const contactId = searchParams.get("contact");
+    if (contactId && !isLoadingConversations && !contactHandled.current) {
+      contactHandled.current = true;
+      createConversation(contactId);
+    }
+  }, [searchParams, isLoadingConversations, createConversation]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -46,7 +71,8 @@ export default function ChatPage() {
           conversations={conversations}
           activeConversationId={activeConversation?.id ?? null}
           onSelectConversation={selectConversation}
-          onNewConversation={createConversation}
+          onNewConversation={() => createConversation()}
+          onDeleteConversation={deleteConversation}
           isLoading={isLoadingConversations}
         />
       </div>
@@ -59,9 +85,35 @@ export default function ChatPage() {
             <div className="px-6 py-4 border-b border-slate-100 flex-shrink-0 bg-white">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="font-semibold text-gray-900 text-sm">
-                    {activeConversation.title}
-                  </h2>
+                  {isEditingTitle ? (
+                    <input
+                      autoFocus
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      onBlur={() => {
+                        if (editTitle.trim() && editTitle !== activeConversation.title) {
+                          renameConversation(activeConversation.id, editTitle.trim());
+                        }
+                        setIsEditingTitle(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); }
+                        if (e.key === "Escape") { setIsEditingTitle(false); }
+                      }}
+                      className="font-semibold text-gray-900 text-sm bg-transparent border-b border-blue-400 outline-none w-full"
+                    />
+                  ) : (
+                    <h2
+                      className="font-semibold text-gray-900 text-sm cursor-pointer hover:text-blue-600 transition-colors"
+                      onClick={() => {
+                        setEditTitle(activeConversation.title);
+                        setIsEditingTitle(true);
+                      }}
+                      title="Click to rename"
+                    >
+                      {activeConversation.title}
+                    </h2>
+                  )}
                   <p className="text-xs text-gray-400 mt-0.5 capitalize">
                     {activeConversation.type === "contact_session"
                       ? "Contact session"

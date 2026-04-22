@@ -56,11 +56,28 @@ export function useContacts() {
     }
   }, [artifactsByContact]);
 
+  const deleteContact = useCallback(async (contactId: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/contacts/${contactId}`, { method: "DELETE" });
+      if (!res.ok) return false;
+      setContacts((prev) => prev.filter((c) => c.id !== contactId));
+      setArtifactsByContact((prev) => {
+        const next = { ...prev };
+        delete next[contactId];
+        return next;
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   return {
     contacts,
     isLoading,
     getContact,
     getArtifactsForContact,
     loadArtifactsForContact,
+    deleteContact,
   };
 }

@@ -9,7 +9,8 @@ import type {
   ScoringPromptInput,
   ScoringResponse,
 } from "@/types/ai";
-import { anthropic, getModelId, MAX_TOKENS } from "./models";
+import { MAX_TOKENS } from "./models";
+import { callMiniMax } from "./minimax";
 
 /**
  * Scores a contact against the user's profile using the PRD scoring rubric.
@@ -23,15 +24,12 @@ export async function scoreContact(
 ): Promise<ScoringResponse> {
   const prompt = buildScoringPrompt(input);
 
-  const response = await anthropic.messages.create({
-    model: getModelId(ModelTier.FAST),
-    max_tokens: MAX_TOKENS[ModelTier.FAST],
-    system: SCORING_SYSTEM_PROMPT,
-    messages: [{ role: "user", content: prompt }],
-  });
+  const response = await callMiniMax(
+    [{ role: "user", content: prompt }],
+    { systemPrompt: SCORING_SYSTEM_PROMPT, maxTokens: MAX_TOKENS[ModelTier.FAST] }
+  );
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.content;
 
   // Extract JSON from the response (model may include surrounding text)
   const jsonMatch = text.match(/\{[\s\S]*\}/);

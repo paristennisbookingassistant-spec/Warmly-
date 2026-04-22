@@ -248,6 +248,8 @@ export interface Contact {
   discovery_session_id: string | null;
   /** User's own free-text annotations */
   notes: string | null;
+  /** Profile photo URL — populated by extension or enrichment */
+  avatar_url: string | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,10 +1,10 @@
 # Product Requirements Document (PRD)
 # AI Networking Coach — MVP
 
-**Version:** 1.1 (post pressure-test update)
+**Version:** 1.2 (relationship science + Phase 2 roadmap update)
 **Author:** Liyang Guo
-**Date:** March 31, 2026
-**Status:** Draft — Revised after Gemini/Copilot/ChatGPT review
+**Date:** April 3, 2026
+**Status:** Draft — Updated with scientific positioning and Phase 2 social intelligence features
 **Target Development Start:** April 2026
 **Target MVP Launch:** June 2026 (INSEAD beta)
 
@@ -19,6 +19,20 @@ Build an AI-powered networking coach that guides professionals through the entir
 Networking is the single most important skill for career success — and the most unequally distributed. Some people are naturally gifted: they intuitively remember to follow up, know exactly what to say, and sense when to reach out. Everyone else faces an invisible barrier — they know networking matters, but the anxiety of doing it poorly keeps them from trying.
 
 This product is the great equalizer. For the naturally gifted networker, it amplifies their capability — handling the tedious searching, tracking, and scheduling so they can focus on the human connection. For everyone else, it acts as a personal coach, guiding them through every step: who to talk to, what to say, how to prepare, and when to follow up. The goal is not to turn people into calculating optimizers of relationships — it's to give everyone access to the social intelligence that the best networkers have intuitively.
+
+### 1.2a Scientific Foundation — Built on Relationship Science, Not Guesswork
+
+This product is grounded in established principles from social network science and relationship psychology. Understanding these principles explains *why* the AI coaching decisions are made — and gives the product credibility beyond generic AI claims.
+
+**Homophily** (McPherson, Smith-Lovin & Cook, 2001): The most replicated finding in social network science. People are dramatically more likely to form relationships with others who share background, values, experiences, or current life stage. "Birds of a feather flock together" is not casual wisdom — it's a robust empirical principle. In practice: a pivot from consulting to tech is a stronger connection anchor than a shared alma mater. Both sides having navigated an unconventional career path creates genuine rapport that generic outreach cannot replicate. The AI actively surfaces these homophily signals in every interaction.
+
+**Weak Ties Theory** (Granovetter, 1973): Counter-intuitively, weak connections (acquaintances, 2nd-degree connections, people you've met once) are more valuable for career opportunities than strong ties (close friends). Strong ties share your information network; weak ties bridge you to entirely new networks. This explains why our discovery engine deliberately prioritizes 2nd-degree connections and alumni you've never met — they provide access to information and opportunities your existing network cannot.
+
+**Social Capital & Network Position**: People whose networks bridge disconnected clusters (brokers) consistently outperform those with dense but redundant networks. The product's discovery and scoring logic is designed to identify contacts who would expand your network's structural coverage — not just add more people from the same circles.
+
+**Practical implication for the product:** The AI doesn't just match on keywords. It reasons about shared career trajectories, common transitions, aligned backgrounds, and timing ("they're in their first year at a new role — high openness to new relationships"). When surfacing why to contact someone or how to open a conversation, the AI makes the homophily signal explicit to the user: *"You both made a non-traditional pivot into consulting from engineering — that shared experience is a strong opening."* This is coaching grounded in science, not template-filling.
+
+**Positioning note:** "Scientifically backed" should be embedded in how the product works, not leaned on as the primary marketing message. Users buy outcomes ("I got the coffee chat I wanted"), not credentials. The science is the explanation for why our AI advice works better than generic ChatGPT prompts — it's a credibility layer for analytical users, not the hook.
 
 ### 1.3 Working Name
 TBD — Candidates under consideration: Orbit, Kova, Nexus, Warmly, Weave, Relayo
@@ -1214,6 +1228,25 @@ Trigger: User says "Let's work on outreach to Marie Chen" in General Chat,
 - [ ] Feedback collection system (in-app surveys, NPS)
 - [ ] Performance optimization
 - [ ] Iterate based on feedback
+
+---
+
+### Product v2 Roadmap — Social Intelligence Expansion
+
+The core principle driving v2 is **richer homophily signal detection**. The MVP identifies shared background from LinkedIn data (career trajectory, education, current role). v2 expands the signal surface to build a more complete picture of a contact — enabling the AI to find connection points that go beyond professional identity.
+
+**v2.1 — Professional Social Signals**
+- **Twitter/X and Substack monitoring**: For contacts who publish publicly (founders, investors, executives, thought leaders), the AI reads their recent posts and surfaces relevant conversation hooks. Example: *"She posted about supply chain resilience last week — this aligns with your thesis on operations efficiency. Lead with that angle."* These platforms are professionally intended and publicly accessible, making them the right starting point.
+- **Company intelligence upgrade**: Deeper integration — funding announcements, leadership changes, product launches — to make meeting prep more timely and specific.
+
+**v2.2 — Enriched Personal Context (Opt-In)**
+- **User-assisted profile enrichment**: After saving a contact, users can optionally add social context they've noticed (Instagram hobbies, a recent trip they mentioned, interests they referenced in conversation). The AI incorporates these into homophily analysis and coaching.
+- **Shared interest identification**: The AI explicitly names the strongest homophily signals for each contact — not just professional overlap but shared values, career inflection points, and life stage alignment. Example: *"You're both in your early 30s navigating the founder/MBA transition — that's a rare shared experience that creates immediate trust."*
+- **Note on automated Instagram/personal social scraping**: Deliberately NOT included. People don't expect personal social feeds to be used for professional analysis, and Instagram's technical protections make automated access unreliable. The right approach is user-provided context, not automated extraction. If this changes (user explicitly links a contact's public profile), it can be reconsidered with explicit user consent flows.
+
+**v2.3 — Network Structure Analysis**
+- **Bridge identification**: The AI identifies contacts who would connect you to currently unreachable parts of your network (weak ties theory — Granovetter 1973), not just people similar to you.
+- **Network gap analysis**: Visualize your current network's structural coverage and identify which types of contacts would most expand your reach.
 
 ---
 

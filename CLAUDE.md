@@ -108,10 +108,12 @@ ai-networking-coach/
 
 ### Design & UI Quality
 - This prototype MUST look polished and professional. We're showing it to testers and IVC judges.
-- Use a consistent design system: rounded corners, subtle shadows, proper spacing.
-- Color palette: dark sidebar (#1a1a2e), white content area, accent blue (#3b82f6), success green, warning amber.
-- Typography: Inter or system font stack. Clear hierarchy with font sizes.
-- Animations: subtle transitions on hover/focus. No jarring movements.
+- **BEFORE any frontend work**, read `.claude/skills/design-references/SKILL.md` for our complete design system (colors, typography, spacing, component patterns).
+- **Design reference files** in `.claude/skills/design-references/`: LINEAR_DESIGN.md (sidebar/nav patterns), NOTION_DESIGN.md (content areas/cards), SUPABASE_DESIGN.md (dashboards/tables), VERCEL_DESIGN.md (status/deploy UI). Read the relevant reference when building that type of component.
+- Color palette: dark sidebar (#1a1a2e), white content area, accent blue (#3b82f6), success green (#10b981), warning amber (#f59e0b), error red (#ef4444).
+- Typography: Inter or system font stack. Clear hierarchy with font sizes. Negative letter-spacing on headings 24px+.
+- Borders: whisper-thin (1px, rgba(0,0,0,0.08) on light, rgba(255,255,255,0.06) on dark). No heavy borders.
+- Animations: subtle transitions on hover/focus (150ms ease). No jarring movements.
 - Responsive: must work on laptop screens (1280px+). Mobile is v2.
 - Refer to the frontend-design plugin and gstack /design-review for quality standards.
 
@@ -193,23 +195,3 @@ If this command fails, do NOT commit. Fix first.
 - Do NOT add features not in the PRD without explicit approval.
 - Do NOT use CSS frameworks other than Tailwind.
 - Do NOT skip TypeScript types for "speed." Types prevent bugs.
-
-## Skill routing
-
-When the user's request matches an available skill, ALWAYS invoke it using the Skill
-tool as your FIRST action. Do NOT answer directly, do NOT use other tools first.
-The skill has specialized workflows that produce better results than ad-hoc answers.
-
-Key routing rules:
-- Product ideas, "is this worth building", brainstorming → invoke office-hours
-- Bugs, errors, "why is this broken", 500 errors → invoke investigate
-- Ship, deploy, push, create PR → invoke ship
-- QA, test the site, find bugs → invoke qa
-- Code review, check my diff → invoke review
-- Update docs after shipping → invoke document-release
-- Weekly retro → invoke retro
-- Design system, brand → invoke design-consultation
-- Visual audit, design polish → invoke design-review
-- Architecture review → invoke plan-eng-review
-- Save progress, checkpoint, resume → invoke checkpoint
-- Code quality, health check → invoke health

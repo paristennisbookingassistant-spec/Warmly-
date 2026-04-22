@@ -51,11 +51,10 @@ export default function ContactsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name,
-          linkedin_url: form.linkedin_url || null,
-          company: form.company || null,
-          current_title: form.current_title || null,
+          ...(form.linkedin_url && { linkedin_url: form.linkedin_url }),
+          ...(form.company && { company: form.company }),
+          ...(form.current_title && { current_title: form.current_title }),
           source: "manual_chat",
-          status: "discovered",
         }),
       });
       if (!res.ok) {
@@ -75,15 +74,15 @@ export default function ContactsPage() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
+    <div className="flex flex-col h-full bg-[#fafafa]">
       {/* Page header */}
-      <div className="bg-white border-b border-slate-100 px-8 py-5 flex-shrink-0">
+      <div className="bg-white border-b border-black/[0.06] px-8 py-5 flex-shrink-0">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold text-gray-900 tracking-tight">
+            <h1 className="text-xl font-semibold text-[#171717] tracking-tight">
               Contacts
             </h1>
-            <p className="text-sm text-gray-500 mt-0.5">
+            <p className="text-sm text-[#525252] mt-0.5">
               {isLoading
                 ? "Loading..."
                 : contacts.length === 0
@@ -163,6 +162,9 @@ export default function ContactsPage() {
               </svg>
             }
           />
+          <p className="text-xs text-[#525252] bg-black/[0.03] border border-black/[0.06] rounded-lg px-3 py-2 -mt-1">
+            For full profile details (experience, education, photo), visit this profile in Chrome and use the extension&apos;s &quot;Save this profile&quot; button.
+          </p>
           <div className="grid grid-cols-2 gap-3">
             <Input
               label="Company"

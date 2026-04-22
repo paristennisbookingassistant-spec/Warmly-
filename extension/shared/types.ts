@@ -30,6 +30,8 @@ export interface ExtractedProfile {
   previous_roles: ExtractedRole[];
   education: ExtractedEducation[];
   location: string;
+  /** LinkedIn profile photo URL, if visible on the page */
+  avatar?: string;
   /** Number of shared connections shown on the profile */
   mutual_connections: number;
   captured_at: string;
@@ -98,6 +100,10 @@ export interface StartDiscoveryPayload {
   session_id: string;
   target_companies: string[];
   max_profiles: number;
+  /** LinkedIn numeric company ID for structured filter search */
+  company_id?: string;
+  /** LinkedIn numeric school ID (e.g. INSEAD = 5176) */
+  school_id?: string;
 }
 
 export interface ProfileExtractedPayload {
