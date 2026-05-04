@@ -245,7 +245,7 @@ async function triggerRescore(
       scores: score.scores,
       recommendation_reason: score.recommendation_reason,
       suggested_hook: score.suggested_hook,
-      model_used: "claude-haiku-4-5",
+      model_used: "MiniMax-M2.7-highspeed",
     });
   } catch (err) {
     console.error("Re-score failed for contact", contactId, err);

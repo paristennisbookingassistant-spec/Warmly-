@@ -17,12 +17,9 @@ vi.mock("@/lib/supabase/server", () => ({
   getSupabaseServerClient: vi.fn().mockResolvedValue(mockSupabase),
 }));
 
-vi.mock("@anthropic-ai/sdk", () => {
-  function AnthropicMock() {
-    return { messages: { create: vi.fn() } };
-  }
-  return { default: AnthropicMock };
-});
+vi.mock("@/lib/ai/minimax", () => ({
+  callMiniMax: vi.fn(),
+}));
 
 const { GET: getGoals, POST: postGoal } = await import("@/app/api/goals/route");
 const { GET: getGoal, PUT: putGoal, DELETE: deleteGoal } = await import(

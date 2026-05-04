@@ -21,7 +21,7 @@ vi.mock("@/lib/ai/coaching", () => ({
   processCoachingMessage: vi.fn().mockResolvedValue({
     agent_message: "Great question! Let me help you with that.",
     trigger_artifact: undefined,
-    model_used: "claude-haiku-4-5",
+    model_used: "MiniMax-M2.7-highspeed",
     tokens_input: 500,
     tokens_output: 100,
   }),
@@ -30,7 +30,7 @@ vi.mock("@/lib/ai/coaching", () => ({
 vi.mock("@/lib/ai/generation", () => ({
   generateArtifact: vi.fn().mockResolvedValue({
     content: { message: "Hi Marie!", hook: "INSEAD", char_count: 50 },
-    model_used: "claude-haiku-4-5",
+    model_used: "MiniMax-M2.7-highspeed",
     tokens_input: 400,
     tokens_output: 80,
   }),
@@ -51,12 +51,9 @@ vi.mock("@/lib/search", () => ({
   }),
 }));
 
-vi.mock("@anthropic-ai/sdk", () => {
-  function AnthropicMock() {
-    return { messages: { create: vi.fn() } };
-  }
-  return { default: AnthropicMock };
-});
+vi.mock("@/lib/ai/minimax", () => ({
+  callMiniMax: vi.fn(),
+}));
 
 const { GET: getConversations, POST: postConversations } = await import("@/app/api/conversations/route");
 const { GET: getConversation, PUT: putConversation, DELETE: deleteConversation } = await import(
@@ -268,30 +265,28 @@ describe("POST /api/conversations/[id]/messages", () => {
       created_at: "2026-04-01T10:00:01Z",
     };
 
-    // Set up from() calls in order
-    mockSupabase.from.mockImplementation((table: string) => {
-      if (table === "conversations") {
-        return makeQueryChain({ data: mockConversation, error: null });
-      }
-      if (table === "users") {
-        return makeQueryChain({ data: mockUserProfile, error: null });
-      }
-      if (table === "conversation_messages") {
-        // Messages fetch, user insert, agent insert — return appropriate mocks
-        const chain = makeQueryChain({ data: [], error: null, count: 0 });
-        (chain.range as ReturnType<typeof vi.fn>)
-          .mockResolvedValueOnce({ data: [], error: null, count: 0 });
-        // single() for inserts — alternate between user and agent messages
-        (chain.single as ReturnType<typeof vi.fn>)
-          .mockResolvedValueOnce({ data: mockUserMsg, error: null })
-          .mockResolvedValueOnce({ data: mockAgentMsg, error: null });
-        return chain;
-      }
-      if (table === "artifacts") {
-        return makeQueryChain({ data: [], error: null, count: 0 });
-      }
-      return makeQueryChain({ data: null, error: null });
-    });
+    // Build the conversation_messages chain up front so single() can be queued
+    const msgChain = makeQueryChain({ data: [], error: null, count: 0 });
+    (msgChain.range as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ data: [], error: null, count: 0 });
+    (msgChain.single as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ data: mockUserMsg, error: null })
+      .mockResolvedValueOnce({ data: mockAgentMsg, error: null });
+
+    // Set up from() calls using mockReturnValueOnce to control ordering:
+    // 1st call: conversations (fetch single conv by id)
+    // 2nd call: conversations (rate-limit array query — needs array data)
+    // 3rd call: conversation_messages (rate-limit count query)
+    // 4th call: users (load user profile)
+    // 5th call: conversation_messages (recent messages + inserts — re-use msgChain)
+    // 6th call: artifacts (artifact metadata)
+    mockSupabase.from
+      .mockReturnValueOnce(makeQueryChain({ data: mockConversation, error: null }))
+      .mockReturnValueOnce(makeQueryChain({ data: [{ id: mockConversation.id }], error: null }))
+      .mockReturnValueOnce(makeQueryChain({ data: null, error: null, count: 0 }))
+      .mockReturnValueOnce(makeQueryChain({ data: mockUserProfile, error: null }))
+      .mockReturnValueOnce(msgChain)
+      .mockReturnValue(makeQueryChain({ data: [], error: null, count: 0 }));
 
     const request = makeRequest(
       "POST",
