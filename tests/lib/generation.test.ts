@@ -1,7 +1,7 @@
 /**
  * tests/lib/generation.test.ts
  * Unit tests for artifact generation.
- * Tests all 6 artifact types with mocked Anthropic responses.
+ * Tests all 6 artifact types with mocked MiniMax responses.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -9,17 +9,14 @@ import { ModelTier } from "@/types/ai";
 import type { ArtifactType } from "@/types/artifacts";
 
 // ---------------------------------------------------------------------------
-// Mock the Anthropic SDK
+// Mock callMiniMax
 // ---------------------------------------------------------------------------
 
-const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }));
+const { mockCallMiniMax } = vi.hoisted(() => ({ mockCallMiniMax: vi.fn() }));
 
-vi.mock("@anthropic-ai/sdk", () => {
-  function AnthropicMock() {
-    return { messages: { create: mockCreate } };
-  }
-  return { default: AnthropicMock };
-});
+vi.mock("@/lib/ai/minimax", () => ({
+  callMiniMax: mockCallMiniMax,
+}));
 
 const { generateArtifact } = await import("@/lib/ai/generation");
 
@@ -109,10 +106,10 @@ const mockContentByType: Record<string, object> = {
   },
 };
 
-function mockApiResponse(artifactType: string) {
+function mockMiniMaxResponse(artifactType: string) {
   return {
-    content: [{ type: "text", text: JSON.stringify(mockContentByType[artifactType]) }],
-    usage: { input_tokens: 800, output_tokens: 300 },
+    content: JSON.stringify(mockContentByType[artifactType]),
+    usage: { prompt_tokens: 800, completion_tokens: 300, total_tokens: 1100 },
   };
 }
 
@@ -125,8 +122,8 @@ describe("generateArtifact()", () => {
     vi.clearAllMocks();
   });
 
-  it("generates a connection_note with Haiku model", async () => {
-    mockCreate.mockResolvedValueOnce(mockApiResponse("connection_note"));
+  it("generates a connection_note with FAST model tier", async () => {
+    mockCallMiniMax.mockResolvedValueOnce(mockMiniMaxResponse("connection_note"));
 
     const result = await generateArtifact({
       artifact_type: "connection_note",
@@ -139,8 +136,8 @@ describe("generateArtifact()", () => {
     expect(result.tokens_output).toBe(300);
   });
 
-  it("generates an outreach_draft with Sonnet model", async () => {
-    mockCreate.mockResolvedValueOnce(mockApiResponse("outreach_draft"));
+  it("generates an outreach_draft with REASONING model tier", async () => {
+    mockCallMiniMax.mockResolvedValueOnce(mockMiniMaxResponse("outreach_draft"));
 
     const result = await generateArtifact({
       artifact_type: "outreach_draft",
@@ -151,8 +148,8 @@ describe("generateArtifact()", () => {
     expect(result.content).toMatchObject({ message: expect.any(String), tone: expect.any(String) });
   });
 
-  it("generates a meeting_prep with Sonnet model", async () => {
-    mockCreate.mockResolvedValueOnce(mockApiResponse("meeting_prep"));
+  it("generates a meeting_prep with REASONING model tier", async () => {
+    mockCallMiniMax.mockResolvedValueOnce(mockMiniMaxResponse("meeting_prep"));
 
     const result = await generateArtifact({
       artifact_type: "meeting_prep",
@@ -168,8 +165,8 @@ describe("generateArtifact()", () => {
     });
   });
 
-  it("generates meeting_notes with Haiku model", async () => {
-    mockCreate.mockResolvedValueOnce(mockApiResponse("meeting_notes"));
+  it("generates meeting_notes with FAST model tier", async () => {
+    mockCallMiniMax.mockResolvedValueOnce(mockMiniMaxResponse("meeting_notes"));
 
     const result = await generateArtifact({
       artifact_type: "meeting_notes",
@@ -183,8 +180,8 @@ describe("generateArtifact()", () => {
     });
   });
 
-  it("generates an action_plan with Sonnet model", async () => {
-    mockCreate.mockResolvedValueOnce(mockApiResponse("action_plan"));
+  it("generates an action_plan with REASONING model tier", async () => {
+    mockCallMiniMax.mockResolvedValueOnce(mockMiniMaxResponse("action_plan"));
 
     const result = await generateArtifact({
       artifact_type: "action_plan",
@@ -198,8 +195,8 @@ describe("generateArtifact()", () => {
     });
   });
 
-  it("generates a follow_up_draft with Haiku by default", async () => {
-    mockCreate.mockResolvedValueOnce(mockApiResponse("follow_up_draft"));
+  it("generates a follow_up_draft with FAST tier by default", async () => {
+    mockCallMiniMax.mockResolvedValueOnce(mockMiniMaxResponse("follow_up_draft"));
 
     const result = await generateArtifact({
       artifact_type: "follow_up_draft",
@@ -209,8 +206,8 @@ describe("generateArtifact()", () => {
     expect(result.model_used).toBe(ModelTier.FAST);
   });
 
-  it("upgrades follow_up_draft to Sonnet when force_reasoning_model is true", async () => {
-    mockCreate.mockResolvedValueOnce(mockApiResponse("follow_up_draft"));
+  it("upgrades follow_up_draft to REASONING when force_reasoning_model is true", async () => {
+    mockCallMiniMax.mockResolvedValueOnce(mockMiniMaxResponse("follow_up_draft"));
 
     const result = await generateArtifact({
       artifact_type: "follow_up_draft",
@@ -222,7 +219,7 @@ describe("generateArtifact()", () => {
   });
 
   it("includes user_instructions in the prompt when provided", async () => {
-    mockCreate.mockResolvedValueOnce(mockApiResponse("connection_note"));
+    mockCallMiniMax.mockResolvedValueOnce(mockMiniMaxResponse("connection_note"));
 
     await generateArtifact({
       artifact_type: "connection_note",
@@ -230,13 +227,13 @@ describe("generateArtifact()", () => {
       user_instructions: "Make it very concise and mention INSEAD",
     });
 
-    const callArgs = mockCreate.mock.calls[0][0];
-    const userPrompt = callArgs.messages[0].content as string;
+    const [messages] = mockCallMiniMax.mock.calls[0];
+    const userPrompt = messages[0].content as string;
     expect(userPrompt).toContain("Make it very concise and mention INSEAD");
   });
 
   it("includes user writing style in system prompt when user_memory is set", async () => {
-    mockCreate.mockResolvedValueOnce(mockApiResponse("outreach_draft"));
+    mockCallMiniMax.mockResolvedValueOnce(mockMiniMaxResponse("outreach_draft"));
 
     const contextWithMemory = {
       ...baseContext,
@@ -269,14 +266,14 @@ describe("generateArtifact()", () => {
       context: contextWithMemory,
     });
 
-    const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs.system).toContain("casual");
+    const [, options] = mockCallMiniMax.mock.calls[0];
+    expect(options.systemPrompt).toContain("casual");
   });
 
   it("throws when model returns non-JSON response", async () => {
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: "Here is a great connection note!" }],
-      usage: { input_tokens: 200, output_tokens: 50 },
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: "Here is a great connection note!",
+      usage: { prompt_tokens: 200, completion_tokens: 50, total_tokens: 250 },
     });
 
     await expect(
@@ -285,7 +282,7 @@ describe("generateArtifact()", () => {
   });
 
   it("includes company intel in prompt when provided", async () => {
-    mockCreate.mockResolvedValueOnce(mockApiResponse("meeting_prep"));
+    mockCallMiniMax.mockResolvedValueOnce(mockMiniMaxResponse("meeting_prep"));
 
     await generateArtifact({
       artifact_type: "meeting_prep",
@@ -295,8 +292,8 @@ describe("generateArtifact()", () => {
       },
     });
 
-    const callArgs = mockCreate.mock.calls[0][0];
-    const userPrompt = callArgs.messages[0].content as string;
+    const [messages] = mockCallMiniMax.mock.calls[0];
+    const userPrompt = messages[0].content as string;
     expect(userPrompt).toContain("$2.85B fund");
   });
 });

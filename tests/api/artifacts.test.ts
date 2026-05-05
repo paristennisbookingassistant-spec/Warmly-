@@ -22,12 +22,9 @@ vi.mock("@/lib/ai/context", () => ({
   createEmptyUserMemory: vi.fn(),
 }));
 
-vi.mock("@anthropic-ai/sdk", () => {
-  function AnthropicMock() {
-    return { messages: { create: vi.fn() } };
-  }
-  return { default: AnthropicMock };
-});
+vi.mock("@/lib/ai/minimax", () => ({
+  callMiniMax: vi.fn(),
+}));
 
 const { GET: getArtifacts, POST: postArtifact } = await import("@/app/api/artifacts/route");
 const { GET: getArtifact, PUT: putArtifact, DELETE: deleteArtifact } = await import(

@@ -1,24 +1,21 @@
 /**
  * tests/lib/scoring.test.ts
  * Unit tests for the AI scoring engine.
- * Mocks the Anthropic SDK to avoid real API calls.
+ * Mocks callMiniMax to avoid real API calls.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SCORING_RUBRIC } from "@/types/ai";
 
 // ---------------------------------------------------------------------------
-// Mock the Anthropic SDK before importing scoring
+// Mock callMiniMax before importing scoring
 // ---------------------------------------------------------------------------
 
-const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }));
+const { mockCallMiniMax } = vi.hoisted(() => ({ mockCallMiniMax: vi.fn() }));
 
-vi.mock("@anthropic-ai/sdk", () => {
-  function AnthropicMock() {
-    return { messages: { create: mockCreate } };
-  }
-  return { default: AnthropicMock };
-});
+vi.mock("@/lib/ai/minimax", () => ({
+  callMiniMax: mockCallMiniMax,
+}));
 
 // Import after mocking
 const { scoreContact } = await import("@/lib/ai/scoring");
@@ -120,9 +117,9 @@ describe("scoreContact()", () => {
   });
 
   it("returns a valid ScoringResponse on success", async () => {
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: JSON.stringify(mockValidScoringResponse) }],
-      usage: { input_tokens: 500, output_tokens: 150 },
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: JSON.stringify(mockValidScoringResponse),
+      usage: { prompt_tokens: 500, completion_tokens: 150, total_tokens: 650 },
     });
 
     const result = await scoreContact(mockScoringInput);
@@ -141,37 +138,35 @@ describe("scoreContact()", () => {
     expect(result.suggested_hook).toBeTruthy();
   });
 
-  it("calls the Anthropic API with Haiku model", async () => {
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: JSON.stringify(mockValidScoringResponse) }],
-      usage: { input_tokens: 500, output_tokens: 150 },
+  it("calls callMiniMax once for scoring", async () => {
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: JSON.stringify(mockValidScoringResponse),
+      usage: { prompt_tokens: 500, completion_tokens: 150, total_tokens: 650 },
     });
 
     await scoreContact(mockScoringInput);
 
-    expect(mockCreate).toHaveBeenCalledOnce();
-    const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs.model).toContain("haiku");
+    expect(mockCallMiniMax).toHaveBeenCalledOnce();
   });
 
   it("includes user profile and contact in the prompt", async () => {
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: JSON.stringify(mockValidScoringResponse) }],
-      usage: { input_tokens: 500, output_tokens: 150 },
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: JSON.stringify(mockValidScoringResponse),
+      usage: { prompt_tokens: 500, completion_tokens: 150, total_tokens: 650 },
     });
 
     await scoreContact(mockScoringInput);
 
-    const callArgs = mockCreate.mock.calls[0][0];
-    const userPrompt = callArgs.messages[0].content as string;
+    const [messages] = mockCallMiniMax.mock.calls[0];
+    const userPrompt = messages[0].content as string;
     expect(userPrompt).toContain("Marie Chen");
     expect(userPrompt).toContain("INSEAD");
   });
 
   it("throws when model returns non-JSON response", async () => {
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: "I cannot score this contact." }],
-      usage: { input_tokens: 100, output_tokens: 20 },
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: "I cannot score this contact.",
+      usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
     });
 
     await expect(scoreContact(mockScoringInput)).rejects.toThrow(
@@ -182,9 +177,9 @@ describe("scoreContact()", () => {
   it("handles tier assignment correctly", async () => {
     // Test tier 2 (score 6.5)
     const tier2Response = { ...mockValidScoringResponse, overall_score: 6.5, tier: 2 as const };
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: JSON.stringify(tier2Response) }],
-      usage: { input_tokens: 500, output_tokens: 150 },
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: JSON.stringify(tier2Response),
+      usage: { prompt_tokens: 500, completion_tokens: 150, total_tokens: 650 },
     });
 
     const result = await scoreContact(mockScoringInput);
@@ -194,9 +189,9 @@ describe("scoreContact()", () => {
 
   it("extracts JSON even when surrounded by extra text", async () => {
     const responseWithPreamble = `Here is my analysis:\n${JSON.stringify(mockValidScoringResponse)}\n\nI hope this helps!`;
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: responseWithPreamble }],
-      usage: { input_tokens: 500, output_tokens: 200 },
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: responseWithPreamble,
+      usage: { prompt_tokens: 500, completion_tokens: 200, total_tokens: 700 },
     });
 
     const result = await scoreContact(mockScoringInput);

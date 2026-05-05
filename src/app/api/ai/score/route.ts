@@ -1,7 +1,7 @@
 /**
  * POST /api/ai/score
  * Scores a contact against the authenticated user's profile.
- * Uses Claude Haiku — fast and cheap for batch scoring.
+ * Uses MiniMax FAST tier — fast and cheap for batch scoring.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -102,7 +102,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   logAiCall({
     route: "POST /api/ai/score",
-    model: "claude-haiku-4-5",
+    model: "MiniMax-M2.7-highspeed",
     tokensInput: 0, // scoreContact doesn't return token counts yet
     tokensOutput: 0,
     latencyMs: Date.now() - start,
@@ -132,7 +132,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     scores: score.scores,
     recommendation_reason: score.recommendation_reason,
     suggested_hook: score.suggested_hook,
-    model_used: "claude-haiku-4-5",
+    model_used: "MiniMax-M2.7-highspeed",
     scored_at: scoredAt,
   });
 

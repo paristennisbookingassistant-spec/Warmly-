@@ -20,10 +20,10 @@ import type {
 // ---------------------------------------------------------------------------
 
 export enum ModelTier {
-  /** Claude Haiku — fast, cheap, used for scoring and simple tasks */
-  FAST = "claude-haiku-4-5-20251001",
-  /** Claude Sonnet — complex reasoning, used for coaching and long-form gen */
-  REASONING = "claude-sonnet-4-6",
+  /** MiniMax fast tier — used for scoring and simple tasks */
+  FAST = "MiniMax-M2.7-highspeed",
+  /** MiniMax reasoning tier — used for coaching and long-form generation */
+  REASONING = "MiniMax-M2.7-highspeed-reasoning",
 }
 
 /**

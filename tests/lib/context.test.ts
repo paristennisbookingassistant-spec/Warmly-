@@ -7,18 +7,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SUMMARIZATION_THRESHOLD, RECENT_MESSAGES_WINDOW } from "@/lib/ai/context";
 
 // ---------------------------------------------------------------------------
-// Mock the Anthropic SDK
-// vi.hoisted() ensures mockCreate is available inside the hoisted vi.mock factory
+// Mock callMiniMax
+// vi.hoisted() ensures mockCallMiniMax is available inside the hoisted vi.mock factory
 // ---------------------------------------------------------------------------
 
-const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }));
+const { mockCallMiniMax } = vi.hoisted(() => ({ mockCallMiniMax: vi.fn() }));
 
-vi.mock("@anthropic-ai/sdk", () => {
-  function AnthropicMock() {
-    return { messages: { create: mockCreate } };
-  }
-  return { default: AnthropicMock };
-});
+vi.mock("@/lib/ai/minimax", () => ({
+  callMiniMax: mockCallMiniMax,
+}));
 
 const { summarizeConversation, extractStylePreferences, createEmptyUserMemory } =
   await import("@/lib/ai/context");
@@ -72,9 +69,9 @@ describe("summarizeConversation()", () => {
   });
 
   it("returns a ConversationSummary with all required fields", async () => {
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: JSON.stringify(mockSummaryResponse) }],
-      usage: { input_tokens: 400, output_tokens: 100 },
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: JSON.stringify(mockSummaryResponse),
+      usage: { prompt_tokens: 400, completion_tokens: 100, total_tokens: 500 },
     });
 
     const result = await summarizeConversation({
@@ -91,16 +88,15 @@ describe("summarizeConversation()", () => {
     });
   });
 
-  it("uses Haiku model for summarization", async () => {
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: JSON.stringify(mockSummaryResponse) }],
-      usage: { input_tokens: 400, output_tokens: 100 },
+  it("calls callMiniMax once for summarization", async () => {
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: JSON.stringify(mockSummaryResponse),
+      usage: { prompt_tokens: 400, completion_tokens: 100, total_tokens: 500 },
     });
 
     await summarizeConversation({ messages: mockMessages, existing_summary: null });
 
-    const callArgs = mockCreate.mock.calls[0][0];
-    expect(callArgs.model).toContain("haiku");
+    expect(mockCallMiniMax).toHaveBeenCalledOnce();
   });
 
   it("merges with existing summary when provided", async () => {
@@ -112,9 +108,9 @@ describe("summarizeConversation()", () => {
       relationship_stage_changes: [],
     };
 
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: JSON.stringify(mockSummaryResponse) }],
-      usage: { input_tokens: 500, output_tokens: 150 },
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: JSON.stringify(mockSummaryResponse),
+      usage: { prompt_tokens: 500, completion_tokens: 150, total_tokens: 650 },
     });
 
     await summarizeConversation({
@@ -122,29 +118,29 @@ describe("summarizeConversation()", () => {
       existing_summary: existingSummary,
     });
 
-    const callArgs = mockCreate.mock.calls[0][0];
-    const userPrompt = callArgs.messages[0].content as string;
+    const [messages] = mockCallMiniMax.mock.calls[0];
+    const userPrompt = messages[0].content as string;
     expect(userPrompt).toContain("Previous decision");
   });
 
   it("includes all message roles in the prompt", async () => {
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: JSON.stringify(mockSummaryResponse) }],
-      usage: { input_tokens: 400, output_tokens: 100 },
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: JSON.stringify(mockSummaryResponse),
+      usage: { prompt_tokens: 400, completion_tokens: 100, total_tokens: 500 },
     });
 
     await summarizeConversation({ messages: mockMessages, existing_summary: null });
 
-    const callArgs = mockCreate.mock.calls[0][0];
-    const userPrompt = callArgs.messages[0].content as string;
+    const [messages] = mockCallMiniMax.mock.calls[0];
+    const userPrompt = messages[0].content as string;
     expect(userPrompt).toContain("user:");
     expect(userPrompt).toContain("agent:");
   });
 
   it("throws when model returns non-JSON", async () => {
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: "The conversation was about networking." }],
-      usage: { input_tokens: 100, output_tokens: 30 },
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: "The conversation was about networking.",
+      usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 },
     });
 
     await expect(
@@ -189,9 +185,9 @@ describe("extractStylePreferences()", () => {
       learning_summary: "User prefers casual tone and short messages",
     };
 
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: JSON.stringify(mockExtractResponse) }],
-      usage: { input_tokens: 300, output_tokens: 100 },
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: JSON.stringify(mockExtractResponse),
+      usage: { prompt_tokens: 300, completion_tokens: 100, total_tokens: 400 },
     });
 
     const result = await extractStylePreferences({
@@ -210,9 +206,9 @@ describe("extractStylePreferences()", () => {
       learning_summary: "No significant changes detected",
     };
 
-    mockCreate.mockResolvedValueOnce({
-      content: [{ type: "text", text: JSON.stringify(mockExtractResponse) }],
-      usage: { input_tokens: 200, output_tokens: 80 },
+    mockCallMiniMax.mockResolvedValueOnce({
+      content: JSON.stringify(mockExtractResponse),
+      usage: { prompt_tokens: 200, completion_tokens: 80, total_tokens: 280 },
     });
 
     await extractStylePreferences({
@@ -221,8 +217,8 @@ describe("extractStylePreferences()", () => {
       current_memory: null,
     });
 
-    const callArgs = mockCreate.mock.calls[0][0];
-    const prompt = callArgs.messages[0].content as string;
+    const [messages] = mockCallMiniMax.mock.calls[0];
+    const prompt = messages[0].content as string;
     expect(prompt).toContain("ORIGINAL_DRAFT_TEXT");
     expect(prompt).toContain("EDITED_VERSION_TEXT");
   });

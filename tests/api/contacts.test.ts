@@ -35,12 +35,9 @@ vi.mock("@/lib/ai/scoring", () => ({
   }),
 }));
 
-vi.mock("@anthropic-ai/sdk", () => {
-  function AnthropicMock() {
-    return { messages: { create: vi.fn() } };
-  }
-  return { default: AnthropicMock };
-});
+vi.mock("@/lib/ai/minimax", () => ({
+  callMiniMax: vi.fn(),
+}));
 
 // Import handlers after mocks
 const { GET: getContacts, POST: postContacts } = await import("@/app/api/contacts/route");
