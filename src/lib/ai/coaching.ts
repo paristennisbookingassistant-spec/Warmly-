@@ -26,8 +26,13 @@ function isStrategicCoachingRequest(message: string): boolean {
 /**
  * Detects whether the agent should trigger artifact generation based on
  * the user's message. Returns the artifact type to generate, or null.
+ *
+ * Exported so the messages route can detect the trigger BEFORE deciding
+ * whether to run a full coaching LLM call. When a trigger fires, we skip
+ * coaching entirely and let the artifact generation be the single source
+ * of truth — see Session 8 in PROJECT_MEMORY.md for why.
  */
-function detectArtifactTrigger(message: string): ArtifactType | null {
+export function detectArtifactTrigger(message: string): ArtifactType | null {
   const lower = message.toLowerCase();
   if (lower.includes("connection note") || lower.includes("connection request")) return "connection_note";
   if (lower.includes("outreach") || lower.includes("message to") || lower.includes("draft a message")) return "outreach_draft";
