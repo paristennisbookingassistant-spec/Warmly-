@@ -2,10 +2,12 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import type { Artifact } from "@/types/database";
 import { useChat } from "@/hooks/useChat";
 import SessionSidebar from "@/components/chat/SessionSidebar";
 import MessageBubble from "@/components/chat/MessageBubble";
 import ChatInput from "@/components/chat/ChatInput";
+import ArtifactDrawer from "@/components/chat/ArtifactDrawer";
 import { MessageSkeleton } from "@/components/ui/Skeleton";
 
 const EXAMPLE_OPENERS = [
@@ -38,10 +40,12 @@ function ChatPage() {
     deleteConversation,
     sendMessage,
     artifactsForMessage,
+    updateArtifact,
   } = useChat();
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState("");
+  const [openArtifact, setOpenArtifact] = useState<Artifact | null>(null);
 
   const searchParams = useSearchParams();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -181,6 +185,7 @@ function ChatPage() {
                     key={msg.id}
                     message={msg}
                     artifacts={artifactsForMessage(msg.id)}
+                    onOpenArtifact={setOpenArtifact}
                   />
                 ))
               )}
@@ -235,6 +240,16 @@ function ChatPage() {
           <EmptyState onNewConversation={createConversation} error={createError} />
         )}
       </div>
+
+      {/* Artifact drawer — opens when user clicks "Open in full" on an ArtifactCard */}
+      <ArtifactDrawer
+        artifact={openArtifact}
+        onClose={() => setOpenArtifact(null)}
+        onUpdated={(updated) => {
+          updateArtifact(updated);
+          setOpenArtifact(updated);
+        }}
+      />
     </div>
   );
 }

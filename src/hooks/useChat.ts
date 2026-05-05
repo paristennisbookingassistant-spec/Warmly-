@@ -196,6 +196,17 @@ export function useChat() {
     [messages, artifacts]
   );
 
+  /**
+   * Replace a single artifact in local state. Called by ArtifactDrawer after a
+   * successful PUT /api/artifacts/[id] (edit, mark-as-sent, finalize) so the
+   * chat stream reflects the new content/status without a full refetch.
+   */
+  const updateArtifact = useCallback((updated: Artifact) => {
+    setArtifacts((prev) =>
+      prev.map((a) => (a.id === updated.id ? updated : a))
+    );
+  }, []);
+
   return {
     conversations,
     activeConversation,
@@ -210,5 +221,6 @@ export function useChat() {
     deleteConversation,
     sendMessage,
     artifactsForMessage,
+    updateArtifact,
   };
 }
