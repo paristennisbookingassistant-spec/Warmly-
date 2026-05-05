@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useContacts } from "@/hooks/useContacts";
 import ContactGrid from "@/components/contacts/ContactGrid";
+import Today from "@/components/contacts/Today";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
@@ -73,57 +74,97 @@ export default function ContactsPage() {
     }
   }
 
+  const tierStats = useMemo(() => {
+    let a = 0;
+    let b = 0;
+    let c = 0;
+    for (const contact of contacts) {
+      if (contact.tier === 1) a++;
+      else if (contact.tier === 2) b++;
+      else if (contact.tier === 3) c++;
+    }
+    return { a, b, c, total: contacts.length };
+  }, [contacts]);
+
   return (
-    <div className="flex flex-col h-full bg-[#fafafa]">
-      {/* Page header */}
-      <div className="bg-white border-b border-black/[0.06] px-8 py-5 flex-shrink-0">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-[#171717] tracking-tight">
-              Contacts
-            </h1>
-            <p className="text-sm text-[#525252] mt-0.5">
-              {isLoading
-                ? "Loading..."
-                : contacts.length === 0
-                ? "Your network starts here"
-                : `${contacts.length} contact${contacts.length === 1 ? "" : "s"} in your network`}
-            </p>
-          </div>
+    <div className="flex flex-col h-full" style={{ background: "var(--bg)" }}>
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-6xl mx-auto px-8 py-10 space-y-10">
+          {/* Hero */}
+          <header className="flex items-end justify-between gap-6">
+            <div>
+              <p className="text-[10.5px] uppercase tracking-[0.12em] font-medium text-ink-3 mb-2">
+                Your network
+              </p>
+              <h1 className="font-display italic text-[40px] leading-[1.05] tracking-tight text-ink">
+                A deliberate network.
+              </h1>
+              {!isLoading && contacts.length > 0 && (
+                <div className="flex items-center gap-5 mt-3 text-[13px] text-ink-3">
+                  <span>
+                    <span className="text-ink-2 font-medium">{tierStats.total}</span>
+                    {" "}contact{tierStats.total === 1 ? "" : "s"}
+                  </span>
+                  {tierStats.a > 0 && (
+                    <span>
+                      <span className="text-ink-2 font-medium">{tierStats.a}</span>
+                      {" "}tier A
+                    </span>
+                  )}
+                  {tierStats.b > 0 && (
+                    <span>
+                      <span className="text-ink-2 font-medium">{tierStats.b}</span>
+                      {" "}tier B
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
 
-          <Button
-            variant="primary"
-            size="md"
-            onClick={() => setShowAddModal(true)}
-            icon={
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2.5}
-                  d="M12 4v16m8-8H4"
-                />
-              </svg>
-            }
-          >
-            Add Contact
-          </Button>
+            <Button
+              variant="primary"
+              size="md"
+              onClick={() => setShowAddModal(true)}
+              icon={
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2.5}
+                    d="M12 4v16m8-8H4"
+                  />
+                </svg>
+              }
+            >
+              Add contact
+            </Button>
+          </header>
+
+          {/* Today feed — re-warm / follow-up / reach-out */}
+          {!isLoading && (
+            <Today contacts={contacts} onOpenContact={handleViewDetail} />
+          )}
+
+          {/* All contacts */}
+          <section>
+            <div className="flex items-end justify-between mb-4">
+              <h2 className="font-display italic text-[24px] text-ink leading-tight tracking-tight">
+                Everyone
+              </h2>
+            </div>
+            <ContactGrid
+              contacts={contacts}
+              isLoading={isLoading}
+              onOpenSession={handleOpenSession}
+              onViewDetail={handleViewDetail}
+            />
+          </section>
         </div>
-      </div>
-
-      {/* Grid */}
-      <div className="flex-1 overflow-y-auto px-8 py-6">
-        <ContactGrid
-          contacts={contacts}
-          isLoading={isLoading}
-          onOpenSession={handleOpenSession}
-          onViewDetail={handleViewDetail}
-        />
       </div>
 
       {/* Add Contact Modal */}
