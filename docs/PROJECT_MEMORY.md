@@ -579,3 +579,90 @@ The prototype is built for one user (Liyang) with his actual LinkedIn account an
 
 **Future feature ideas (second priority):**
 1. **LinkedIn Chat AI Assistant (Module 10)** — Inject an AI button into LinkedIn's messaging compose area (like Dex's "D AI" button). Content script uses MutationObserver to detect `.msg-form__contenteditable`, injects button, scrapes chat history from DOM (`.msg-s-event-listitem__body`), sends to backend for LLM reply generation, inserts response via `document.execCommand('insertText')`. Proven pattern used by Dex, Reepl, and multiple open-source extensions. Would allow users to get AI-drafted replies directly inside LinkedIn without switching to our web app.
+
+### Session 8 — April 26 – May 5, 2026
+
+**Topics covered:**
+
+**Cleanup + auth recovery (April 26):**
+- Removed all Anthropic SDK references from the codebase (kept the model-tier routing constants but rewired everything through MiniMax). MiniMax is now the only LLM provider.
+- Added `/forgot-password` and `/reset-password` flow with Supabase recovery — addresses gap discovered when Liyang got locked out (no recovery flow existed).
+- All 137 tests rewired to mock `callMiniMax` instead of `@anthropic-ai/sdk`. Build clean.
+- Vercel/GitHub reconnection saga: Vercel's GitHub App had lost access to the Warmly repo, so `git push` was firing webhooks Vercel was rejecting. Reauthorized GitHub App, project picked up commits, preview deploys came back online.
+
+**Tech-partner collaboration model (April 26):**
+- Liyang recruited a tech co-founder. Agreed working agreement: PR-based GitHub flow, validation gate (tsc + build + tests) non-negotiable, conventional commits, `docs/PROJECT_MEMORY.md` as shared brain, weekly architecture sync, async daily Slack updates.
+- Ownership split: tech partner owns backend / AI engine / extension stability / Supabase / auth / deploy infra. Liyang owns product / design / prompts / GTM. Frontend is shared (Liyang prototypes with AI agents, partner refactors / hardens).
+- Co-founder sync planned for Thursday May 7 to confirm Warmly brand name, Phase split, and unblock the outreach skill port.
+
+**Warmly editorial design overhaul — Phase 1 + 2 (April 30 – May 4):**
+
+Liyang generated a new design in Claude Design (`docs/design/v2/`) — full React-style JSX prototypes with a warm/editorial aesthetic and "Warmly" as the new product name. Three strategic decisions confirmed before implementation:
+1. Warmly is the new production name (pending co-founder confirmation Thursday).
+2. Full editorial overhaul (not hybrid) — adopt the warm cream/serif aesthetic.
+3. Goals view will use the gamified design (streaks/habits/quests) but with hardcoded sample data; real gamification deferred to v2.
+
+Detailed plan saved at `~/.claude/plans/ok-all-downloaded-here-humming-finch.md`. Implementation across 4 commits on branch `claude/zen-robinson-233760`:
+
+- **Phase 1 — `d49db07` — design tokens + shell:** New OKLch warm palette + Instrument Serif display font + Geist UI. Sidebar gets "Warmly" italic wordmark with cream accent dot. globals.css migrated to Tailwind v4 `@theme inline` with all design tokens. Drawer-slide-in keyframes + `.hook-block` class added. DESIGN.md fully rewritten as the new system spec. Design source-of-truth saved to `docs/design/v2/`.
+- **Phase 2.1 — `f58a2b9` — ArtifactDrawer:** New right-side slide-in editor for AI artifacts. ArtifactCard simplified to compact "Open in full ↗" preview. Drawer renders editable primary text + read-only structured sections (discussion topics, action items, etc.). Footer: Copy / Edit / Mark as sent (outreach types) or Mark as final. ESC + backdrop-click dismiss. Body scroll locks. Hits existing `PUT /api/artifacts/:id` (already supported partial updates with `user_edit_distance` for style learning).
+- **Phase 2.2 — `94a70ee` — ContactDetail 2-column rebuild:** Major view rewrite. Left: hero + prominent hook-block (italic serif quote with accent left-bar, "Why this person · why now") + 5-node stage track + career & education timelines (collapsed by default with show-more) + artifacts list + notes (notes now actually save — fixed the prior TODO). Right: Coach's take + Why-this-match (4 derived bullets via new `lib/utils/matchSignals.ts`) + relevance score with collapsed breakdown + discovery metadata. Health indicator (green/yellow/red/gray) derived from `last_interaction_at`.
+- **Phase 2.3 — `10802e6` — Today feed + editorial hero:** Contacts page gets editorial hero ("YOUR NETWORK / *A deliberate network.*") with stats + Today section showing 3 lanes (Re-warm / Follow-up / Reach-out), each surfacing the most-actionable contact in that intent. Pure logic over `status` + `last_interaction_at` + `tier` — no backend changes, no LLM call. Empty lanes show friendly placeholders.
+
+**Vercel deployment saga:**
+- Production branch on Vercel was set to `master` but the GitHub repo's default is `main`. After reconnecting GitHub access, Vercel started auto-deploying preview URLs for the feature branch. Phase 1 hit production via PR #1 merge ~10h before the rest. Phases 2.1–2.3 visible only on preview URLs (e.g. `FLCCPCVFR`) until merged.
+- Liyang verified the new design works on the latest preview URL (`A deliberate network.` hero, Today lanes, italic display headings, Warmly wordmark, contact detail 2-column with hook block + coach sidebar).
+
+**Artifact double-generation bug discovered (May 5):**
+- When a coaching message triggers an artifact (keyword in user message + active contact session), the backend runs **two LLM calls in parallel**: one for the chat reply (`processCoachingMessage`), one for the artifact (`generateArtifact`). Both fire, both render. Users see two surfaces with different content.
+- Worse than duplication: the two calls don't share generation context, so the chat reply and the artifact body produce **different drafts** for the same request. Liyang spotted this in a test on Dominik's contact session — chat reply gave a 2-message strategy (LinkedIn note + follow-up), artifact gave a single different email mentioning RWZ + virtual coffee.
+- The system prompt politely tells the LLM "the system handles generation separately" but MiniMax M2.7 doesn't reliably comply.
+- **Fix proposed (Option B, recommended):** Skip the coaching call entirely when `trigger_artifact && contact`. Replace the chat reply with a deterministic short message like *"Drafted your outreach to {name} — opening it in the drawer."* Auto-open drawer for one smooth gesture. Saves tokens, ensures consistency, eliminates the conflict. ~30 min of work — not yet shipped.
+
+**Key decisions:**
+- Goals view: defer real gamification to v2; ship the visual design now with hardcoded sample data so the demo feels complete (per Liyang's explicit choice).
+- Tweaks panel + Type Lab from the design ref: NOT shipped to production. They're designer-iteration tools only.
+- Branch naming: working on `claude/zen-robinson-233760` — long-lived feature branch through the design overhaul. Will need to merge to main before May 7 co-founder sync.
+- "⌘K Quick find" button in design: deferred to v2.
+
+**Key learnings:**
+- The Claude Design bundle's React-style JSX files (`docs/design/v2/project/src/`) are an excellent source-of-truth — interaction patterns (drawer slide, inline-confirm delete, expand toggles) are encoded in the code, not just the screenshots. Always read the matching `.jsx` file when implementing a component.
+- Tailwind v4 has a different mental model than v3: no `tailwind.config.ts`, all design tokens go through `@theme inline { ... }` in `globals.css`. CSS variables drive everything.
+- The `match_signals` field expected by the design didn't need a schema change — it's pure derivation from existing fields (career history, education, status, location). `lib/utils/matchSignals.ts` does this client-side with no LLM call.
+- `next_steps` and `coach_summary` from the design also don't need new columns — they map to existing `action_plan` artifacts and `recommendation_reason` respectively.
+- When triggering artifacts: parallel LLM calls without shared output context produce inconsistent drafts. This is a coordination bug, not a prompt bug — needs to be fixed in code, not just in the prompt.
+- The 5-node stage track from the design (Discovered → Contacted → Connected → Met → Ongoing) maps cleanly to our existing `ContactStatus` enum — no migration required.
+
+**Status:**
+- Auth recovery flow: WORKING (forgot/reset password live)
+- MiniMax-only stack: COMPLETE (no Anthropic SDK references in source code)
+- Warmly Phase 1 (design tokens + shell): SHIPPED — sidebar wordmark, warm canvas, Instrument Serif on production
+- Warmly Phase 2.1 (ArtifactDrawer): SHIPPED — right-side slide-in editor, working in preview
+- Warmly Phase 2.2 (ContactDetail rebuild): SHIPPED — 2-column with hook block + coach sidebar
+- Warmly Phase 2.3 (Today feed + hero): SHIPPED — editorial hero + 3-lane daily action feed
+- Warmly Phase 2.4 (chat surface refresh): NOT STARTED — session sidebar, conversation header, composer chips, message bubbles, empty state still on old hex colors
+- Warmly Phase 3 (Goals + auth polish): NOT STARTED
+- Artifact double-generation fix: NOT SHIPPED (Option B agreed, ~30 min of work)
+- Tech partner onboarding: tasks queued (forgot-password polish, ContactCard token refresh, scoring backfill) but not assigned yet — Thursday sync
+
+**Immediate next steps:**
+1. **Fix the artifact double-generation bug.** Skip the coaching LLM call when an artifact is triggered; emit a deterministic short reply; auto-open the drawer. This is the highest-leverage open issue — every artifact interaction is currently confusing.
+2. **Phase 2.4 — chat surface refresh.** SessionSidebar, conversation header, ChatInput chips ("Prep a meeting / Paste LinkedIn / Run discovery" + "⌘↵ to send" hint), message bubble visual polish, empty state. ~3 commits, ~3 hours.
+3. **Phase 3 — Goals + auth polish.** Goals: build the gamified visual (StreakWidget, RingTarget, HabitsHeatmap, QuestCard, LevelBadge) with sample data. Auth pages: token-only refresh.
+4. **Merge `claude/zen-robinson-233760` to `main`** before Thursday co-founder sync so production reflects the new design.
+5. **Co-founder sync agenda (Thursday May 7):** confirm Warmly brand, agree Phase split, hand off backend tasks (artifact dedup fix, scoring backfill, outreach skill port).
+
+**Outstanding TODOs (not blockers, but worth tracking):**
+- ContactCard.tsx still hardcodes old hex colors (`bg-[#2563eb]`, blue accent bar) — token-only refresh in Phase 2.4.
+- Goals view still on old design — Phase 3.
+- Auth pages still on old design — Phase 3.
+- Tweaks panel from `docs/design/v2/` could be ported as a `NODE_ENV === "development"` dev tool — useful for design iteration, never ship to prod.
+- "⌘K Quick find" button placeholder in topbar (design ref includes it; we deferred to v2).
+- Empty Today lanes currently say "Nothing waiting in this lane today. {hint}." — copy could be warmer.
+- Re-score button on contact cards (for old contacts saved before MiniMax was wired up — they have null scores).
+
+**Open questions for Thursday co-founder sync:**
+- Confirm "Warmly" as the production brand — affects domain registration, GTM, contracts.
+- Equity discussion (was flagged as "early month" priority).
+- Validate the phased rollout split (frontend with Liyang, backend hardening + AI engine with partner).
+- Decide on artifact double-generation fix priority vs. Phase 2.4 chat refresh.
