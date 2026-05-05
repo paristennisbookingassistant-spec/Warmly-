@@ -68,7 +68,7 @@ function ChatPage() {
   }, [messages, isSending]);
 
   return (
-    <div className="flex h-full bg-white">
+    <div className="flex h-full" style={{ background: "var(--bg)" }}>
       {/* Session sidebar */}
       <div className="w-64 flex-shrink-0">
         <SessionSidebar
@@ -82,13 +82,19 @@ function ChatPage() {
       </div>
 
       {/* Chat area */}
-      <div className="flex-1 flex flex-col min-w-0 border-l border-slate-100">
+      <div className="flex-1 flex flex-col min-w-0">
         {activeConversation ? (
           <>
             {/* Conversation header */}
-            <div className="px-6 py-4 border-b border-slate-100 flex-shrink-0 bg-white">
-              <div className="flex items-center justify-between">
-                <div>
+            <div
+              className="px-6 py-4 flex-shrink-0"
+              style={{
+                background: "var(--bg)",
+                borderBottom: "1px solid var(--line-soft)",
+              }}
+            >
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
                   {isEditingTitle ? (
                     <input
                       autoFocus
@@ -104,11 +110,16 @@ function ChatPage() {
                         if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); }
                         if (e.key === "Escape") { setIsEditingTitle(false); }
                       }}
-                      className="font-semibold text-gray-900 text-sm bg-transparent border-b border-blue-400 outline-none w-full"
+                      className="font-display italic text-[22px] leading-tight bg-transparent outline-none w-full"
+                      style={{
+                        color: "var(--ink)",
+                        borderBottom: "1px solid var(--accent)",
+                      }}
                     />
                   ) : (
                     <h2
-                      className="font-semibold text-gray-900 text-sm cursor-pointer hover:text-blue-600 transition-colors"
+                      className="font-display italic text-[22px] leading-tight cursor-pointer transition-colors truncate"
+                      style={{ color: "var(--ink)" }}
                       onClick={() => {
                         setEditTitle(activeConversation.title);
                         setIsEditingTitle(true);
@@ -118,35 +129,34 @@ function ChatPage() {
                       {activeConversation.title}
                     </h2>
                   )}
-                  <p className="text-xs text-gray-400 mt-0.5 capitalize">
+                  <p
+                    className="text-[11px] uppercase tracking-[0.12em] font-medium mt-1"
+                    style={{ color: "var(--ink-3)" }}
+                  >
                     {activeConversation.type === "contact_session"
                       ? "Contact session"
-                      : "General chat"}
+                      : "Strategy thread"}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                {activeConversation.status !== "active" && (
                   <span
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                      activeConversation.status === "active"
-                        ? "bg-green-50 text-green-700"
-                        : "bg-gray-100 text-gray-500"
-                    }`}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] uppercase tracking-wider font-medium flex-shrink-0"
+                    style={{
+                      background: "var(--surface-2)",
+                      color: "var(--ink-3)",
+                    }}
                   >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        activeConversation.status === "active"
-                          ? "bg-green-500"
-                          : "bg-gray-400"
-                      }`}
-                    />
-                    {activeConversation.status === "active" ? "Active" : "Archived"}
+                    Archived
                   </span>
-                </div>
+                )}
               </div>
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 bg-gray-50/30">
+            <div
+              className="flex-1 overflow-y-auto px-6 py-6 space-y-6"
+              style={{ background: "var(--bg)" }}
+            >
               {isLoadingMessages ? (
                 <>
                   <MessageSkeleton />
@@ -156,27 +166,20 @@ function ChatPage() {
                   <MessageSkeleton />
                 </>
               ) : messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center py-16">
-                  <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center mb-3">
-                    <svg
-                      className="w-5 h-5 text-blue-500"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={1.5}
-                        d="M13 10V3L4 14h7v7l9-11h-7z"
-                      />
-                    </svg>
-                  </div>
-                  <p className="text-sm font-medium text-gray-700">
-                    Ready to help
+                <div className="flex flex-col items-center justify-center h-full text-center py-16 max-w-md mx-auto">
+                  <p
+                    className="font-display italic text-[26px] leading-tight tracking-tight"
+                    style={{ color: "var(--ink-2)" }}
+                  >
+                    What&rsquo;s on your mind?
                   </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    Type a message or choose a quick action below
+                  <p
+                    className="text-[13px] mt-3 leading-relaxed"
+                    style={{ color: "var(--ink-3)" }}
+                  >
+                    Tell me about a person you want to reach, a meeting coming
+                    up, or a relationship you want to keep alive — I&rsquo;ll
+                    take it from there.
                   </p>
                 </div>
               ) : (
@@ -193,34 +196,46 @@ function ChatPage() {
               {/* Agent typing indicator */}
               {isSending && (
                 <div className="flex gap-3 animate-slide-up">
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center flex-shrink-0 mt-1 shadow-sm">
-                    <svg
-                      className="w-3.5 h-3.5 text-white"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2.5}
-                        d="M13 10V3L4 14h7v7l9-11h-7z"
-                      />
-                    </svg>
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-1"
+                    style={{
+                      background: "var(--ink)",
+                      color: "var(--bg)",
+                    }}
+                  >
+                    <span className="font-display italic text-[15px] leading-none -mt-0.5">
+                      c
+                    </span>
                   </div>
-                  <div className="bg-white border border-gray-100 shadow-sm rounded-2xl rounded-bl-sm px-4 py-3">
+                  <div
+                    className="rounded-2xl rounded-bl-sm px-4 py-3"
+                    style={{
+                      background: "var(--surface)",
+                      border: "1px solid var(--line-soft)",
+                      boxShadow: "var(--shadow-1)",
+                    }}
+                  >
                     <div className="flex gap-1 items-center h-4">
                       <span
-                        className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce"
-                        style={{ animationDelay: "0ms" }}
+                        className="w-1.5 h-1.5 rounded-full animate-bounce"
+                        style={{
+                          background: "var(--ink-4)",
+                          animationDelay: "0ms",
+                        }}
                       />
                       <span
-                        className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce"
-                        style={{ animationDelay: "150ms" }}
+                        className="w-1.5 h-1.5 rounded-full animate-bounce"
+                        style={{
+                          background: "var(--ink-4)",
+                          animationDelay: "150ms",
+                        }}
                       />
                       <span
-                        className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce"
-                        style={{ animationDelay: "300ms" }}
+                        className="w-1.5 h-1.5 rounded-full animate-bounce"
+                        style={{
+                          background: "var(--ink-4)",
+                          animationDelay: "300ms",
+                        }}
                       />
                     </div>
                   </div>
@@ -232,7 +247,13 @@ function ChatPage() {
             </div>
 
             {/* Input */}
-            <div className="px-6 py-4 border-t border-slate-100 flex-shrink-0 bg-white">
+            <div
+              className="px-6 py-4 flex-shrink-0"
+              style={{
+                background: "var(--bg)",
+                borderTop: "1px solid var(--line-soft)",
+              }}
+            >
               <ChatInput onSend={sendMessage} isLoading={isSending} />
             </div>
           </>
@@ -262,43 +283,46 @@ function EmptyState({
   error?: string | null;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full text-center px-8 bg-gray-50/30">
-      {/* Icon */}
-      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center mb-6 shadow-lg shadow-blue-500/25">
-        <svg
-          className="w-8 h-8 text-white"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.5}
-            d="M13 10V3L4 14h7v7l9-11h-7z"
-          />
-        </svg>
-      </div>
-
-      <h2 className="text-xl font-semibold text-gray-900 tracking-tight">
-        Your AI Networking Coach
+    <div
+      className="flex flex-col items-center justify-center h-full text-center px-8"
+      style={{ background: "var(--bg)" }}
+    >
+      <p
+        className="text-[10.5px] uppercase tracking-[0.12em] font-medium mb-3"
+        style={{ color: "var(--ink-3)" }}
+      >
+        Your networking coach
+      </p>
+      <h2
+        className="font-display italic text-[40px] leading-[1.05] tracking-tight max-w-md"
+        style={{ color: "var(--ink)" }}
+      >
+        Tell me who&rsquo;s on your mind.
       </h2>
-      <p className="text-sm text-gray-500 mt-2 max-w-sm leading-relaxed">
-        I help you find the right contacts, craft strategic outreach, prepare
-        for meetings, and maintain relationships.
+      <p
+        className="text-[14px] mt-4 max-w-md leading-relaxed"
+        style={{ color: "var(--ink-3)" }}
+      >
+        I&rsquo;ll help you find the right people, draft outreach that sounds
+        like you, prepare for meetings, and keep the conversation going long
+        after.
       </p>
 
       {/* Example openers */}
-      <div className="grid grid-cols-2 gap-2 mt-8 max-w-md w-full">
+      <div className="grid grid-cols-2 gap-2 mt-10 max-w-md w-full">
         {EXAMPLE_OPENERS.map((opener) => (
           <button
             key={opener.label}
-            onClick={() => {
-              onNewConversation();
+            onClick={onNewConversation}
+            className="text-left px-4 py-3 rounded-lg transition-colors duration-150"
+            style={{
+              background: "var(--surface)",
+              border: "1px solid var(--line)",
+              color: "var(--ink-2)",
+              boxShadow: "var(--shadow-1)",
             }}
-            className="text-left px-4 py-3 rounded-xl bg-white border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 transition-all duration-150 shadow-sm group"
           >
-            <p className="text-xs font-medium text-gray-700 group-hover:text-blue-700 transition-colors">
+            <p className="text-[12.5px] font-medium leading-snug">
               {opener.label}
             </p>
           </button>
@@ -307,13 +331,16 @@ function EmptyState({
 
       <button
         onClick={onNewConversation}
-        className="mt-6 px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 active:scale-95 transition-all duration-150 shadow-sm shadow-blue-500/25"
+        className="mt-8 px-5 py-2 rounded-full text-[12.5px] font-medium transition-colors text-bg"
+        style={{ background: "var(--ink)" }}
       >
-        New conversation
+        Start a new thread
       </button>
 
       {error && (
-        <p className="mt-3 text-sm text-red-500">{error}</p>
+        <p className="mt-3 text-[12px]" style={{ color: "var(--bad)" }}>
+          {error}
+        </p>
       )}
     </div>
   );
