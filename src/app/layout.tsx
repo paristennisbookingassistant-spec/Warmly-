@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 
 const geist = Geist({
@@ -7,10 +7,22 @@ const geist = Geist({
   subsets: ["latin"],
 });
 
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+const instrumentSerif = Instrument_Serif({
+  variable: "--font-instrument-serif",
+  weight: "400",
+  style: ["normal", "italic"],
+  subsets: ["latin"],
+});
+
 export const metadata: Metadata = {
-  title: "AI Networking Coach",
+  title: "Warmly — Your AI networking coach",
   description:
-    "Your AI networking coach that finds the right people, helps you reach out, prepares you for conversations, and keeps your relationships alive.",
+    "Warmly finds the right people, helps you reach out, prepares you for conversations, and keeps your relationships alive.",
 };
 
 export default function RootLayout({
@@ -19,8 +31,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geist.variable} h-full antialiased`}>
-      <body className="h-full bg-[#fafafa] font-sans">{children}</body>
+    <html
+      lang="en"
+      className={`${geist.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}
+    >
+      <body className="h-full bg-bg font-sans text-ink">{children}</body>
     </html>
   );
 }

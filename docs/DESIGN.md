@@ -1,95 +1,143 @@
-# AI Networking Coach — Design System
+# Warmly — Design System
 
-## Inspired by: ElevenLabs (restrained elegance, warm minimalism)
+> **Brand:** Warmly. Editorial, warm, deliberate. Reads like a luxury notebook, not a SaaS dashboard.
+>
+> **Reference:** Full HTML/CSS source of truth lives in `docs/design/v2/project/src/styles.css`. When in doubt, read the reference.
 
-## Visual Theme
-Near-white canvas with warm undertones. Surfaces barely exist — multi-layered shadows at sub-0.1 opacity create depth without weight. Typography does the heavy lifting. The feel is premium, confident, spacious — like a high-end CRM, not a dashboard.
+## Aesthetic
 
-## Color Palette
+Warm bone canvas with cream/sienna accents. Typography drives personality: Instrument Serif italic for display moments (the wordmark, page titles, AI quotes), Geist sans for everything else. Surfaces barely exist — multi-layered shadows at sub-0.1 opacity create depth without weight. The feel is editorial, confident, considered — like a high-end personal CRM, not a generic SaaS.
 
-### Surfaces
-- **Canvas:** `#fafafa` — primary background
-- **Card:** `#ffffff` — elevated surfaces
-- **Warm Stone:** `rgba(245, 242, 239, 0.8)` — subtle warm tint for secondary surfaces
-- **Sidebar:** `#111111` — near-black sidebar
+## Color Palette (OKLch)
 
-### Text
-- **Primary:** `#171717` — headings, names
-- **Secondary:** `#525252` — body text, descriptions
-- **Tertiary:** `#a3a3a3` — metadata, timestamps, muted labels
+All colors use OKLch for perceptual uniformity. Tokens are exposed as CSS variables in `src/app/globals.css` and as Tailwind utility classes via `@theme`.
 
-### Interactive
-- **Accent:** `#2563eb` — links, active states, primary buttons
-- **Accent Hover:** `#1d4ed8` — hover state
-- **Success:** `#059669` — completed, positive
-- **Warning:** `#d97706` — attention, in-progress
-- **Danger:** `#dc2626` — errors, destructive
+### Surfaces (warm bone palette — default)
+- `--bg` `oklch(0.985 0.006 75)` — canvas
+- `--bg-sunk` `oklch(0.965 0.008 75)` — secondary backgrounds
+- `--surface` `oklch(1 0 0)` — elevated cards
+- `--surface-2` `oklch(0.975 0.006 75)` — hover/sunken inserts
+- `--line` `oklch(0.91 0.008 70)` — primary borders
+- `--line-soft` `oklch(0.945 0.006 70)` — subtle dividers
 
-### Borders & Shadows
-- **Border Subtle:** `rgba(0, 0, 0, 0.06)` — card borders, dividers
-- **Border Medium:** `rgba(0, 0, 0, 0.1)` — inputs, stronger separation
-- **Shadow Soft:** `0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0, 0, 0, 0.04)` — cards
-- **Shadow Medium:** `0 4px 12px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.04)` — modals, dropdowns
-- **Shadow Warm:** `0 4px 16px rgba(78, 50, 23, 0.04)` — warm accent shadow for CTAs
+### Ink scale (warm neutrals)
+- `--ink` `oklch(0.22 0.012 60)` — primary text, headings
+- `--ink-2` `oklch(0.38 0.012 60)` — body text
+- `--ink-3` `oklch(0.55 0.012 60)` — secondary labels
+- `--ink-4` `oklch(0.68 0.010 60)` — metadata, timestamps
+
+### Accent (cream/sienna)
+- `--accent` `oklch(0.60 0.13 45)` — primary accent (cream/tan)
+- `--accent-soft` `oklch(0.94 0.035 55)` — accent backgrounds (selection, soft highlights)
+- `--accent-ink` `oklch(0.38 0.10 45)` — accent foreground for soft accent backgrounds
+
+### Status
+- `--good` `oklch(0.62 0.09 155)` — success, healthy relationships
+- `--warn` `oklch(0.72 0.11 75)` — warning, going stale
+- `--bad` `oklch(0.60 0.13 30)` — danger, gone cold
+- `--mute` `oklch(0.75 0.008 60)` — neutral, undefined
+
+### Sidebar (dark variant)
+The sidebar shell remains dark for contrast against the warm canvas. Tokens: `--sidebar-bg`, `--sidebar-line`, `--sidebar-ink`, `--sidebar-ink-2`, `--sidebar-ink-3`.
+
+### Future palette swaps
+The CSS supports `[data-palette="cream|taupe|bone|peach"]` on `<html>` for live palette swaps. Default is cream. We do not ship the Tweaks panel in production — it's a designer-only tool living in `docs/design/v2/`.
 
 ## Typography
 
-### Font Stack
-- **Display/Body:** Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif
-- **Mono:** "Geist Mono", ui-monospace, SFMono-Regular, monospace
+### Stack
+- **Display** (`--font-display`): Instrument Serif → Cormorant Garamond → Georgia
+- **UI** (`--font-ui`, default `font-sans`): Geist → system stack
+- **Mono** (`--font-mono`): Geist Mono → ui-monospace
 
-### Scale
-| Role | Size | Weight | Letter Spacing | Line Height |
-|------|------|--------|----------------|-------------|
-| Display | 28px | 600 | -0.8px | 1.15 |
-| Heading 1 | 22px | 600 | -0.5px | 1.2 |
-| Heading 2 | 18px | 600 | -0.3px | 1.3 |
-| Heading 3 | 15px | 600 | normal | 1.4 |
-| Body | 14px | 400 | 0.1px | 1.6 |
-| Body Medium | 14px | 500 | 0.1px | 1.6 |
-| Caption | 13px | 400 | 0.1px | 1.5 |
-| Micro | 11px | 500 | 0.3px | 1.3 |
+Italic Instrument Serif is the brand voice. It carries the **Warmly** wordmark, all top-level page titles, contact names on the detail hero, and AI-quoted "hook" moments.
 
-## Component Patterns
+### Scale (rough — let context guide exact sizes)
+- Display headings: 22–26px, italic, letter-spacing -0.01em
+- Page titles (H1): 22px, semibold, sans
+- Section headings (H3): 13–14px, semibold, uppercase tracking 0.08em (for `kicker`-style labels)
+- Body: 13–14px, sans
+- Metadata / micro: 10.5–12px, sans, `--ink-3` or `--ink-4`
 
-### Buttons
-- **Primary:** bg `#171717`, text white, rounded-full (pill), px-5 py-2
-- **Secondary:** bg white, text `#171717`, border `rgba(0,0,0,0.1)`, shadow-soft, rounded-full
-- **Ghost:** bg transparent, text `#525252`, hover bg `rgba(0,0,0,0.04)`, rounded-lg
-- **Danger:** bg white, text `#dc2626`, border `rgba(220,38,38,0.2)`, hover bg `#fef2f2`
-- **All buttons:** transition-all duration-150, font-weight 500
+### Discipline
+- **Reserve serif italic for display only.** Never set body copy in serif — it's expensive on load and loses impact when overused.
+- **Avoid all-caps in body text.** Use uppercase only for tracked-out section labels (10.5px, letter-spacing 0.12em).
 
-### Cards
-- bg white, border `rgba(0,0,0,0.06)`, rounded-xl (12px), shadow-soft
-- Padding: 20-24px
-- Hover: shadow-medium, transition 200ms
+## Spacing scale
 
-### Inputs
-- bg white, border `rgba(0,0,0,0.1)`, rounded-lg (8px)
-- Focus: ring-2 ring-blue-500/20, border-blue-500
-- Padding: 10px 14px
-- Font: 14px, weight 400
+`--space-1` through `--space-8`: 4 / 8 / 12 / 16 / 20 / 24 / 32 / 48 px.
 
-### Sidebar
-- bg `#111111`, text `#a3a3a3`
-- Active item: text white, bg `rgba(255,255,255,0.08)`
-- Hover: bg `rgba(255,255,255,0.04)`
-- Border-right: none (clean edge)
+Use Tailwind's spacing utilities (`p-3`, `gap-4`, etc.) — they map to the same scale.
 
-### Badges/Tags
-- Rounded-full, px-2.5 py-0.5, text 11px weight 500
-- Tier A: bg `#ecfdf5` text `#059669`
-- Tier B: bg `#eff6ff` text `#2563eb`
-- Tier C: bg `#fef3c7` text `#d97706`
+## Radii
 
-## Spacing
-- Base: 4px
-- Common: 4, 8, 12, 16, 20, 24, 32, 48px
-- Card gap: 12-16px
-- Section gap: 32-48px
-- Page padding: 24-32px
+- `--radius-sm` 6px — chips, dots, pills
+- `--radius` 10px — buttons, cards, inputs
+- `--radius-lg` 14px — large cards, modals
 
-## Transitions
-- Hover: 150ms ease
-- Expand/collapse: 200ms ease-out
-- Page transitions: 300ms ease
+## Shadows
+
+Three layers, all subtle:
+- `--shadow-1` — card edge (`0 1px 0`)
+- `--shadow-2` — resting card (used as `.shadow-soft`)
+- `--shadow-3` — elevated card / drawer (used as `.shadow-medium`)
+
+Heavy drop shadows are forbidden. Whisper-thin or nothing.
+
+## Borders
+
+1px `var(--line)` for primary divisions, 1px `var(--line-soft)` for subtle dividers. Inset borders via `box-shadow: inset 0 0 0 1px var(--line)` are the cleanest pattern (no layout shift).
+
+## Animations
+
+- `slideUp` — message entry, 200ms ease-out
+- `fadeIn` — page transitions, 250ms ease-out
+- `drawerSlideIn` — right-side drawer, 200ms cubic-bezier(0.4, 0, 0.2, 1)
+- `skeletonPulse` — loading shimmer, 1.8s
+- Hover lift on cards/buttons: 1px translateY, 120–160ms transition
+
+## Component patterns
+
+### Hook block
+The signature pattern. Used for AI-quoted insights ("why this person · why now").
+- Left border 2px `var(--accent)`
+- 16px left padding
+- Italic Instrument Serif body, 20px
+- 10.5px tracked-out uppercase label above, in `--ink-3`
+
+CSS classes: `.hook-block`, `.hook-block__label`, `.hook-block__body` (defined in `globals.css`).
+
+### Stage track
+5 horizontal nodes connected by lines: Discovered → Contacted → Connected → Met → Ongoing. Filled circles for done, accent ring for current, hollow for upcoming.
+
+### Timeline
+Career history and education as left-bordered columns with offset dots per item. First item is "current" (accent dot, fuller text). Subsequent items collapse to a faded one-line summary unless expanded.
+
+### Artifact card → Drawer
+Artifacts in chat appear as compact cards (single-letter type icon, label, title, preview, "Open in full ↗"). Clicking opens a right-side slide-in drawer (`.animate-drawer-in`) with the full content, edit mode, and a primary "Use this" action.
+
+### Quick-action chips
+Inline pill buttons above the chat send area: "Prep a meeting", "Paste LinkedIn", "Run discovery". 11px sans, `surface-2` background, `line-soft` inset border.
+
+### Inline confirm
+For destructive actions (delete session), the trash icon is replaced inline with `Cancel | Delete` buttons rather than a modal. Less interruptive.
+
+## Iconography
+
+Minimal stroke icons, 1.5px stroke, 24×24 viewBox. No fills, no shadows. The full set lives in `docs/design/v2/project/src/atoms.jsx` (Icon component). Port icons inline as needed — don't pull in an icon library.
+
+## What we do NOT ship
+
+- **Tweaks panel** — designer iteration tool. Stays in `docs/design/v2/`.
+- **Type Lab view** — design exploration only. Not in nav, not routed.
+- **⌘K Quick find** — placeholder in design, deferred to v2 of the product.
+- **Multiple palette/density swaps** — cream + balanced is the production preset.
+
+## Reference
+
+The complete source-of-truth design lives at:
+- `docs/design/v2/project/src/styles.css` — all CSS tokens and component styles
+- `docs/design/v2/project/src/*.jsx` — view-by-view React-style mockups
+- `docs/design/v2/project/screenshots/` — design iteration screenshots
+
+When implementing a component, **read the matching `.jsx` file first**. The mockups encode interaction patterns (drawer slide-in, inline confirm, expand/collapse toggles) that aren't visible from screenshots alone.
