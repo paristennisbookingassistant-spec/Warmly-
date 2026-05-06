@@ -669,6 +669,8 @@ Detailed plan saved at `~/.claude/plans/ok-all-downloaded-here-humming-finch.md`
 
 **Queued for after Phase 3 — prompt audit + outreach skill port:**
 
+[Status May 6 evening: ALL FOUR PHASES SHIPPED + MERGED TO MAIN. See Session 9 below for the full implementation log.]
+
 Liyang flagged on May 6 that he wants a deep-dive audit of every LLM prompt
 in the codebase before pushing further on AI features. Two-part scope:
 
@@ -701,3 +703,113 @@ in the codebase before pushing further on AI features. Two-part scope:
    Optional accelerator for new users: onboarding asks "paste 2-3 messages
    you've sent in your real voice" so the system has a baseline before any
    real artifacts are generated.
+
+### Session 9 — May 6, 2026
+
+**Topics covered:**
+
+The full Warmly redesign + AI-skill architecture overhaul shipped today.
+20 commits, all merged to main, production at `f160faf`. Roughly five
+distinct workstreams:
+
+**1. Warmly editorial design rollout (Phases 1-3) — already on main earlier today**
+- Phase 1 (`d49db07`): tokens + shell — OKLch warm palette, Instrument Serif, "Warmly" wordmark, Tailwind v4 @theme
+- Phase 2.1 (`f58a2b9`): ArtifactDrawer right-side slide-in editor for AI artifacts
+- Phase 2.2 (`94a70ee`): ContactDetail 2-column with hook block + coach sidebar
+- Phase 2.3 (`10802e6`): Today feed (re-warm/follow-up/reach-out) + editorial hero on contacts page
+- Phase 2.4 (`6b9d04d`): chat surface refresh (sidebar, header, composer chips, message bubbles, empty states)
+- Phase 2.5 (`966ef9e`): table list view for contacts + filter pills (All/Tier 1/Met/ongoing/Going cold/New) + list/grid layout toggle
+- Phase 2.5 polish (`3992e07`): lighter row dividers + explicit pointer cursor on contact rows
+- Phase 3 (`7a5b509`): Goals gamified visual (sample data) + auth pages refresh
+
+**2. Artifact double-generation bug fix (`754af8a`)**
+- Discovered Liyang's chat reply and artifact body were producing CONFLICTING drafts (not just duplicate). Coaching call + generation call were running in parallel without shared output context.
+- Fix: `messages/route.ts` calls `detectArtifactTrigger()` first (no LLM, just keyword match). If trigger fires AND there's a contact, skip coaching entirely — artifact becomes single source of truth. Replace chat reply with deterministic `ARTIFACT_INTRO` map.
+- Side benefits: ~50% LLM cost reduction on artifact-triggering messages, faster response, trigger now visible to user.
+
+**3. Documentation pass**
+- `docs/COFOUNDER_SYNC.md` (`427528a`): 90-min meeting plan for the Thursday co-founder sync — agenda with 8 sections, time estimates, decisions-needed flags, ownership split, first-week task handoff, pre-read checklist for partner
+- `docs/PROMPT_INVENTORY.md` (`ffd2b27`): full reference for every LLM prompt site — schemas, triggers, costs, tuning levers, reverse-lookup table, 5 open quality questions, "how to change a prompt safely" protocol
+- This Session 8/9 entry in PROJECT_MEMORY.md
+
+**4. Outreach skill port (Phase A — `9958940`)**
+Universal content from `~/.claude/skills/outreach-messages/SKILL.md` ported as TypeScript constants in `src/lib/ai/skills/outreach.ts`. Used by all three outreach-family artifact types (`connection_note`, `outreach_draft`, `follow_up_draft`). Includes:
+- OUTREACH_PHILOSOPHY (peer-level sense-checking, 2-step approach, no-transaction framing)
+- CONNECTION_POINTS_PRIORITY (mutual contact > school > transition > geo > sector > content)
+- HARD_GATES (no em-dashes, no "I came across", no "I hope this finds you well", no "leverage" / "synergy" / "furthermore", organic-not-research framing of recipient's company, presumption gate, repetition gate)
+- VOICE_PRINCIPLES (specific beats flattering, one sharp question, confidence without neediness, apologize for cold outreach, keep ask small, lead with your interest then bridge, read-aloud test)
+- LEARNED_PATTERNS (cross-reference all schools, generic fallback worse than no message, organic vs research framing, one-question rule, honor previous role, follow-ups continue, technical depth in connection request)
+- TEMPLATES per channel (connection request 300 chars, outreach draft, follow-up after-meeting + no-reply nudge)
+- JSON schemas
+
+**5. AI skill architecture full rollout (`b2446b8` + `f160faf`)**
+
+The "skill architecture" is the unified pattern: each artifact family has (a) a universal skill file in `src/lib/ai/skills/<family>.ts` carrying philosophy + structure + templates, and (b) a per-family prompt builder in `src/lib/ai/prompts/build<Family>Prompt.ts` that composes universal content with per-user data (profile_md + approved learnings + writing style).
+
+**Phase B — `users.profile_md`** (auto-built identity narrative):
+- Migration `20260506000000_add_user_profile_md.sql` adds `users.profile_md TEXT`
+- `lib/ai/profile.ts`: `buildInitialProfile(data)` generates markdown from onboarding fields + optional CV/cover-letter + voice samples; `enrichProfile(existing, newContext)` refines on identity disclosure; `looksLikeIdentityDisclosure(message)` is the cheap rule-based gate
+- Wiring: `buildPerUserIdentitySection()` in `buildOutreachPrompt.ts` injects profile_md as high-priority section
+- `GenerationContext.user_profile_md` (optional, backwards-compat)
+- `messages/route.ts` pulls and passes it
+
+**Phase C — `user_learnings` table** (closed self-improvement loop):
+- Migration `20260506000001_add_user_learnings.sql` adds the table with status (pending/approved/rejected/archived), confidence (1-10), source_artifact_id, category (voice/strategy/gate/hook/tone/other), excerpts, RLS
+- `lib/ai/learnings.ts`: `distillLearnings(...)` runs MiniMax to extract 1-3 generalizable patterns from original_draft vs sent_version; `shouldAutoApprove()` requires confidence>=8 + no_conflict; `shouldDiscard()` filters confidence<5
+- Trigger: `app/api/artifacts/[id]/route.ts` PUT handler — when `status='sent'` on outreach-family type, fires `triggerLessonDistillation()` async; pulls existing approved learnings to prevent duplicates and catch conflicts
+- Auto-approval gate: confidence≥8+no_conflict → status='approved' immediately; otherwise pending for user review
+- API endpoints: `GET /api/learnings` (list), `PATCH /api/learnings/[id]` (approve/reject/archive), `DELETE /api/learnings/[id]`
+- Wiring: `buildApprovedLearningsSection()` injects top 30 approved learnings into outreach prompt; "user has approved these — APPLY THEM" framing makes them outrank universal voice rules when conflict
+
+**Phase D — meeting + action skill files**:
+- `skills/meeting.ts`: philosophy (value exchange, anchor in their world), research framework, discussion topic taxonomy, do/don't coaching, meeting notes capture structure, JSON schemas for meeting_prep + meeting_notes
+- `skills/action.ts`: philosophy (momentum > activity, specificity is the whole game, don't invent obligations), priority lattice (now/soon/later), draft inclusion guide, coaching note guide, JSON schema for action_plan
+- `prompts/buildMeetingPrompt.ts` and `prompts/buildActionPrompt.ts` mirror the outreach builder pattern
+- `generation.ts` router now picks: outreach family → buildOutreachPrompts; meeting family → buildMeetingPrompts; action_plan → buildActionPrompts; else → generic fallback
+
+**Final prompt structure (every outreach-family artifact gets this composed):**
+```
+SYSTEM
+├─ Universal: PHILOSOPHY + CONNECTION_POINTS + HARD_GATES + VOICE_PRINCIPLES + LEARNED_PATTERNS + TEMPLATE
+├─ Per-user (Phase B): profile_md identity narrative
+├─ Per-user (Phase C): top 30 approved learnings
+├─ Per-user (existing): user_memory.writing_style
+└─ JSON schema
+
+USER PROMPT
+├─ Sender (career + education + goals + networking_preferences)
+├─ Recipient (name + role + company + career + education + location)
+├─ Conversation summary + recent messages
+├─ Company intel (meeting_prep only)
+└─ "Draft a {type}" + the user's exact request
+```
+
+**Key decisions:**
+- Profile is AUTO-BUILT, not user-typed. Generated from onboarding answers + optional CV upload + ongoing conversation enrichment. User can edit anytime via Settings (UI not yet built but API ready).
+- Auto-approval threshold: confidence ≥ 8 AND no_conflict. Anything else surfaces to user.
+- Universal skill content lives in code as TypeScript string constants (no DB tables for templates / philosophy / gates). Edit a file → ship a commit → next draft uses new content. Per-user content lives in DB (profile_md text column, user_learnings table). This keeps the architecture simple while supporting per-user personalization.
+- Learnings are read in batches of 30 max — keeps the prompt size bounded as the library grows.
+
+**Key learnings:**
+- Reading the gstack skill files surfaced ~80% universal content (philosophy, gates, templates, learned patterns) and ~20% Liyang-specific content (his school, career, hooks, specific phrases). The split mapped cleanly to the static-code-constants vs per-user-DB-data architecture.
+- The biggest practical UX shift was understanding that the chat reply and the artifact body were producing CONFLICTING drafts (not duplicate). Once that was fixed, the artifact card became the unambiguous single source of truth.
+- Tailwind v4 has a different mental model than v3: no `tailwind.config.ts`, all design tokens go through `@theme inline { ... }` in `globals.css`. Took a moment to recognize.
+- The Vercel + GitHub App flow had a connection break that took some debugging — preview URLs come from Vercel auto-deploys per branch, but production only updates on merges to `main`. The branch was at PR #2 merge for a while before the rest of the work landed.
+
+**Status (end of May 6):**
+- Production: at `f160faf`. All Warmly design + skill architecture is live.
+- Branch: clean working tree, identical to main.
+- All 137 unit/API tests passing.
+- Build clean. tsc clean.
+- 20 commits shipped today. None reverted. None broken in production.
+
+**Immediate next steps (next session):**
+1. **Onboarding flow rebuild** — the new design has a 2-column conversational onboarding with live `user.md` preview. Liyang's existing onboarding still uses old design + simple stepper. Higher leverage than auth polish, and it's the natural place to invoke `buildInitialProfile()` for the first time.
+2. **CV upload endpoint** — `buildInitialProfile()` accepts `cv_text` but there's no upload UI yet. Adding this lets users seed `profile_md` with their actual resume in 5 seconds.
+3. **Settings UI for profile_md + pending learnings** — view + edit profile, approve/reject pending learnings. APIs exist; just frontend.
+4. **Wire `enrichProfile()` into chat route** — currently the rule-based gate exists in `profile.ts` but the LLM call isn't fired. Wants to test cost impact first.
+5. **Tester recruitment** — get 5-10 INSEAD MBA classmates signed up on the live URL.
+
+**For Thursday's co-founder sync:**
+- See `docs/COFOUNDER_SYNC.md` for the agenda. Production matches the demo experience the partner will see. The skill architecture is documented in `docs/PROMPT_INVENTORY.md` (extended with Phase B/C/D content). First-week task split for partner is in the COFOUNDER_SYNC.md.
+- Partner's first PR candidates: onboarding rebuild, CV upload endpoint, Settings UI for profile/learnings. All natural backend + frontend work, all unblocked by what shipped today.
