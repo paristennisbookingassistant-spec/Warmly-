@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Warmly · Co-founder sync</title>
+
+  <!-- Fonts: Instrument Serif (display) + Satoshi (body) + JetBrains Mono (labels) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ===========================================
+       THEME — Warmly editorial palette
+       Tweak here to retune the whole deck.
+       =========================================== */
+    :root {
+      /* Colors */
+      --bg: #f4ede0;
+      --paper: #faf5e9;
+      --ink: #1f1b16;
+      --ink-soft: #4a3f30;
+      --ink-mute: #8a7a62;
+      --line: #c9bba1;
+      --line-soft: #d9cdb4;
+      --accent: #6f7a5c;        /* sage — for "partial" status */
+      --accent-warm: #b87a4a;   /* terracotta — for headlines + accents */
+      --not-yet: #a89070;       /* muted taupe — for "not yet" status */
+
+      /* Type */
+      --font-display: "Instrument Serif", "Times New Roman", serif;
+      --font-body: "Satoshi", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+      /* Sizes (clamp for viewport fit) */
+      --display-xl: clamp(2.75rem, 8vw, 7rem);
+      --display-lg: clamp(2rem, 5.5vw, 4.5rem);
+      --display-md: clamp(1.5rem, 3.5vw, 2.75rem);
+      --display-sm: clamp(1.15rem, 2.2vw, 1.6rem);
+      --body: clamp(0.95rem, 1.3vw, 1.15rem);
+      --body-sm: clamp(0.8rem, 1vw, 0.95rem);
+      --label: clamp(0.7rem, 0.85vw, 0.8rem);
+
+      /* Spacing */
+      --slide-padding: clamp(2rem, 5vw, 5rem);
+      --gap: clamp(0.75rem, 1.6vw, 1.5rem);
+      --gap-lg: clamp(1.5rem, 3vw, 3rem);
+
+      /* Animation */
+      --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+      --dur: 0.7s;
+    }
+
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    /* ===========================================
+       VIEWPORT BASE — slides fit exactly in view
+       =========================================== */
+    html, body { height: 100%; overflow-x: hidden; }
+    html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-size: var(--body);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .slide {
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      scroll-snap-align: start;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      padding: var(--slide-padding);
+    }
+    .slide-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      max-height: 100%;
+      overflow: hidden;
+    }
+
+    /* Subtle paper grain — purely decorative */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        radial-gradient(rgba(31, 27, 22, 0.03) 1px, transparent 1px),
+        radial-gradient(rgba(31, 27, 22, 0.02) 1px, transparent 1px);
+      background-size: 3px 3px, 7px 7px;
+      background-position: 0 0, 1px 2px;
+      pointer-events: none;
+      z-index: 1;
+      mix-blend-mode: multiply;
+      opacity: 0.5;
+    }
+    .slide > * { position: relative; z-index: 2; }
+
+    /* ===========================================
+       TYPOGRAPHY HELPERS
+       =========================================== */
+    .display {
+      font-family: var(--font-display);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1;
+      color: var(--ink);
+    }
+    .display.italic { font-style: italic; }
+    .display-xl { font-size: var(--display-xl); line-height: 0.92; }
+    .display-lg { font-size: var(--display-lg); line-height: 1; }
+    .display-md { font-size: var(--display-md); line-height: 1.05; }
+    .display-sm { font-size: var(--display-sm); line-height: 1.2; }
+
+    .label {
+      font-family: var(--font-mono);
+      font-size: var(--label);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
+      font-weight: 500;
+    }
+
+    .lead {
+      font-size: clamp(1.05rem, 1.6vw, 1.4rem);
+      color: var(--ink-soft);
+      line-height: 1.5;
+      max-width: 60ch;
+    }
+
+    em.serif {
+      font-family: var(--font-display);
+      font-style: italic;
+      font-weight: 400;
+    }
+
+    /* ===========================================
+       SLIDE HEADER STRIP
+       Small "Warmly · {section}" header at top of content slides
+       =========================================== */
+    .slide-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: clamp(0.75rem, 1.5vw, 1.1rem);
+      border-bottom: 1px solid var(--line-soft);
+      margin-bottom: clamp(1.25rem, 2.5vw, 2rem);
+    }
+    .slide-strip .brand-mark { display: flex; align-items: center; gap: 0.5rem; }
+    .slide-strip .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent-warm);
+      animation: pulse-dot 3s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.4); opacity: 0.7; }
+    }
+    .slide-strip .brand-name {
+      font-family: var(--font-display);
+      font-style: italic;
+      font-size: clamp(1rem, 1.4vw, 1.25rem);
+      color: var(--ink);
+    }
+    .slide-strip .meta {
+      font-family: var(--font-mono);
+      font-size: var(--label);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
+    }
+
+    /* ===========================================
+       SLIDE 01 — AGENDA
+       Three big agenda items, generous space, hairline rules
+       =========================================== */
+    .agenda-list {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      justify-content: center;
+      gap: 0;
+      max-width: 1100px;
+    }
+    .agenda-row {
+      display: grid;
+      grid-template-columns: 90px 1fr;
+      gap: clamp(1rem, 2.5vw, 2.5rem);
+      padding: clamp(1.5rem, 3.5vw, 3rem) 0;
+      border-top: 1px solid var(--line);
+      align-items: baseline;
+    }
+    .agenda-row:last-child { border-bottom: 1px solid var(--line); }
+    .agenda-row .num {
+      font-family: var(--font-display);
+      font-style: italic;
+      font-size: clamp(2rem, 3.5vw, 3rem);
+      color: var(--accent-warm);
+      line-height: 1;
+    }
+    .agenda-row .title {
+      font-family: var(--font-display);
+      font-size: clamp(1.6rem, 3vw, 2.5rem);
+      color: var(--ink);
+      line-height: 1.1;
+      letter-spacing: -0.01em;
+    }
+    .agenda-row .title-sub {
+      display: block;
+      font-family: var(--font-body);
+      font-size: var(--body-sm);
+      color: var(--ink-mute);
+      margin-top: 0.5rem;
+      line-height: 1.4;
+    }
+
+    /* ===========================================
+       SLIDE 02 — DEMO TRANSITION
+       Single big word, lots of negative space
+       =========================================== */
+    .transition-slide {
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .transition-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: clamp(1.5rem, 3vw, 2.5rem);
+    }
+    .transition-label {
+      font-family: var(--font-mono);
+      font-size: var(--label);
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
+    }
+    .transition-word {
+      font-family: var(--font-display);
+      font-style: italic;
+      font-size: var(--display-xl);
+      color: var(--ink);
+      letter-spacing: -0.025em;
+      line-height: 0.9;
+    }
+    .transition-word em { color: var(--accent-warm); }
+    .transition-line {
+      font-family: var(--font-display);
+      font-size: clamp(1.1rem, 1.7vw, 1.5rem);
+      color: var(--ink-soft);
+      max-width: 38ch;
+      line-height: 1.4;
+      font-style: italic;
+    }
+    .transition-rule {
+      width: 48px;
+      height: 1px;
+      background: var(--accent-warm);
+    }
+
+    /* ===========================================
+       SLIDE 03 — FEATURES + DISCUSSION
+       Two-column: features (left) + discussion (right)
+       =========================================== */
+    .feature-headline {
+      max-width: 1200px;
+      margin-bottom: clamp(0.85rem, 1.6vw, 1.25rem);
+    }
+    .feature-headline h2 {
+      font-family: var(--font-display);
+      font-size: clamp(1.35rem, 2.5vw, 2.05rem);
+      line-height: 1.15;
+      letter-spacing: -0.015em;
+      color: var(--ink);
+    }
+    .feature-headline h2 em {
+      font-style: italic;
+      color: var(--accent-warm);
+    }
+    .feature-headline p {
+      font-size: var(--body);
+      color: var(--ink-soft);
+      max-width: 75ch;
+      margin-top: clamp(0.4rem, 0.8vw, 0.7rem);
+      line-height: 1.5;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: clamp(1.5rem, 3vw, 3rem);
+      flex: 1;
+      max-height: 100%;
+      overflow: hidden;
+      align-items: start;
+    }
+
+    .feature-list {
+      display: flex;
+      flex-direction: column;
+    }
+    .feature-list-label {
+      font-family: var(--font-mono);
+      font-size: var(--label);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
+      padding-bottom: clamp(0.5rem, 1vw, 0.85rem);
+      border-bottom: 2px solid var(--ink);
+      margin-bottom: clamp(0.4rem, 0.8vw, 0.7rem);
+    }
+    .feature-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 1rem;
+      padding: clamp(0.4rem, 0.8vw, 0.65rem) 0;
+      border-bottom: 1px dashed var(--line-soft);
+      align-items: center;
+    }
+    .feature-row:last-child { border-bottom: 0; }
+    .feature-name {
+      font-family: var(--font-display);
+      font-size: clamp(1rem, 1.4vw, 1.2rem);
+      color: var(--ink);
+      letter-spacing: -0.005em;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-family: var(--font-mono);
+      font-size: var(--label);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .status::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .status.partial {
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+    }
+    .status.partial::before { background: var(--accent); }
+    .status.not-yet {
+      color: var(--not-yet);
+      background: color-mix(in srgb, var(--not-yet) 14%, transparent);
+    }
+    .status.not-yet::before {
+      background: transparent;
+      border: 1.5px solid var(--not-yet);
+    }
+
+    .discussion {
+      display: flex;
+      flex-direction: column;
+      padding: clamp(1.25rem, 2.5vw, 2rem);
+      background: var(--paper);
+      border: 1px solid var(--line-soft);
+      border-left: 3px solid var(--accent-warm);
+      border-radius: 4px;
+    }
+    .discussion-label {
+      font-family: var(--font-mono);
+      font-size: var(--label);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent-warm);
+      margin-bottom: clamp(0.75rem, 1.5vw, 1.25rem);
+    }
+    .discussion-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: clamp(0.6rem, 1.2vw, 1rem);
+    }
+    .discussion-list li {
+      font-family: var(--font-display);
+      font-style: italic;
+      font-size: clamp(1rem, 1.45vw, 1.25rem);
+      line-height: 1.35;
+      color: var(--ink);
+      padding-left: 1.25rem;
+      position: relative;
+    }
+    .discussion-list li::before {
+      content: "?";
+      position: absolute;
+      left: 0;
+      top: 0;
+      font-family: var(--font-display);
+      font-style: italic;
+      color: var(--accent-warm);
+      font-weight: 400;
+    }
+
+    /* ===========================================
+       SLIDE 04 — PLAN TO MOVE FORWARD
+       Three big numbered cards
+       =========================================== */
+    .plan-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: clamp(1rem, 2vw, 2rem);
+      flex: 1;
+      max-height: 100%;
+      overflow: hidden;
+      align-items: stretch;
+      margin-top: clamp(1rem, 2vw, 1.5rem);
+    }
+    .plan-card {
+      display: flex;
+      flex-direction: column;
+      gap: clamp(0.75rem, 1.5vw, 1.25rem);
+      padding: clamp(1.25rem, 2.5vw, 2.25rem);
+      background: var(--paper);
+      border: 1px solid var(--line-soft);
+      border-radius: 4px;
+      position: relative;
+    }
+    .plan-card .card-num {
+      font-family: var(--font-display);
+      font-style: italic;
+      font-size: clamp(2.5rem, 4.5vw, 4rem);
+      color: var(--accent-warm);
+      line-height: 0.9;
+    }
+    .plan-card .card-owner {
+      font-family: var(--font-mono);
+      font-size: var(--label);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-mute);
+    }
+    .plan-card .card-task {
+      font-family: var(--font-display);
+      font-size: clamp(1.3rem, 2.2vw, 1.85rem);
+      line-height: 1.15;
+      color: var(--ink);
+      letter-spacing: -0.01em;
+    }
+    .plan-card .card-detail {
+      font-size: var(--body-sm);
+      color: var(--ink-soft);
+      line-height: 1.5;
+      margin-top: auto;
+      padding-top: clamp(0.75rem, 1.5vw, 1rem);
+      border-top: 1px solid var(--line-soft);
+    }
+    .plan-card.open {
+      background: transparent;
+      border-style: dashed;
+    }
+    .plan-card.open .card-num { color: var(--ink-mute); }
+    .plan-card.open .card-task { font-style: italic; color: var(--ink-soft); }
+
+    /* ===========================================
+       NAVIGATION CHROME
+       =========================================== */
+    .progress-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 2px;
+      background: var(--accent-warm);
+      z-index: 100;
+      transition: width 0.2s ease;
+    }
+    .keyboard-hint {
+      position: fixed;
+      bottom: clamp(1rem, 2vw, 1.5rem);
+      right: clamp(1rem, 2vw, 1.5rem);
+      font-family: var(--font-mono);
+      font-size: var(--label);
+      color: var(--ink-mute);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .slide-counter {
+      position: fixed;
+      bottom: clamp(1rem, 2vw, 1.5rem);
+      left: clamp(1rem, 2vw, 1.5rem);
+      font-family: var(--font-mono);
+      font-size: var(--label);
+      color: var(--ink-mute);
+      letter-spacing: 0.12em;
+      z-index: 100;
+    }
+    .slide-counter .current {
+      font-family: var(--font-display);
+      font-style: italic;
+      color: var(--accent-warm);
+      font-size: 1.4em;
+      line-height: 1;
+    }
+
+    /* ===========================================
+       REVEAL ANIMATIONS
+       =========================================== */
+    .reveal {
+      opacity: 0;
+      transform: translateY(24px);
+      transition:
+        opacity var(--dur) var(--ease),
+        transform var(--dur) var(--ease);
+    }
+    .slide.visible .reveal { opacity: 1; transform: translateY(0); }
+    .slide.visible .reveal:nth-child(1) { transition-delay: 0.05s; }
+    .slide.visible .reveal:nth-child(2) { transition-delay: 0.18s; }
+    .slide.visible .reveal:nth-child(3) { transition-delay: 0.32s; }
+    .slide.visible .reveal:nth-child(4) { transition-delay: 0.45s; }
+    .slide.visible .reveal:nth-child(5) { transition-delay: 0.58s; }
+
+    /* ===========================================
+       RESPONSIVE
+       =========================================== */
+    @media (max-height: 700px) {
+      :root {
+        --slide-padding: clamp(1.25rem, 3.5vw, 3rem);
+        --display-xl: clamp(2rem, 6vw, 4.5rem);
+        --display-lg: clamp(1.6rem, 4.5vw, 3rem);
+      }
+    }
+    @media (max-height: 600px) {
+      :root {
+        --slide-padding: clamp(0.85rem, 2.5vw, 2rem);
+        --display-xl: clamp(1.5rem, 5vw, 3rem);
+        --gap: clamp(0.5rem, 1vw, 0.85rem);
+      }
+      .keyboard-hint, .slide-counter { display: none; }
+    }
+    @media (max-width: 800px) {
+      .feature-grid, .plan-grid { grid-template-columns: 1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.2s !important;
+      }
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top progress bar (fills as you advance) -->
+  <div class="progress-bar" id="progress" style="width: 0%"></div>
+
+  <!-- Bottom-left counter -->
+  <div class="slide-counter">
+    <span class="current" id="counterCurrent">01</span>
+    <span> / <span id="counterTotal">04</span></span>
+  </div>
+
+  <!-- Bottom-right keyboard hint -->
+  <div class="keyboard-hint">← → · space</div>
+
+  <!-- ===========================================
+       SLIDE 01 — AGENDA
+       =========================================== -->
+  <section class="slide">
+    <div class="slide-strip reveal">
+      <div class="brand-mark">
+        <span class="dot"></span>
+        <span class="brand-name">Warmly</span>
+      </div>
+      <span class="meta">Co-founder sync · 01 / 04</span>
+    </div>
+    <div class="slide-content">
+      <div class="agenda-list">
+        <div class="agenda-row reveal">
+          <span class="num">01</span>
+          <div>
+            <h2 class="title">Demo</h2>
+            <span class="title-sub">A walk through what's actually built.</span>
+          </div>
+        </div>
+        <div class="agenda-row reveal">
+          <span class="num">02</span>
+          <div>
+            <h2 class="title">Alignment on key user experience &amp; features</h2>
+            <span class="title-sub">What we ship for the demo. What an INSEAD student really needs.</span>
+          </div>
+        </div>
+        <div class="agenda-row reveal">
+          <span class="num">03</span>
+          <div>
+            <h2 class="title">Plan to move forward</h2>
+            <span class="title-sub">Who does what before our next sync.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===========================================
+       SLIDE 02 — DEMO TRANSITION
+       =========================================== -->
+  <section class="slide transition-slide">
+    <div class="transition-content reveal">
+      <span class="transition-label">Section one</span>
+      <h2 class="transition-word"><em>Demo</em></h2>
+      <div class="transition-rule"></div>
+      <p class="transition-line">Let me show you what we have.</p>
+    </div>
+  </section>
+
+  <!-- ===========================================
+       SLIDE 03 — ALIGNMENT
+       =========================================== -->
+  <section class="slide">
+    <div class="slide-strip reveal">
+      <div class="brand-mark">
+        <span class="dot"></span>
+        <span class="brand-name">Warmly</span>
+      </div>
+      <span class="meta">Alignment · 03 / 04</span>
+    </div>
+    <div class="slide-content">
+      <div class="feature-headline reveal">
+        <h2>
+          A <em>personal networking assistant</em> that knows about you, your goals, your contacts, and your history with each — and helps you manage your network and achieve your objectives.
+        </h2>
+      </div>
+      <div class="feature-grid">
+        <div class="feature-list reveal">
+          <span class="feature-list-label">Features · status today</span>
+          <div class="feature-row">
+            <span class="feature-name">Contact discovery</span>
+            <span class="status partial">Partial</span>
+          </div>
+          <div class="feature-row">
+            <span class="feature-name">Background scraping &amp; enrichment</span>
+            <span class="status partial">Partial</span>
+          </div>
+          <div class="feature-row">
+            <span class="feature-name">Outreach drafting in one prompt</span>
+            <span class="status partial">Partial</span>
+          </div>
+          <div class="feature-row">
+            <span class="feature-name">Meeting preparation</span>
+            <span class="status partial">Partial</span>
+          </div>
+          <div class="feature-row">
+            <span class="feature-name">Conversation-history awareness</span>
+            <span class="status not-yet">Not yet</span>
+          </div>
+          <div class="feature-row">
+            <span class="feature-name">Meeting notes generation</span>
+            <span class="status not-yet">Not yet</span>
+          </div>
+          <div class="feature-row">
+            <span class="feature-name">Relationship management</span>
+            <span class="status not-yet">Not yet</span>
+          </div>
+        </div>
+        <aside class="discussion reveal">
+          <span class="discussion-label">To discuss together</span>
+          <ul class="discussion-list">
+            <li>Which features ship for the demo?</li>
+            <li>What's most useful for an <em>INSEAD student</em>?</li>
+            <li>INSEAD directory now — extension as the long-term <em>moat</em>?</li>
+            <li>Could the extension layer extend to other apps — <em>WhatsApp</em>?</li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===========================================
+       SLIDE 04 — PLAN TO MOVE FORWARD
+       =========================================== -->
+  <section class="slide">
+    <div class="slide-strip reveal">
+      <div class="brand-mark">
+        <span class="dot"></span>
+        <span class="brand-name">Warmly</span>
+      </div>
+      <span class="meta">Plan to move forward · 04 / 04</span>
+    </div>
+    <div class="slide-content">
+      <div class="reveal" style="max-width: 1100px;">
+        <h2 class="display display-md">Two clear lanes — and one open question.</h2>
+        <p class="lead" style="margin-top: clamp(0.5rem, 1vw, 0.85rem);">
+          Until our next sync.
+        </p>
+      </div>
+      <div class="plan-grid">
+        <div class="plan-card reveal">
+          <span class="card-num">01</span>
+          <span class="card-owner">Sanket</span>
+          <h3 class="card-task">Build the features we align on, ready for the demo.</h3>
+          <p class="card-detail">
+            Whichever subset we pick from slide 03 — focused, tested, demoable end-to-end.
+          </p>
+        </div>
+        <div class="plan-card reveal">
+          <span class="card-num">02</span>
+          <span class="card-owner">Liyang</span>
+          <h3 class="card-task">Customer insights &amp; expert interviews.</h3>
+          <p class="card-detail">
+            Stress-test market need and willingness to pay before we invest more dev hours.
+          </p>
+        </div>
+        <div class="plan-card open reveal">
+          <span class="card-num">03</span>
+          <span class="card-owner">Open</span>
+          <h3 class="card-task">Anything else?</h3>
+          <p class="card-detail">
+            What are we missing? What should we drop? Cadence, tools, anything you'd add.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===========================================
+       NAVIGATION + ANIMATION CONTROLLER
+       Single-file, zero dependencies.
+       =========================================== -->
+  <script>
+    /**
+     * SlidePresentation
+     * Handles keyboard, scroll, swipe, progress bar, and reveal animations.
+     */
+    class SlidePresentation {
+      constructor() {
+        this.slides = Array.from(document.querySelectorAll('.slide'));
+        this.progress = document.getElementById('progress');
+        this.counterCurrent = document.getElementById('counterCurrent');
+        this.counterTotal = document.getElementById('counterTotal');
+        this.currentIndex = 0;
+        this.touchStartY = 0;
+
+        this.counterTotal.textContent = String(this.slides.length).padStart(2, '0');
+
+        this.setupIntersectionObserver();
+        this.setupKeyboardNav();
+        this.setupTouchNav();
+      }
+
+      setupIntersectionObserver() {
+        // Add .visible to slide when ≥40% in view → triggers staggered reveal
+        const obs = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((e) => {
+              if (e.isIntersecting && e.intersectionRatio > 0.4) {
+                e.target.classList.add('visible');
+                const idx = this.slides.indexOf(e.target);
+                this.currentIndex = idx;
+                this.updateChrome();
+              }
+            });
+          },
+          { threshold: [0, 0.4, 0.6, 1] }
+        );
+        this.slides.forEach((s) => obs.observe(s));
+      }
+
+      updateChrome() {
+        const pct = ((this.currentIndex + 1) / this.slides.length) * 100;
+        this.progress.style.width = pct + '%';
+        this.counterCurrent.textContent = String(this.currentIndex + 1).padStart(2, '0');
+      }
+
+      goTo(idx) {
+        const next = Math.max(0, Math.min(this.slides.length - 1, idx));
+        this.slides[next].scrollIntoView({ behavior: 'smooth' });
+      }
+
+      setupKeyboardNav() {
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
+            e.preventDefault();
+            this.goTo(this.currentIndex + 1);
+          } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') {
+            e.preventDefault();
+            this.goTo(this.currentIndex - 1);
+          } else if (e.key === 'Home') {
+            this.goTo(0);
+          } else if (e.key === 'End') {
+            this.goTo(this.slides.length - 1);
+          }
+        });
+      }
+
+      setupTouchNav() {
+        document.addEventListener('touchstart', (e) => {
+          this.touchStartY = e.touches[0].clientY;
+        }, { passive: true });
+        document.addEventListener('touchend', (e) => {
+          const dy = e.changedTouches[0].clientY - this.touchStartY;
+          if (Math.abs(dy) > 50) {
+            this.goTo(this.currentIndex + (dy < 0 ? 1 : -1));
+          }
+        }, { passive: true });
+      }
+    }
+
+    // Boot
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => new SlidePresentation());
+    } else {
+      new SlidePresentation();
+    }
+  </script>
+</body>
+</html>
