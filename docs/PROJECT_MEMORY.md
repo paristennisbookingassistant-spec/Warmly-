@@ -666,3 +666,38 @@ Detailed plan saved at `~/.claude/plans/ok-all-downloaded-here-humming-finch.md`
 - Equity discussion (was flagged as "early month" priority).
 - Validate the phased rollout split (frontend with Liyang, backend hardening + AI engine with partner).
 - Decide on artifact double-generation fix priority vs. Phase 2.4 chat refresh.
+
+**Queued for after Phase 3 — prompt audit + outreach skill port:**
+
+Liyang flagged on May 6 that he wants a deep-dive audit of every LLM prompt
+in the codebase before pushing further on AI features. Two-part scope:
+
+1. **Prompt inventory.** Map every place a prompt is constructed:
+   - `lib/ai/scoring.ts` → `buildScoringPrompt` (contact relevance scoring)
+   - `lib/ai/coaching.ts` → `buildCoachingSystemPrompt` + `buildCoachingUserPrompt` (chat coaching)
+   - `lib/ai/generation.ts` → `buildGenerationPrompts` (6 artifact types)
+   - `lib/ai/context.ts` → `summarizeConversation` + `extractStylePreferences`
+   - `app/api/discovery/extract/route.ts` (LinkedIn profile parsing)
+   - `app/api/discovery/resolve-company/route.ts` (company disambiguation)
+   - `app/api/conversations/[id]/messages/route.ts` → `ARTIFACT_INTRO` (deterministic, not LLM, but worth documenting)
+   For each: what input shape, what output shape, which user-facing feature it powers, when does it fire. Output: `docs/PROMPT_INVENTORY.md`.
+
+2. **Outreach skill port.** Take the prompts and adaptive-question logic from
+   the gstack `/outreach` skill (LinkedIn scrape → profile card → adaptive
+   clarifying questions → draft in user's voice) and bake them into
+   `lib/ai/generation.ts` for the `outreach_draft` artifact type. Then layer
+   on the self-improving voice-matching architecture:
+     - Phase 1: After every artifact gets marked sent, store the *final edited*
+       text in a `sent_messages` table or in the existing artifacts row
+       (`content` already has the user's edits — we just need to flag accepted)
+     - Phase 2: Background job (cron or threshold) extracts style features
+       (tone, sentence length, formality, opener/closer patterns) into
+       `users.user_memory.learned_patterns` (PRD Section 5.9 already specified)
+     - Phase 3: Every `generateArtifact` call reads `user_memory` and biases
+       output toward the user's actual voice. Already partially wired —
+       `extractStylePreferences` runs on every PUT /api/artifacts/[id] when
+       `user_edit_distance` is provided. Verify this is firing correctly.
+
+   Optional accelerator for new users: onboarding asks "paste 2-3 messages
+   you've sent in your real voice" so the system has a baseline before any
+   real artifacts are generated.
