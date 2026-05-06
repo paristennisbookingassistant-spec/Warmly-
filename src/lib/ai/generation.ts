@@ -1,17 +1,26 @@
 /**
  * ai/generation.ts
- * Artifact generation using Claude Haiku/Sonnet based on artifact type.
- * See PRD Section 5.4.1 for model routing rules.
+ *
+ * Routes artifact generation to the right prompt builder based on artifact
+ * type. Outreach-family artifacts (connection_note, outreach_draft,
+ * follow_up_draft) get the rich Warmly outreach skill prompt with
+ * philosophy + voice rules + anti-AI gates + templates. Other artifact types
+ * (meeting_prep, meeting_notes, action_plan) currently use the generic
+ * prompt — Phase D will give them their own skill files.
  */
 
 import type { ArtifactType } from "@/types/artifacts";
 import type { GenerationRequest, GenerationResponse } from "@/types/ai";
 import { getModelForArtifact, MAX_TOKENS } from "./models";
 import { callMiniMax } from "./minimax";
+import {
+  buildOutreachPrompts,
+  isOutreachFamily,
+} from "@/lib/ai/prompts/buildOutreachPrompt";
 
 /**
  * Generates an artifact for a given contact/conversation context.
- * Routes to the correct model tier based on artifact type.
+ * Routes to the correct prompt builder based on artifact type.
  */
 export async function generateArtifact(
   request: GenerationRequest
@@ -21,7 +30,7 @@ export async function generateArtifact(
     request.force_reasoning_model
   );
 
-  const { systemPrompt, userPrompt } = buildGenerationPrompts(request);
+  const { systemPrompt, userPrompt } = buildPrompts(request);
 
   const response = await callMiniMax(
     [{ role: "user", content: userPrompt }],
@@ -45,13 +54,36 @@ export async function generateArtifact(
   };
 }
 
-function buildGenerationPrompts(request: GenerationRequest): {
+/**
+ * Top-level prompt router. Picks the right builder per artifact family.
+ */
+function buildPrompts(request: GenerationRequest): {
+  systemPrompt: string;
+  userPrompt: string;
+} {
+  // Outreach-family artifacts use the rich Warmly outreach skill
+  if (isOutreachFamily(request.artifact_type)) {
+    return buildOutreachPrompts(request.artifact_type, request);
+  }
+
+  // All other artifact types fall through to the generic prompt
+  // (TODO Phase D: split meeting_prep/meeting_notes and action_plan
+  // into their own skill files for parity with outreach.)
+  return buildGenericPrompts(request);
+}
+
+/**
+ * Generic prompt builder used for meeting_prep, meeting_notes, action_plan.
+ * Identical to what shipped before this refactor — preserved verbatim so
+ * those artifact types remain unchanged while we ship the outreach skill.
+ */
+function buildGenericPrompts(request: GenerationRequest): {
   systemPrompt: string;
   userPrompt: string;
 } {
   const { artifact_type, context, user_instructions } = request;
 
-  const systemPrompt = buildSystemPrompt(artifact_type, context.user_memory);
+  const systemPrompt = buildGenericSystemPrompt(artifact_type, context.user_memory);
 
   const userPrompt = `## User Profile
 ${JSON.stringify(context.user_profile, null, 2)}
@@ -73,7 +105,7 @@ Respond with ONLY a valid JSON object matching the ${artifact_type} content stru
   return { systemPrompt, userPrompt };
 }
 
-function buildSystemPrompt(
+function buildGenericSystemPrompt(
   artifactType: ArtifactType,
   userMemory: GenerationRequest["context"]["user_memory"]
 ): string {
