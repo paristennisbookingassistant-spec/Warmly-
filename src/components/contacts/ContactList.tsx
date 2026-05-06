@@ -175,7 +175,7 @@ export default function ContactList({
         style={{
           gridTemplateColumns: "minmax(180px, 1.5fr) minmax(180px, 1.5fr) 110px minmax(140px, 1fr) 100px 100px",
           color: "var(--ink-3)",
-          borderBottom: "1px solid var(--line)",
+          borderBottom: "1px solid var(--line-soft)",
         }}
         role="row"
       >
@@ -202,19 +202,20 @@ export default function ContactList({
       </div>
 
       {/* Rows */}
-      <div className="divide-y" style={{ borderColor: "var(--line-soft)" }}>
-        {sorted.map((c) => {
+      <div>
+        {sorted.map((c, idx) => {
           const tags = deriveContextTags(c);
           const health = getRelationshipHealthFromDate(c.last_interaction_at);
           return (
             <button
               key={c.id}
               onClick={() => onOpenContact(c)}
-              className="w-full text-left grid items-center px-3 py-3 transition-colors hover:bg-surface-2"
+              className="w-full text-left grid items-center px-3 py-3 transition-colors cursor-pointer hover:bg-surface-2"
               style={{
                 gridTemplateColumns:
                   "minmax(180px, 1.5fr) minmax(180px, 1.5fr) 110px minmax(140px, 1fr) 100px 100px",
-                borderTop: "1px solid var(--line-soft)",
+                // Only draw between rows (skip the very first one — header already has its border)
+                borderTop: idx === 0 ? "none" : "1px solid var(--line-soft)",
               }}
               role="row"
             >
