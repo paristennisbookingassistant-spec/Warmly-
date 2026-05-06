@@ -375,13 +375,13 @@ export default function ContactDetail({
           </section>
 
           {/* Career timeline */}
-          {contact.career_history.length > 0 && (
+          {(contact.career_history?.length ?? 0) > 0 && (
             <section>
               <h3 className="text-[13px] font-semibold text-ink mb-4">
                 Career path
               </h3>
               <Timeline
-                items={contact.career_history}
+                items={contact.career_history ?? []}
                 renderItem={(role) => (
                   <div>
                     <div className="text-[14px] font-medium text-ink leading-snug">
@@ -410,13 +410,13 @@ export default function ContactDetail({
           )}
 
           {/* Education timeline */}
-          {contact.education.length > 0 && (
+          {(contact.education?.length ?? 0) > 0 && (
             <section>
               <h3 className="text-[13px] font-semibold text-ink mb-4">
                 Education
               </h3>
               <Timeline
-                items={contact.education}
+                items={contact.education ?? []}
                 renderItem={(edu) => (
                   <div>
                     <div className="text-[14px] font-medium text-ink leading-snug">

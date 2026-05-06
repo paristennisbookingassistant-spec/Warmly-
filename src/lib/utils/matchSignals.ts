@@ -37,23 +37,37 @@ const TARGET_SECTORS = [
 
 const CONSULTING_FIRMS = ["Bain", "McKinsey", "BCG", "Deloitte", "Accenture"];
 
+/**
+ * Null-safe key extractor. Returns lowercased string, or "" if key is null/undefined.
+ * Used because contact data scraped from LinkedIn sometimes has missing fields
+ * (e.g. a career_history entry where `company` is null because the extension
+ * couldn't extract it). Without this guard, .toLowerCase() throws and crashes
+ * the entire contact detail page during SSR.
+ */
+function safeLower(value: string | null | undefined): string {
+  return (value ?? "").toLowerCase();
+}
+
 function findOverlap<T>(
   a: T[],
   b: T[],
-  key: (item: T) => string
+  key: (item: T) => string | null | undefined
 ): { match: string } | null {
-  const seen = new Set(a.map((item) => key(item).toLowerCase()).filter(Boolean));
+  const seen = new Set(
+    a.map((item) => safeLower(key(item))).filter(Boolean)
+  );
   for (const item of b) {
-    const k = key(item).toLowerCase();
+    const k = safeLower(key(item));
     if (k && seen.has(k)) {
-      return { match: key(item) };
+      const original = key(item);
+      if (original) return { match: original };
     }
   }
   return null;
 }
 
 function listIncludes(haystack: string[], needles: string[]): string[] {
-  const lower = haystack.map((h) => h.toLowerCase());
+  const lower = haystack.filter(Boolean).map((h) => safeLower(h));
   return needles.filter((n) =>
     lower.some((h) => h.includes(n.toLowerCase()))
   );
@@ -66,10 +80,12 @@ export function buildMatchSignals({
   const signals: string[] = [];
 
   // ---- Strongest: school overlap with the user
+  // Both user.education and contact.education default to [] in the schema, but
+  // guard with `?? []` in case a row was migrated/seeded without that default.
   if (user?.education && user.education.length > 0) {
     const overlap = findOverlap(
       user.education,
-      contact.education,
+      contact.education ?? [],
       (e) => e.school
     );
     if (overlap) {
@@ -81,7 +97,7 @@ export function buildMatchSignals({
   if (user?.career_history && user.career_history.length > 0) {
     const overlap = findOverlap(
       user.career_history,
-      contact.career_history,
+      contact.career_history ?? [],
       (r) => r.company
     );
     if (overlap) {
@@ -90,9 +106,12 @@ export function buildMatchSignals({
   }
 
   // ---- Domain match: contact in user's target sectors (from current title or recent companies)
+  // career_history entries may have missing `company` — guard with `?? ""`
   const contactCompanies = [
     contact.company ?? "",
-    ...contact.career_history.slice(0, 3).map((r) => r.company),
+    ...(contact.career_history ?? [])
+      .slice(0, 3)
+      .map((r) => r.company ?? ""),
   ].filter(Boolean);
   const matchingSectors = listIncludes(contactCompanies, TARGET_SECTORS);
   if (matchingSectors.length > 0) {
@@ -101,16 +120,14 @@ export function buildMatchSignals({
 
   // ---- Career path: consulting → investing pivot signal
   const userIsConsultant =
-    user?.career_history?.some((r) =>
-      CONSULTING_FIRMS.some((f) =>
-        r.company.toLowerCase().includes(f.toLowerCase())
-      )
-    ) ?? false;
-  const contactWasConsultant = contact.career_history.some((r) =>
-    CONSULTING_FIRMS.some((f) =>
-      r.company.toLowerCase().includes(f.toLowerCase())
-    )
-  );
+    user?.career_history?.some((r) => {
+      const company = safeLower(r.company);
+      return CONSULTING_FIRMS.some((f) => company.includes(f.toLowerCase()));
+    }) ?? false;
+  const contactWasConsultant = (contact.career_history ?? []).some((r) => {
+    const company = safeLower(r.company);
+    return CONSULTING_FIRMS.some((f) => company.includes(f.toLowerCase()));
+  });
   const contactNowInvestor =
     matchingSectors.includes("VC") ||
     matchingSectors.includes("PE") ||
