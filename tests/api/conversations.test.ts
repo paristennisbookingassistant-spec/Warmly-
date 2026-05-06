@@ -25,6 +25,10 @@ vi.mock("@/lib/ai/coaching", () => ({
     tokens_input: 500,
     tokens_output: 100,
   }),
+  // detectArtifactTrigger is called in the messages route BEFORE deciding
+  // coaching vs. artifact path. Tests use plain conversational messages so
+  // the trigger never fires — return null to keep them on the coaching path.
+  detectArtifactTrigger: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock("@/lib/ai/generation", () => ({

@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getSupabaseServerClient, type SupabaseServerClient } from "@/lib/supabase/server";
-import { processCoachingMessage } from "@/lib/ai/coaching";
+import { processCoachingMessage, detectArtifactTrigger } from "@/lib/ai/coaching";
 import { generateArtifact } from "@/lib/ai/generation";
 import { summarizeConversation, SUMMARIZATION_THRESHOLD } from "@/lib/ai/context";
 import { searchCompanyIntel } from "@/lib/search";
@@ -44,6 +44,37 @@ import type {
 } from "@/types/database";
 import type { ArtifactType } from "@/types/artifacts";
 import type { ConversationSummary } from "@/types/ai";
+
+// ---------------------------------------------------------------------------
+// Constants — deterministic reply when artifact is triggered
+// ---------------------------------------------------------------------------
+
+/**
+ * When a user message triggers artifact generation in a contact session,
+ * we SKIP the coaching LLM call and use this deterministic short reply
+ * instead. Prevents the artifact body and the chat reply from diverging
+ * (the bug Session 8 in PROJECT_MEMORY.md captured).
+ *
+ * The reply also signals intent ("opening it now") so the user knows the
+ * card below the message is the canonical, editable version.
+ */
+const ARTIFACT_INTRO: Record<ArtifactType, (name: string) => string> = {
+  connection_note: (name) =>
+    `Drafted a connection note for ${name} — opening it now. Review, edit if it doesn't sound like you, then send.`,
+  outreach_draft: (name) =>
+    `Drafted your outreach to ${name} — opening it now. Tweak anything that feels off, then mark it as sent when you've actually sent it.`,
+  meeting_prep: (name) =>
+    `Prepared the briefing for your meeting with ${name} — opening it now. Skim the discussion topics and questions before you walk in.`,
+  meeting_notes: (name) =>
+    `Captured your notes from the conversation with ${name} — opening it now. Add anything I missed before finalizing.`,
+  action_plan: (name) =>
+    `Mapped out the next steps with ${name} — opening it now. Adjust the timing if anything's unrealistic.`,
+  follow_up_draft: (name) =>
+    `Drafted your follow-up to ${name} — opening it now. Make it sound like you, then mark as sent.`,
+};
+
+const ARTIFACT_FALLBACK_FAILURE = (name: string) =>
+  `I tried to draft something for ${name} but the generation failed — try again in a moment.`;
 
 // ---------------------------------------------------------------------------
 // Validation schemas
@@ -281,54 +312,25 @@ export async function POST(
     .order("created_at", { ascending: false })
     .limit(10);
 
-  // 8. Call coaching AI
-  const aiStart = Date.now();
-  const coachingResult = await processCoachingMessage({
-    context: {
-      user_profile: {
-        career_history: userTyped.career_history,
-        education: userTyped.education,
-        goals: userTyped.goals,
-        networking_preferences: userTyped.networking_preferences,
-      },
-      user_memory: userTyped.user_memory,
-      conversation_summary: conversationSummaryText,
-      recent_messages: recentMessages.map((m) => ({
-        role: m.role as "user" | "agent",
-        content: m.content,
-      })),
-      contact_profile: contact
-        ? {
-            name: contact.name,
-            current_title: contact.current_title,
-            company: contact.company,
-            career_history: contact.career_history ?? [],
-            education: contact.education ?? [],
-            location: contact.location,
-            profile_snapshot: contact.profile_snapshot,
-          }
-        : undefined,
-    },
-    user_message: parsed.data.content,
-  });
+  // 8. Detect artifact trigger BEFORE deciding LLM strategy.
+  //    If a contact session + trigger keyword matches, we skip the coaching
+  //    LLM call entirely and let artifact generation be the single source of
+  //    truth (preventing the chat-reply / artifact-body divergence bug from
+  //    Session 8). Otherwise, run coaching as normal.
+  const earlyTrigger = detectArtifactTrigger(parsed.data.content);
+  const shouldGenerateArtifact = Boolean(earlyTrigger && contact);
 
-  logAiCall({
-    route: "POST /api/conversations/[id]/messages (coaching)",
-    model: coachingResult.model_used,
-    tokensInput: coachingResult.tokens_input,
-    tokensOutput: coachingResult.tokens_output,
-    latencyMs: Date.now() - aiStart,
-  });
-
-  // 9. Generate artifact if triggered
   const artifactsCreated: Artifact[] = [];
   const artifactIds: string[] = [];
+  let agentMessage = "";
+  let coachingModelUsed = "n/a";
 
-  if (coachingResult.trigger_artifact && contact) {
+  if (shouldGenerateArtifact && earlyTrigger && contact) {
+    // ---- Artifact path: skip coaching, generate the artifact only ----
     try {
-      // For meeting_prep, fetch company intel
+      // For meeting_prep, fetch company intel first
       let companyIntelRaw: string | undefined;
-      if (coachingResult.trigger_artifact === "meeting_prep" && contact.company) {
+      if (earlyTrigger === "meeting_prep" && contact.company) {
         try {
           const intel = await searchCompanyIntel(contact.company);
           companyIntelRaw = intel.raw_context;
@@ -339,7 +341,7 @@ export async function POST(
 
       const genStart = Date.now();
       const genResult = await generateArtifact({
-        artifact_type: coachingResult.trigger_artifact,
+        artifact_type: earlyTrigger,
         context: {
           user_profile: {
             career_history: userTyped.career_history,
@@ -374,7 +376,7 @@ export async function POST(
       });
 
       logAiCall({
-        route: `POST /api/conversations/[id]/messages (generate:${coachingResult.trigger_artifact})`,
+        route: `POST /api/conversations/[id]/messages (generate:${earlyTrigger})`,
         model: genResult.model_used,
         tokensInput: genResult.tokens_input,
         tokensOutput: genResult.tokens_output,
@@ -388,7 +390,7 @@ export async function POST(
           user_id: user.id,
           contact_id: contact.id,
           conversation_id: conversationId,
-          type: coachingResult.trigger_artifact,
+          type: earlyTrigger,
           content: genResult.content,
           status: "draft",
           version: 1,
@@ -400,12 +402,65 @@ export async function POST(
       if (!artifactError && savedArtifact) {
         artifactsCreated.push(savedArtifact as Artifact);
         artifactIds.push(savedArtifact.id as string);
+        // Deterministic short reply — the artifact card carries the content
+        agentMessage = ARTIFACT_INTRO[earlyTrigger](contact.name);
+        coachingModelUsed = `deterministic+${genResult.model_used}`;
+      } else {
+        console.error("Failed to save artifact:", artifactError);
+        agentMessage = ARTIFACT_FALLBACK_FAILURE(contact.name);
+        coachingModelUsed = "deterministic-fallback";
       }
     } catch (err) {
       console.error("Artifact generation failed:", err);
-      // Continue — return coaching response without artifact
+      agentMessage = ARTIFACT_FALLBACK_FAILURE(contact.name);
+      coachingModelUsed = "deterministic-fallback";
     }
+  } else {
+    // ---- Coaching path: no artifact trigger, run conversational LLM ----
+    const aiStart = Date.now();
+    const coachingResult = await processCoachingMessage({
+      context: {
+        user_profile: {
+          career_history: userTyped.career_history,
+          education: userTyped.education,
+          goals: userTyped.goals,
+          networking_preferences: userTyped.networking_preferences,
+        },
+        user_memory: userTyped.user_memory,
+        conversation_summary: conversationSummaryText,
+        recent_messages: recentMessages.map((m) => ({
+          role: m.role as "user" | "agent",
+          content: m.content,
+        })),
+        contact_profile: contact
+          ? {
+              name: contact.name,
+              current_title: contact.current_title,
+              company: contact.company,
+              career_history: contact.career_history ?? [],
+              education: contact.education ?? [],
+              location: contact.location,
+              profile_snapshot: contact.profile_snapshot,
+            }
+          : undefined,
+      },
+      user_message: parsed.data.content,
+    });
+
+    logAiCall({
+      route: "POST /api/conversations/[id]/messages (coaching)",
+      model: coachingResult.model_used,
+      tokensInput: coachingResult.tokens_input,
+      tokensOutput: coachingResult.tokens_output,
+      latencyMs: Date.now() - aiStart,
+    });
+
+    agentMessage = coachingResult.agent_message;
+    coachingModelUsed = coachingResult.model_used;
   }
+
+  // Reference for the rest of the function — preserves prior shape
+  void coachingModelUsed;
 
   // 10. Save agent message with artifact_ids
   const { data: savedAgentMessage, error: agentMsgError } = await supabase
@@ -413,7 +468,7 @@ export async function POST(
     .insert({
       conversation_id: conversationId,
       role: "agent",
-      content: coachingResult.agent_message,
+      content: agentMessage,
       artifacts_generated: artifactIds,
     })
     .select()

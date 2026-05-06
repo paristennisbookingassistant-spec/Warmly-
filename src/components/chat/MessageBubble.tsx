@@ -7,11 +7,13 @@ import ArtifactCard from "./ArtifactCard";
 interface MessageBubbleProps {
   message: ConversationMessage;
   artifacts?: Artifact[];
+  onOpenArtifact?: (artifact: Artifact) => void;
 }
 
 export default function MessageBubble({
   message,
   artifacts = [],
+  onOpenArtifact,
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
 
@@ -19,22 +21,18 @@ export default function MessageBubble({
     <div
       className={`flex gap-3 animate-slide-up ${isUser ? "flex-row-reverse" : "flex-row"} group`}
     >
-      {/* Agent avatar */}
+      {/* Agent avatar — italic serif "c" mark */}
       {!isUser && (
-        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center flex-shrink-0 mt-1 shadow-sm">
-          <svg
-            className="w-3.5 h-3.5 text-white"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2.5}
-              d="M13 10V3L4 14h7v7l9-11h-7z"
-            />
-          </svg>
+        <div
+          className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-1"
+          style={{
+            background: "var(--ink)",
+            color: "var(--bg)",
+          }}
+        >
+          <span className="font-display italic text-[15px] leading-none -mt-0.5">
+            c
+          </span>
         </div>
       )}
 
@@ -43,17 +41,28 @@ export default function MessageBubble({
       >
         {/* Message bubble */}
         <div
-          className={
+          className="px-4 py-2.5 rounded-2xl text-[14px] leading-relaxed"
+          style={
             isUser
-              ? "px-4 py-2.5 bg-blue-600 text-white rounded-2xl rounded-br-sm text-sm leading-relaxed shadow-sm"
-              : "px-4 py-2.5 bg-white border border-gray-100 shadow-sm rounded-2xl rounded-bl-sm text-sm leading-relaxed text-gray-800"
+              ? {
+                  background: "var(--ink)",
+                  color: "var(--bg)",
+                  borderBottomRightRadius: 6,
+                }
+              : {
+                  background: "var(--surface)",
+                  color: "var(--ink)",
+                  border: "1px solid var(--line-soft)",
+                  boxShadow: "var(--shadow-1)",
+                  borderBottomLeftRadius: 6,
+                }
           }
         >
           <p className="whitespace-pre-wrap">{message.content}</p>
         </div>
 
         {/* Timestamp — visible on hover */}
-        <span className="text-[10px] text-gray-400 px-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+        <span className="text-[10px] text-ink-4 px-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
           {formatRelativeTime(message.created_at)}
         </span>
 
@@ -61,7 +70,11 @@ export default function MessageBubble({
         {artifacts.length > 0 && (
           <div className="flex flex-col gap-2 w-full mt-1">
             {artifacts.map((artifact) => (
-              <ArtifactCard key={artifact.id} artifact={artifact} />
+              <ArtifactCard
+                key={artifact.id}
+                artifact={artifact}
+                onOpen={onOpenArtifact}
+              />
             ))}
           </div>
         )}

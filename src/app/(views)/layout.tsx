@@ -7,24 +7,57 @@ import { cn } from "@/lib/utils";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
-const NAV_ITEMS = [
+type NavItem = {
+  href: string;
+  label: string;
+  kbd: string;
+  icon: (active: boolean) => React.ReactElement;
+};
+
+// Minimal stroke icons — match the design system (1.5px stroke, 14px box).
+const strokeProps = {
+  fill: "none" as const,
+  stroke: "currentColor",
+  strokeWidth: 1.5,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  viewBox: "0 0 24 24",
+};
+
+const NAV_ITEMS: NavItem[] = [
   {
     href: "/chat",
     label: "Chat",
-    iconPath:
-      "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
+    kbd: "G C",
+    icon: () => (
+      <svg {...strokeProps} className="w-3.5 h-3.5">
+        <path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-4 4v-4H6a2 2 0 0 1-2-2z" />
+      </svg>
+    ),
   },
   {
     href: "/contacts",
     label: "Contacts",
-    iconPath:
-      "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z",
+    kbd: "G N",
+    icon: () => (
+      <svg {...strokeProps} className="w-3.5 h-3.5">
+        <circle cx="9" cy="8" r="3" />
+        <path d="M3 19c.8-3 3-5 6-5s5.2 2 6 5" />
+        <circle cx="17" cy="7" r="2" />
+        <path d="M16 13c2.5 0 4.5 1.8 5 4.5" />
+      </svg>
+    ),
   },
   {
     href: "/goals",
     label: "Goals",
-    iconPath:
-      "M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9",
+    kbd: "G G",
+    icon: () => (
+      <svg {...strokeProps} className="w-3.5 h-3.5">
+        <circle cx="12" cy="12" r="8" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    ),
   },
 ];
 
@@ -51,7 +84,6 @@ export default function ViewsLayout({
       }
     });
     // Forward session to Chrome extension (if installed) via postMessage.
-    // The auth-bridge content script running on this page stores it in chrome.storage.local.
     void supabase.auth.getSession().then((response: { data: { session: Session | null } }) => {
       const session = response.data.session;
       if (session) {
@@ -72,29 +104,27 @@ export default function ViewsLayout({
   }, []);
 
   return (
-    <div className="flex h-screen overflow-x-auto bg-[#111111] min-w-[768px]">
+    <div
+      className="flex h-screen overflow-x-auto min-w-[768px]"
+      style={{ background: "var(--sidebar-bg)" }}
+    >
       {/* Sidebar */}
-      <aside className="w-56 flex-shrink-0 flex flex-col h-full bg-[#111111]">
-        {/* Logo area */}
-        <div className="px-5 pt-6 pb-5 flex items-center gap-3">
-          <div className="w-7 h-7 rounded-lg bg-[#2563eb] flex items-center justify-center flex-shrink-0">
-            <svg
-              className="w-3.5 h-3.5 text-white"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2.5}
-                d="M13 10V3L4 14h7v7l9-11h-7z"
-              />
-            </svg>
-          </div>
-          <span className="text-sm font-semibold text-white tracking-tight">
-            Networking Coach
+      <aside
+        className="w-[232px] flex-shrink-0 flex flex-col h-full"
+        style={{ background: "var(--sidebar-bg)" }}
+      >
+        {/* Brand / wordmark */}
+        <div className="px-5 pt-6 pb-5 flex items-baseline gap-1.5">
+          <span
+            className="font-display italic text-[26px] leading-none tracking-tight"
+            style={{ color: "var(--sidebar-ink)" }}
+          >
+            Warmly
           </span>
+          <span
+            className="inline-block w-[5px] h-[5px] rounded-full -translate-y-[10px]"
+            style={{ background: "var(--accent)" }}
+          />
         </div>
 
         {/* Nav items */}
@@ -107,70 +137,82 @@ export default function ViewsLayout({
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-150",
-                  isActive
-                    ? "bg-white/[0.08] text-white"
-                    : "text-[#a3a3a3] hover:bg-white/[0.04] hover:text-white"
+                  "flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] transition-colors duration-150 group"
                 )}
+                style={{
+                  color: isActive
+                    ? "var(--sidebar-ink)"
+                    : "var(--sidebar-ink-2)",
+                  background: isActive ? "var(--sidebar-active)" : "transparent",
+                }}
               >
-                <svg
+                <span
                   className="flex-shrink-0"
-                  style={{ width: "16px", height: "16px" }}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+                  style={{
+                    color: isActive ? "var(--accent)" : "var(--sidebar-ink-3)",
+                  }}
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={isActive ? 2.5 : 2}
-                    d={item.iconPath}
-                  />
-                </svg>
-                {item.label}
+                  {item.icon(isActive)}
+                </span>
+                <span className="flex-1">{item.label}</span>
+                <span
+                  className="font-mono text-[10px] tracking-wider"
+                  style={{ color: "var(--sidebar-ink-3)" }}
+                >
+                  {item.kbd}
+                </span>
               </Link>
             );
           })}
         </nav>
 
         {/* User section */}
-        <div className="px-3 pb-4 pt-2">
-          <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/[0.04] transition-all duration-150 group cursor-pointer">
-            <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0">
-              <span className="text-[11px] font-semibold text-white/60">
+        <div
+          className="px-3 pb-4 pt-3 border-t"
+          style={{ borderColor: "var(--sidebar-line)" }}
+        >
+          <div className="flex items-center gap-2.5 px-2 py-2 rounded-md group cursor-pointer">
+            <div
+              className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
+              style={{
+                background: "oklch(1 0 0 / 0.06)",
+                boxShadow: "inset 0 0 0 1px oklch(1 0 0 / 0.08)",
+              }}
+            >
+              <span
+                className="text-[11px] font-medium"
+                style={{ color: "var(--sidebar-ink-2)" }}
+              >
                 {userName?.[0]?.toUpperCase() ?? "?"}
               </span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[12px] font-medium text-white/70 truncate leading-tight">
+              <p
+                className="text-[12.5px] font-medium truncate leading-tight"
+                style={{ color: "var(--sidebar-ink)" }}
+              >
                 {userName ?? "Loading..."}
               </p>
-              <p className="text-[10px] text-[#525252] truncate leading-tight mt-0.5">
+              <p
+                className="text-[10.5px] truncate leading-tight mt-0.5"
+                style={{ color: "var(--sidebar-ink-3)" }}
+              >
                 {userEmail ?? ""}
               </p>
             </div>
             <button
-              className="opacity-0 group-hover:opacity-100 transition-opacity text-[#525252] hover:text-[#a3a3a3]"
+              className="opacity-0 group-hover:opacity-100 transition-opacity"
               title="Sign out"
               aria-label="Sign out"
+              style={{ color: "var(--sidebar-ink-3)" }}
               onClick={async () => {
                 const supabase = getSupabaseBrowserClient();
                 await supabase.auth.signOut();
                 window.location.href = "/login";
               }}
             >
-              <svg
-                className="w-3.5 h-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                />
+              <svg {...strokeProps} className="w-3.5 h-3.5">
+                <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
             </button>
           </div>
@@ -178,7 +220,12 @@ export default function ViewsLayout({
       </aside>
 
       {/* Main content area */}
-      <main className="flex-1 overflow-hidden bg-[#fafafa]">{children}</main>
+      <main
+        className="flex-1 overflow-hidden"
+        style={{ background: "var(--bg)" }}
+      >
+        {children}
+      </main>
     </div>
   );
 }
