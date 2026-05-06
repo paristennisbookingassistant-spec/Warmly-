@@ -222,12 +222,15 @@ export default function Today({ contacts, onOpenContact }: TodayProps) {
   return (
     <section className="space-y-4">
       <div>
-        <h2 className="font-display italic text-[24px] text-ink leading-tight tracking-tight">
-          Today
-        </h2>
-        <p className="text-[12.5px] text-ink-3 mt-1">
-          Three people worth your attention right now.
+        <p
+          className="text-[10.5px] uppercase tracking-[0.12em] font-medium"
+          style={{ color: "var(--ink-3)" }}
+        >
+          Today · coach&rsquo;s focus
         </p>
+        <h2 className="font-display italic text-[24px] text-ink leading-tight tracking-tight mt-1">
+          Three people worth your attention right now.
+        </h2>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
