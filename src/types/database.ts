@@ -92,6 +92,40 @@ export interface UserMemory {
 export type SubscriptionTier = "free" | "pro" | "team";
 export type SubscriptionStatus = "active" | "trialing" | "past_due" | "canceled";
 
+// ---------------------------------------------------------------------------
+// User Learnings — closes the self-improvement loop
+// ---------------------------------------------------------------------------
+
+export type LearningStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "archived";
+
+export type LearningCategory =
+  | "voice"
+  | "strategy"
+  | "gate"
+  | "hook"
+  | "tone"
+  | "other";
+
+export interface UserLearning {
+  id: string;
+  user_id: string;
+  learning: string;
+  status: LearningStatus;
+  approved_at: ISODateString | null;
+  /** 1-10. >=8 with no_conflict auto-approves. */
+  confidence: number;
+  source_artifact_id: string | null;
+  category: LearningCategory;
+  original_draft_excerpt: string | null;
+  sent_excerpt: string | null;
+  created_at: ISODateString;
+  updated_at: ISODateString;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -104,6 +138,13 @@ export interface User {
   networking_preferences: NetworkingPreferences;
   /** Agent's long-term memory — nullable until first interaction */
   user_memory: UserMemory | null;
+  /**
+   * Free-form markdown identity narrative — auto-built from onboarding
+   * answers, optional CV/cover-letter upload, and ongoing conversation.
+   * Editable by user via Settings. Injected into outreach prompts to
+   * make every draft specifically in the user's voice.
+   */
+  profile_md: string | null;
   subscription_status: SubscriptionStatus;
   subscription_tier: SubscriptionTier;
 }

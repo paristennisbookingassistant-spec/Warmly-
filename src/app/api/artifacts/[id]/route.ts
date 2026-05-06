@@ -14,6 +14,12 @@ import { z } from "zod";
 import { getSupabaseServerClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import { extractStylePreferences } from "@/lib/ai/context";
 import {
+  distillLearnings,
+  shouldAutoApprove,
+  shouldDiscard,
+  type LearningCandidate,
+} from "@/lib/ai/learnings";
+import {
   unauthorized,
   notFound,
   validationError,
@@ -173,6 +179,22 @@ export async function PUT(
     );
   }
 
+  // Side-effect: when an outreach-family artifact transitions to 'sent',
+  // distill 1-3 generalizable learnings from the diff between the original
+  // AI draft and the version the user actually sent. Phase C of the
+  // self-improvement loop. Confidence >= 8 + no_conflict auto-approves;
+  // confidence 5-7 surfaces to the user for explicit approval; <5 discarded.
+  const isOutreachSent =
+    parsed.data.status === "sent" && outreachTypes.includes(currentArtifact.type);
+  if (isOutreachSent) {
+    void triggerLessonDistillation(
+      user.id,
+      currentArtifact,
+      (parsed.data.content ?? currentArtifact.content) as Record<string, unknown>,
+      supabase
+    );
+  }
+
   const response: UpdateArtifactResponse = {
     data: updatedArtifact as Artifact,
     error: null,
@@ -267,4 +289,99 @@ function extractTextFromContent(content: Record<string, unknown>): string {
   if (typeof content.message === "string") return content.message;
   if (typeof content.person_summary === "string") return content.person_summary;
   return JSON.stringify(content);
+}
+
+// ---------------------------------------------------------------------------
+// Phase C — lesson distillation on Mark-as-sent
+// ---------------------------------------------------------------------------
+
+/**
+ * Fired when the user marks an outreach artifact as sent. Compares what we
+ * drafted vs. what they sent, distills 1-3 generalizable learnings, and
+ * inserts them into user_learnings with the correct status:
+ *   - confidence >= 8 + no_conflict: status='approved' (auto)
+ *   - confidence 5-7 or has_conflict: status='pending' (user reviews)
+ *   - confidence < 5: discarded (not even inserted)
+ */
+async function triggerLessonDistillation(
+  userId: string,
+  sourceArtifact: Artifact,
+  sentContent: Record<string, unknown>,
+  supabase: SupabaseServerClient
+): Promise<void> {
+  try {
+    // Pull the original draft (what we generated initially — version 1).
+    // For now we approximate by comparing the artifact's stored content
+    // to the sent content. If they're identical (no edits), we skip —
+    // there's nothing meaningful to distill.
+    const originalText = extractTextFromContent(sourceArtifact.content);
+    const sentText = extractTextFromContent(sentContent);
+
+    if (!originalText || !sentText || originalText === sentText) {
+      return;
+    }
+
+    // Pull existing approved learnings to feed into the distillation prompt
+    const { data: existingLearnings } = await supabase
+      .from("user_learnings")
+      .select("learning")
+      .eq("user_id", userId)
+      .eq("status", "approved")
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    const existingTexts = (existingLearnings ?? []).map(
+      (l) => l.learning as string
+    );
+
+    // Pull contact name for context
+    let contactName: string | undefined;
+    if (sourceArtifact.contact_id) {
+      const { data: contactData } = await supabase
+        .from("contacts")
+        .select("name")
+        .eq("id", sourceArtifact.contact_id)
+        .single();
+      contactName = contactData?.name as string | undefined;
+    }
+
+    const candidates = await distillLearnings({
+      original_draft: originalText,
+      sent_version: sentText,
+      existing_learnings: existingTexts,
+      artifact_type: sourceArtifact.type,
+      contact_name: contactName,
+    });
+
+    if (candidates.length === 0) return;
+
+    const rows = candidates
+      .filter((c) => !shouldDiscard(c))
+      .map((c: LearningCandidate) => {
+        const autoApprove = shouldAutoApprove(c);
+        return {
+          user_id: userId,
+          learning: c.learning,
+          status: autoApprove ? "approved" : "pending",
+          approved_at: autoApprove ? new Date().toISOString() : null,
+          confidence: c.confidence,
+          source_artifact_id: sourceArtifact.id,
+          category: c.category,
+          original_draft_excerpt: originalText.slice(0, 500),
+          sent_excerpt: sentText.slice(0, 500),
+        };
+      });
+
+    if (rows.length === 0) return;
+
+    const { error: insertError } = await supabase
+      .from("user_learnings")
+      .insert(rows);
+
+    if (insertError) {
+      console.error("Lesson insert failed:", insertError);
+    }
+  } catch (err) {
+    console.error("Lesson distillation failed:", err);
+  }
 }

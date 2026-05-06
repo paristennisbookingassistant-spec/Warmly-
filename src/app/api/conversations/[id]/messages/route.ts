@@ -339,6 +339,19 @@ export async function POST(
         }
       }
 
+      // Pull approved learnings — Phase C self-improvement signal that
+      // gets injected into the outreach prompt
+      const { data: approvedLearningsData } = await supabase
+        .from("user_learnings")
+        .select("learning")
+        .eq("user_id", user.id)
+        .eq("status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(30);
+      const approvedLearnings = (approvedLearningsData ?? []).map(
+        (r) => r.learning as string
+      );
+
       const genStart = Date.now();
       const genResult = await generateArtifact({
         artifact_type: earlyTrigger,
@@ -350,6 +363,8 @@ export async function POST(
             networking_preferences: userTyped.networking_preferences,
           },
           user_memory: userTyped.user_memory,
+          user_profile_md: userTyped.profile_md,
+          approved_learnings: approvedLearnings,
           contact_profile: {
             name: contact.name,
             current_title: contact.current_title,

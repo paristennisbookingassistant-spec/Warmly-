@@ -23,6 +23,45 @@ type OutreachFamilyType =
   | "follow_up_draft";
 
 /**
+ * Build the per-user identity block from the auto-built profile_md narrative.
+ * This is the high-leverage section: it's where Liyang-specific (or
+ * user-specific) hooks, transition story, and voice live. Empty until
+ * onboarding generates the initial profile.
+ */
+function buildPerUserIdentitySection(profileMd: string | null | undefined): string {
+  if (!profileMd || profileMd.trim().length === 0) {
+    return "";
+  }
+  return `## User identity (from their auto-built profile)
+
+${profileMd.trim()}
+
+Use this profile to ground EVERY draft in this specific person. Reference their actual schools, employers, transition story, and hooks — not generic versions. If the profile mentions specific phrases the user uses, weave them in naturally where appropriate.`;
+}
+
+/**
+ * Build the approved-learnings block. Each learning is a generalizable
+ * pattern distilled from a previously-sent message — the user has either
+ * explicitly approved it or it auto-approved (confidence >=8 + no_conflict).
+ *
+ * These are HIGH-PRIORITY: the user has already taught us these. Apply them.
+ */
+function buildApprovedLearningsSection(
+  learnings: string[] | undefined
+): string {
+  if (!learnings || learnings.length === 0) return "";
+  const numbered = learnings
+    .slice(0, 30)
+    .map((l, i) => `${i + 1}. ${l}`)
+    .join("\n");
+  return `## Approved learnings (the user has explicitly approved these — APPLY THEM)
+
+${numbered}
+
+These are not suggestions — they are rules the agent has learned from how the user actually sends messages. If a learning conflicts with the universal voice rules above, the learning wins.`;
+}
+
+/**
  * Build the per-user "writing style" block that gets injected into the system
  * prompt. Reads from user_memory.writing_style which is auto-populated by
  * extractStylePreferences on every artifact edit (PRD 5.9 Layer 1).
@@ -145,13 +184,33 @@ Respond with ONLY a valid JSON object matching the schema. No prose around it.`
 /**
  * Public API — used by `lib/ai/generation.ts` to build prompts for
  * outreach-family artifact types.
+ *
+ * Composes:
+ *   - Universal skill content (philosophy, gates, templates, schema)
+ *   - User identity narrative (auto-built from onboarding + CV)
+ *   - User's learned writing style (from edit history)
+ *   - The user/contact context for this specific call
  */
 export function buildOutreachPrompts(
   artifactType: OutreachFamilyType,
   request: GenerationRequest
 ): { systemPrompt: string; userPrompt: string } {
+  const identitySection = buildPerUserIdentitySection(
+    request.context.user_profile_md
+  );
+  const learningsSection = buildApprovedLearningsSection(
+    request.context.approved_learnings
+  );
   const styleSection = buildPerUserStyleSection(request.context.user_memory);
-  const systemPrompt = buildOutreachSystemPrompt(artifactType, styleSection);
+
+  // Order matters: identity (who) → learnings (what user has taught us) →
+  // style (auto-extracted preferences). Later sections take priority when
+  // there's conflict (per-user rules trump universal defaults).
+  const combined = [identitySection, learningsSection, styleSection]
+    .filter((s) => s.length > 0)
+    .join("\n\n");
+
+  const systemPrompt = buildOutreachSystemPrompt(artifactType, combined);
   const userPrompt = buildOutreachUserPrompt(artifactType, request);
   return { systemPrompt, userPrompt };
 }
