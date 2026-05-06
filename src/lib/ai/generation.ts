@@ -17,6 +17,14 @@ import {
   buildOutreachPrompts,
   isOutreachFamily,
 } from "@/lib/ai/prompts/buildOutreachPrompt";
+import {
+  buildMeetingPrompts,
+  isMeetingFamily,
+} from "@/lib/ai/prompts/buildMeetingPrompt";
+import {
+  buildActionPrompts,
+  isActionFamily,
+} from "@/lib/ai/prompts/buildActionPrompt";
 
 /**
  * Generates an artifact for a given contact/conversation context.
@@ -56,19 +64,27 @@ export async function generateArtifact(
 
 /**
  * Top-level prompt router. Picks the right builder per artifact family.
+ *
+ * Each family has its own skill file (`src/lib/ai/skills/<family>.ts`)
+ * carrying universal philosophy + structure, plus a per-family prompt
+ * builder (`src/lib/ai/prompts/build<Family>Prompt.ts`) that composes
+ * universal content with per-user data (profile_md + approved learnings
+ * + writing style).
  */
 function buildPrompts(request: GenerationRequest): {
   systemPrompt: string;
   userPrompt: string;
 } {
-  // Outreach-family artifacts use the rich Warmly outreach skill
   if (isOutreachFamily(request.artifact_type)) {
     return buildOutreachPrompts(request.artifact_type, request);
   }
-
-  // All other artifact types fall through to the generic prompt
-  // (TODO Phase D: split meeting_prep/meeting_notes and action_plan
-  // into their own skill files for parity with outreach.)
+  if (isMeetingFamily(request.artifact_type)) {
+    return buildMeetingPrompts(request.artifact_type, request);
+  }
+  if (isActionFamily(request.artifact_type)) {
+    return buildActionPrompts(request);
+  }
+  // Fallback for any future artifact type without a dedicated skill yet
   return buildGenericPrompts(request);
 }
 
