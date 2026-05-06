@@ -3,8 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import Button from "@/components/ui/Button";
-import Input from "@/components/ui/Input";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -33,67 +31,68 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-blue-950 px-4 relative overflow-hidden">
-      {/* Background glow */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="w-full max-w-sm relative z-10">
-        {/* Card */}
-        <div className="bg-white rounded-2xl shadow-2xl shadow-black/30 p-8">
-          {/* Logo */}
-          <div className="flex flex-col items-center mb-8">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/30 mb-4">
-              <svg
-                className="w-5 h-5 text-white"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2.5}
-                  d="M13 10V3L4 14h7v7l9-11h-7z"
-                />
-              </svg>
-            </div>
-            <h1 className="text-lg font-semibold text-gray-900">
-              Networking Coach
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">Reset your password</p>
+    <div
+      className="min-h-screen flex items-center justify-center px-4"
+      style={{ background: "var(--bg)" }}
+    >
+      <div className="w-full max-w-sm">
+        {/* Brand */}
+        <div className="flex flex-col items-center mb-8">
+          <div className="flex items-baseline gap-1.5 mb-3">
+            <span
+              className="font-display italic text-[36px] leading-none tracking-tight"
+              style={{ color: "var(--ink)" }}
+            >
+              Warmly
+            </span>
+            <span
+              className="inline-block w-1.5 h-1.5 rounded-full -translate-y-[14px]"
+              style={{ background: "var(--accent)" }}
+            />
           </div>
+          <p
+            className="font-display italic text-[20px]"
+            style={{ color: "var(--ink-2)" }}
+          >
+            Reset your password.
+          </p>
+        </div>
 
+        {/* Card */}
+        <div
+          className="rounded-xl p-7"
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--line)",
+            boxShadow: "var(--shadow-2)",
+          }}
+        >
           {sent ? (
-            /* Success state */
             <div className="space-y-4">
-              <div className="flex items-start gap-3 text-sm text-green-700 bg-green-50 border border-green-100 rounded-lg px-4 py-3">
-                <svg
-                  className="w-5 h-5 flex-shrink-0 mt-0.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                <div>
-                  <p className="font-medium">Check your email</p>
-                  <p className="mt-0.5 text-green-600">
-                    We sent a password reset link to{" "}
-                    <span className="font-medium">{email}</span>. Click the link
-                    to set a new password.
-                  </p>
-                </div>
+              <div
+                className="rounded-md px-4 py-3"
+                style={{
+                  background: "var(--accent-soft)",
+                  color: "var(--accent-ink)",
+                  border: "1px solid color-mix(in oklch, var(--accent) 25%, var(--line))",
+                }}
+              >
+                <p className="text-[13px] font-medium">Check your email.</p>
+                <p className="text-[12px] mt-1 leading-relaxed">
+                  We sent a reset link to{" "}
+                  <span className="font-medium">{email}</span>. Click it to set
+                  a new password.
+                </p>
               </div>
-              <p className="text-xs text-center text-gray-400">
-                Didn&apos;t receive it? Check your spam folder or{" "}
+              <p
+                className="text-[11.5px] text-center"
+                style={{ color: "var(--ink-4)" }}
+              >
+                Didn&rsquo;t receive it? Check your spam folder or{" "}
                 <button
                   onClick={() => setSent(false)}
-                  className="text-blue-500 hover:text-blue-400 underline transition-colors"
+                  className="underline hover:opacity-80 transition-opacity"
+                  style={{ color: "var(--accent-ink)" }}
                 >
                   try again
                 </button>
@@ -101,74 +100,74 @@ export default function ForgotPasswordPage() {
               </p>
             </div>
           ) : (
-            /* Form state */
             <form onSubmit={handleSubmit} className="space-y-4">
-              <p className="text-sm text-gray-500 text-center -mt-2 mb-2">
-                Enter your account email and we&apos;ll send a reset link.
+              <p
+                className="text-[12.5px] text-center -mt-1 leading-relaxed"
+                style={{ color: "var(--ink-3)" }}
+              >
+                Enter your account email and we&rsquo;ll send a reset link.
               </p>
 
-              <Input
-                label="Email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-                autoComplete="email"
-                leftIcon={
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"
-                    />
-                  </svg>
-                }
-              />
+              <div>
+                <label
+                  className="block text-[11px] uppercase tracking-[0.12em] font-medium mb-1.5"
+                  style={{ color: "var(--ink-3)" }}
+                >
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                  autoComplete="email"
+                  autoFocus
+                  className="w-full px-3.5 py-2.5 text-[14px] rounded-md focus:outline-none transition-colors placeholder:text-ink-4"
+                  style={{
+                    background: "var(--surface)",
+                    border: "1px solid var(--line)",
+                    color: "var(--ink)",
+                  }}
+                />
+              </div>
 
               {error && (
-                <div className="flex items-start gap-2 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2.5">
-                  <svg
-                    className="w-4 h-4 flex-shrink-0 mt-0.5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
+                <div
+                  className="text-[12.5px] rounded-md px-3 py-2"
+                  style={{
+                    background:
+                      "color-mix(in oklch, var(--bad) 8%, var(--bg))",
+                    color: "var(--bad)",
+                    border:
+                      "1px solid color-mix(in oklch, var(--bad) 20%, var(--line))",
+                  }}
+                >
                   {error}
                 </div>
               )}
 
-              <Button
+              <button
                 type="submit"
-                variant="primary"
-                loading={loading}
-                className="w-full"
-                size="lg"
+                disabled={loading}
+                className="w-full py-2.5 rounded-full text-[13px] font-medium text-bg transition-colors disabled:opacity-50"
+                style={{ background: "var(--ink)" }}
               >
-                Send reset link
-              </Button>
+                {loading ? "Sending…" : "Send reset link"}
+              </button>
             </form>
           )}
         </div>
 
-        <p className="text-center text-sm text-slate-400 mt-6">
+        <p
+          className="text-center text-[12.5px] mt-6"
+          style={{ color: "var(--ink-3)" }}
+        >
           Remember your password?{" "}
           <Link
             href="/login"
-            className="text-blue-400 hover:text-blue-300 font-medium transition-colors"
+            className="font-medium hover:opacity-80 transition-opacity"
+            style={{ color: "var(--accent-ink)" }}
           >
             Sign in
           </Link>
