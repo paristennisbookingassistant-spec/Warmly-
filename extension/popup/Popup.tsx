@@ -395,7 +395,7 @@ export default function Popup() {
   const handleStartDiscovery = useCallback(async () => {
     if (!companyName.trim()) return;
 
-    // Find the LinkedIn tab to send the message to
+    // Confirm a LinkedIn tab is open — CDP needs one to attach to.
     const tabs = await chrome.tabs.query({ url: "*://www.linkedin.com/*" });
     const linkedInTab = tabs[0];
     if (!linkedInTab?.id) {
@@ -404,44 +404,65 @@ export default function Popup() {
       return;
     }
 
-    // Send discovery command to content script
-    chrome.tabs.sendMessage(
-      linkedInTab.id,
+    // Route through the service worker's CDP_DISCOVER handler.
+    //
+    // Why CDP and not the content-script orchestrator:
+    //   The content-script path navigates the tab via window.location.href,
+    //   which kills the content script (page reload destroys its JS context).
+    //   The orchestrator's await never resolves and discovery stalls on the
+    //   company page — exactly the "company opens but no alumni search" bug.
+    //
+    //   CDP (chrome.debugger) drives the tab from the service worker. The
+    //   browser process holds the connection — page navigations don't break
+    //   it. Same flow (resolve company → filter by school → visit profiles
+    //   → extract → save), but it actually runs to completion.
+    //
+    // We optimistically flip the popup to "active" before the response so the
+    // user sees the progress card immediately. SESSION_PROGRESS broadcasts
+    // from the SW will keep the counter updated; on completion or error the
+    // SW's final response settles the view.
+    const sessionId = crypto.randomUUID();
+    setPs((prev) => ({
+      ...prev,
+      view: "active",
+      session: {
+        session_id: sessionId,
+        user_id: "",
+        status: "running",
+        profiles_viewed: 0,
+        profiles_scored: 0,
+        profiles_saved: 0,
+        target_companies: [companyName.trim()],
+        current_company_index: 0,
+        started_at: new Date().toISOString(),
+        last_heartbeat: new Date().toISOString(),
+        completed_companies: [],
+        processed_urls: [],
+      },
+    }));
+
+    chrome.runtime.sendMessage(
       {
-        type: "START_DISCOVERY",
+        type: "CDP_DISCOVER",
         payload: {
-          session_id: crypto.randomUUID(),
-          target_companies: [companyName.trim()],
-          max_profiles: 25,
-          school_id: schoolId,
+          companyName: companyName.trim(),
+          schoolId: schoolId || "5176", // dropdown default = INSEAD
         },
       },
       (response) => {
         if (chrome.runtime.lastError) {
-          setSavedMsg("Refresh LinkedIn page first");
-          setTimeout(() => setSavedMsg(null), 3000);
+          setSavedMsg("Discovery failed to start. Reload the extension.");
+          setTimeout(() => setSavedMsg(null), 4000);
+          setPs((prev) => ({ ...prev, view: "idle" }));
           return;
         }
-        if (response?.ok) {
-          setPs((prev) => ({
-            ...prev,
-            view: "active",
-            session: {
-              session_id: crypto.randomUUID(),
-              user_id: "",
-              status: "running",
-              profiles_viewed: 0,
-              profiles_scored: 0,
-              profiles_saved: 0,
-              target_companies: [companyName.trim()],
-              current_company_index: 0,
-              started_at: new Date().toISOString(),
-              last_heartbeat: new Date().toISOString(),
-              completed_companies: [],
-              processed_urls: [],
-            },
-          }));
+        if (response?.ok === false) {
+          setSavedMsg(response.error ?? "Discovery failed");
+          setTimeout(() => setSavedMsg(null), 5000);
+          setPs((prev) => ({ ...prev, view: "idle" }));
         }
+        // ok === true: SESSION_PROGRESS handler keeps state synced;
+        // final SESSION_PROGRESS with state COMPLETED flips the view.
       }
     );
   }, [companyName, schoolId]);
