@@ -13,6 +13,7 @@ import type { ArtifactType } from "@/types/artifacts";
 import type { GenerationRequest, GenerationResponse } from "@/types/ai";
 import { getModelForArtifact, MAX_TOKENS } from "./models";
 import { callMiniMax } from "./minimax";
+import { sanitizeOutreachContent } from "./sanitizeOutreach";
 import {
   buildOutreachPrompts,
   isOutreachFamily,
@@ -52,7 +53,21 @@ export async function generateArtifact(
     throw new Error(`Generation model returned non-JSON response: ${text}`);
   }
 
-  const content = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+  const rawContent = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+
+  // Defense-in-depth: deterministic post-processing for outreach-family
+  // artifacts. Strips em-dashes and enforces the 300-char limit on
+  // connection_note. The system prompt asks the model to do this; the
+  // sanitizer guarantees it. See sanitizeOutreach.ts for the full rationale.
+  const { content, warnings } = sanitizeOutreachContent(
+    request.artifact_type,
+    rawContent
+  );
+  if (warnings.length > 0) {
+    console.log(
+      `[outreach sanitize] ${request.artifact_type}: ${warnings.join("; ")}`
+    );
+  }
 
   return {
     content,
