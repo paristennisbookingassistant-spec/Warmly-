@@ -48,12 +48,48 @@ export async function generateArtifact(
 
   const text = response.content;
 
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  // Strip code fences if the model wrapped the JSON in ```json ... ```
+  const fencedMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+  const candidate = fencedMatch ? fencedMatch[1] : text;
+  const jsonMatch = candidate.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
-    throw new Error(`Generation model returned non-JSON response: ${text}`);
+    console.error(
+      `[generate ${request.artifact_type}] Non-JSON response from model. First 500 chars:`,
+      text.slice(0, 500)
+    );
+    throw new Error(`Generation model returned non-JSON response`);
   }
 
-  const rawContent = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+  let rawContent: Record<string, unknown>;
+  try {
+    rawContent = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+  } catch (err) {
+    console.error(
+      `[generate ${request.artifact_type}] JSON parse failed. Raw match:`,
+      jsonMatch[0].slice(0, 500)
+    );
+    throw new Error(
+      `Generation model returned malformed JSON: ${err instanceof Error ? err.message : "unknown"}`
+    );
+  }
+
+  // Some models occasionally return the artifact under alternate keys
+  // (note, body, text, draft) instead of message. Normalize before
+  // sanitization so the rest of the pipeline doesn't see an empty field.
+  if (typeof rawContent.message !== "string" || rawContent.message.trim().length === 0) {
+    const fallbackKeys = ["note", "body", "text", "draft", "content"] as const;
+    for (const k of fallbackKeys) {
+      const v = rawContent[k];
+      if (typeof v === "string" && v.trim().length > 0) {
+        console.warn(
+          `[generate ${request.artifact_type}] message empty/missing, hoisted from "${k}"`
+        );
+        rawContent.message = v;
+        delete rawContent[k];
+        break;
+      }
+    }
+  }
 
   // Defense-in-depth: deterministic post-processing for outreach-family
   // artifacts. Strips em-dashes and enforces the 300-char limit on
@@ -66,6 +102,28 @@ export async function generateArtifact(
   if (warnings.length > 0) {
     console.log(
       `[outreach sanitize] ${request.artifact_type}: ${warnings.join("; ")}`
+    );
+  }
+
+  // Final guard: outreach-family artifacts MUST have a non-empty message.
+  // Saving an empty card is worse than failing — the user would see a blank
+  // artifact and lose trust. Throwing here lets the route fall through to
+  // the deterministic "I tried to draft something but it failed" fallback,
+  // which prompts the user to retry.
+  if (
+    (request.artifact_type === "connection_note" ||
+      request.artifact_type === "outreach_draft" ||
+      request.artifact_type === "follow_up_draft") &&
+    (typeof content.message !== "string" || content.message.trim().length === 0)
+  ) {
+    console.error(
+      `[generate ${request.artifact_type}] Empty message after sanitize. Raw content keys:`,
+      Object.keys(rawContent).join(", "),
+      "First 300 chars of raw:",
+      JSON.stringify(rawContent).slice(0, 300)
+    );
+    throw new Error(
+      `Generation produced empty ${request.artifact_type} message`
     );
   }
 

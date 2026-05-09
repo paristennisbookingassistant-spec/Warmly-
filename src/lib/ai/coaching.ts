@@ -9,6 +9,7 @@ import type { CoachingRequest, CoachingResponse } from "@/types/ai";
 import type { ArtifactType } from "@/types/artifacts";
 import { getModelForConversation, MAX_TOKENS } from "./models";
 import { callMiniMax } from "./minimax";
+import { stripDashes } from "./sanitizeOutreach";
 
 /**
  * Determines whether a user message requires strategic coaching (Sonnet)
@@ -144,7 +145,12 @@ export async function processCoachingMessage(
     { systemPrompt, maxTokens: MAX_TOKENS[model] }
   );
 
-  const agentMessage = response.content;
+  // Strip em/en-dashes from the coaching reply too. The system prompt asks
+  // the model not to use them; the artifact pipeline guarantees it via the
+  // sanitizer. This makes coaching consistent — the user shouldn't see
+  // em-dashes in chat just because the message went through the coaching
+  // path instead of the artifact path.
+  const { text: agentMessage } = stripDashes(response.content);
 
   return {
     agent_message: agentMessage,
