@@ -141,13 +141,16 @@ export function useChat() {
       }
 
       if (!res.ok || !json?.data) {
-        const reason =
-          json?.error?.message ??
-          (res.status === 429
+        const serverReason = json?.error?.message;
+        const fallback =
+          res.status === 429
             ? "You're sending messages too quickly. Wait a moment and try again."
             : res.status >= 500
-              ? "The coach is having trouble responding. Please try again."
-              : `Request failed (${res.status}). Please try again.`);
+              ? "The coach is having trouble responding."
+              : `Request failed (${res.status}).`;
+        // Prefer the server's specific reason; otherwise show fallback.
+        // Always remind the user that Retry will resend their message.
+        const reason = `${serverReason ?? fallback} Click Retry to resend your message.`;
         failGracefully(reason);
         return;
       }
@@ -171,7 +174,7 @@ export function useChat() {
         )
       );
     } catch {
-      failGracefully("Couldn't reach the coach — check your connection and try again.");
+      failGracefully("Couldn't reach the coach. Check your connection, then click Retry to resend your message.");
     } finally {
       setIsSending(false);
     }

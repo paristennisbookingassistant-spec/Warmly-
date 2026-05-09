@@ -433,45 +433,61 @@ export async function POST(
   } else {
     // ---- Coaching path: no artifact trigger, run conversational LLM ----
     const aiStart = Date.now();
-    const coachingResult = await processCoachingMessage({
-      context: {
-        user_profile: {
-          career_history: userTyped.career_history,
-          education: userTyped.education,
-          goals: userTyped.goals,
-          networking_preferences: userTyped.networking_preferences,
+    try {
+      const coachingResult = await processCoachingMessage({
+        context: {
+          user_profile: {
+            career_history: userTyped.career_history,
+            education: userTyped.education,
+            goals: userTyped.goals,
+            networking_preferences: userTyped.networking_preferences,
+          },
+          user_memory: userTyped.user_memory,
+          conversation_summary: conversationSummaryText,
+          recent_messages: recentMessages.map((m) => ({
+            role: m.role as "user" | "agent",
+            content: m.content,
+          })),
+          contact_profile: contact
+            ? {
+                name: contact.name,
+                current_title: contact.current_title,
+                company: contact.company,
+                career_history: contact.career_history ?? [],
+                education: contact.education ?? [],
+                location: contact.location,
+                profile_snapshot: contact.profile_snapshot,
+              }
+            : undefined,
         },
-        user_memory: userTyped.user_memory,
-        conversation_summary: conversationSummaryText,
-        recent_messages: recentMessages.map((m) => ({
-          role: m.role as "user" | "agent",
-          content: m.content,
-        })),
-        contact_profile: contact
-          ? {
-              name: contact.name,
-              current_title: contact.current_title,
-              company: contact.company,
-              career_history: contact.career_history ?? [],
-              education: contact.education ?? [],
-              location: contact.location,
-              profile_snapshot: contact.profile_snapshot,
-            }
-          : undefined,
-      },
-      user_message: parsed.data.content,
-    });
+        user_message: parsed.data.content,
+      });
 
-    logAiCall({
-      route: "POST /api/conversations/[id]/messages (coaching)",
-      model: coachingResult.model_used,
-      tokensInput: coachingResult.tokens_input,
-      tokensOutput: coachingResult.tokens_output,
-      latencyMs: Date.now() - aiStart,
-    });
+      logAiCall({
+        route: "POST /api/conversations/[id]/messages (coaching)",
+        model: coachingResult.model_used,
+        tokensInput: coachingResult.tokens_input,
+        tokensOutput: coachingResult.tokens_output,
+        latencyMs: Date.now() - aiStart,
+      });
 
-    agentMessage = coachingResult.agent_message;
-    coachingModelUsed = coachingResult.model_used;
+      agentMessage = coachingResult.agent_message;
+      coachingModelUsed = coachingResult.model_used;
+    } catch (err) {
+      // The LLM call failed (MiniMax key invalid, quota, timeout, network, ...).
+      // Roll back the user message we just inserted so the conversation
+      // doesn't end up with a hanging user-only bubble in the DB. Then return
+      // the underlying reason so the UI can show something actionable.
+      console.error("Coaching LLM call failed:", err);
+      await supabase
+        .from("conversation_messages")
+        .delete()
+        .eq("id", savedUserMessage.id);
+
+      const reason =
+        err instanceof Error ? err.message : "Unknown error";
+      return internalError(`Coach is unavailable: ${reason}`);
+    }
   }
 
   // Reference for the rest of the function — preserves prior shape
