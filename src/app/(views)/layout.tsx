@@ -6,6 +6,9 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
+import Onboarding from "@/components/onboarding/Onboarding";
+
+const ONBOARDING_KEY = "warmly.onboarded";
 
 type NavItem = {
   href: string;
@@ -49,6 +52,18 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    href: "/meetings",
+    label: "Meetings",
+    kbd: "G M",
+    icon: () => (
+      <svg {...strokeProps} className="w-3.5 h-3.5">
+        <rect x="9" y="3" width="6" height="11" rx="3" />
+        <path d="M5 11a7 7 0 0 0 14 0" />
+        <path d="M12 18v3" />
+      </svg>
+    ),
+  },
+  {
     href: "/goals",
     label: "Goals",
     kbd: "G G",
@@ -69,6 +84,16 @@ export default function ViewsLayout({
   const pathname = usePathname();
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
+  // null = not yet checked; false = not done; true = done.
+  const [onboarded, setOnboarded] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    try {
+      setOnboarded(localStorage.getItem(ONBOARDING_KEY) === "1");
+    } catch {
+      setOnboarded(true); // fail open if localStorage isn't available
+    }
+  }, []);
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -102,6 +127,24 @@ export default function ViewsLayout({
       }
     });
   }, []);
+
+  // Gate: while we're checking, show a quiet placeholder so we don't flash the app.
+  if (onboarded === null) {
+    return <div className="h-screen" style={{ background: "var(--bg)" }} />;
+  }
+
+  // Gate: first-time users see Onboarding before the app shell.
+  if (onboarded === false) {
+    const finish = () => {
+      try {
+        localStorage.setItem(ONBOARDING_KEY, "1");
+      } catch {
+        // ignore
+      }
+      setOnboarded(true);
+    };
+    return <Onboarding onDone={finish} onSkip={finish} />;
+  }
 
   return (
     <div
@@ -200,6 +243,25 @@ export default function ViewsLayout({
                 {userEmail ?? ""}
               </p>
             </div>
+            <button
+              className="opacity-0 group-hover:opacity-100 transition-opacity"
+              title="Replay onboarding"
+              aria-label="Replay onboarding"
+              style={{ color: "var(--sidebar-ink-3)" }}
+              onClick={() => {
+                try {
+                  localStorage.removeItem(ONBOARDING_KEY);
+                } catch {
+                  // ignore
+                }
+                setOnboarded(false);
+              }}
+            >
+              <svg {...strokeProps} className="w-3.5 h-3.5">
+                <path d="M3 12a9 9 0 1 0 3-6.7" />
+                <path d="M3 4v5h5" />
+              </svg>
+            </button>
             <button
               className="opacity-0 group-hover:opacity-100 transition-opacity"
               title="Sign out"

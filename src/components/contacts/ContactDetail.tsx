@@ -16,12 +16,14 @@ import type { Contact, Artifact, User } from "@/types/database";
 import Avatar from "@/components/ui/Avatar";
 import ArtifactCard from "@/components/chat/ArtifactCard";
 import ArtifactDrawer from "@/components/chat/ArtifactDrawer";
+import MeetingStrip from "@/components/contacts/MeetingStrip";
 import { formatRelativeTime } from "@/lib/utils";
 import {
   buildMatchSignals,
   getRelationshipHealthFromDate,
   type RelationshipHealth,
 } from "@/lib/utils/matchSignals";
+import { RECORDINGS } from "@/lib/mock/recordings";
 
 interface ContactDetailProps {
   contact: Contact;
@@ -243,6 +245,18 @@ export default function ContactDetail({
   const health = getRelationshipHealthFromDate(contact.last_interaction_at);
   const tier = contact.tier;
 
+  // Mock meeting strip — match by contact name (case-insensitive). Real linkage
+  // will land when meetings get a backend.
+  const linkedMeetings = useMemo(
+    () =>
+      RECORDINGS.filter(
+        (r) => r.contactName.toLowerCase() === contact.name.toLowerCase()
+      ),
+    [contact.name]
+  );
+
+  const nextSteps = useMemo(() => buildNextSteps(contact), [contact]);
+
   async function handleNotesBlur() {
     if (notes === (contact.notes ?? "")) return;
     setIsSavingNotes(true);
@@ -436,6 +450,25 @@ export default function ContactDetail({
             </section>
           )}
 
+          {/* Meetings strip */}
+          <section>
+            <div className="flex items-baseline justify-between mb-3">
+              <h3 className="text-[13px] font-semibold text-ink">Meetings</h3>
+              <span
+                className="text-[11px]"
+                style={{ color: "var(--ink-3)" }}
+              >
+                {linkedMeetings.length === 0
+                  ? "No conversations yet"
+                  : `${linkedMeetings.length} ${linkedMeetings.length === 1 ? "meeting" : "meetings"} captured`}
+              </span>
+            </div>
+            <MeetingStrip
+              meetings={linkedMeetings}
+              contactFirstName={contact.name.split(" ")[0]}
+            />
+          </section>
+
           {/* Artifacts */}
           {Object.keys(groupedArtifacts).length > 0 && (
             <section>
@@ -514,6 +547,33 @@ export default function ContactDetail({
             <p className="font-display italic text-[15px] leading-relaxed text-ink">
               {contact.recommendation_reason}
             </p>
+          </SideBlock>
+        )}
+
+        {/* Next steps */}
+        {nextSteps.length > 0 && (
+          <SideBlock label="Next steps">
+            <div className="space-y-3">
+              {nextSteps.map((s, i) => (
+                <div key={i} className="flex gap-3">
+                  <span
+                    className="font-mono text-[10.5px] uppercase tracking-wider mt-0.5 flex-shrink-0"
+                    style={{
+                      color: "var(--ink-3)",
+                      minWidth: 64,
+                    }}
+                  >
+                    {s.when}
+                  </span>
+                  <span
+                    className="text-[12.5px] leading-snug"
+                    style={{ color: "var(--ink-2)" }}
+                  >
+                    {s.what}
+                  </span>
+                </div>
+              ))}
+            </div>
           </SideBlock>
         )}
 
@@ -611,4 +671,74 @@ export default function ContactDetail({
       />
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Next-steps generator — derives 2 placeholder steps from stage + tier.
+// Backend will replace this with real coach-generated guidance.
+// ---------------------------------------------------------------------------
+
+function buildNextSteps(contact: Contact): Array<{ when: string; what: string }> {
+  const company = contact.company ?? "their company";
+  const stage = contact.status;
+
+  switch (stage) {
+    case "discovered":
+      return [
+        {
+          when: "Today",
+          what: `Send a warm, short intro referencing the ${company} angle.`,
+        },
+        {
+          when: "+1 week",
+          what: "If no reply, soft re-engage with a specific observation, not a pitch.",
+        },
+      ];
+    case "contacted":
+      return [
+        {
+          when: "+3 days",
+          what: "Wait for response. Don't double-message.",
+        },
+        {
+          when: "+1 week",
+          what: "If silent, send one more value-add message, then let it rest.",
+        },
+      ];
+    case "connected":
+      return [
+        {
+          when: "Today",
+          what: "Propose a 20-minute intro call with two specific time options.",
+        },
+        {
+          when: "+2 weeks",
+          what: "If no reply on scheduling, share something useful unprompted.",
+        },
+      ];
+    case "met":
+      return [
+        {
+          when: "Today",
+          what: "Send a thank-you note referencing one specific thing they said.",
+        },
+        {
+          when: "+3 weeks",
+          what: "Follow up with progress on whatever advice they gave.",
+        },
+      ];
+    case "ongoing":
+      return [
+        {
+          when: "+4 weeks",
+          what: "Light check-in. Share progress, don't ask for anything.",
+        },
+        {
+          when: "+10 weeks",
+          what: "Quarterly catch-up. Bring one thing they'd find genuinely useful.",
+        },
+      ];
+    default:
+      return [];
+  }
 }

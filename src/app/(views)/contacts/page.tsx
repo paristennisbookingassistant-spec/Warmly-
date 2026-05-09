@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useContacts } from "@/hooks/useContacts";
-import ContactGrid from "@/components/contacts/ContactGrid";
+import ContactGroupedView from "@/components/contacts/ContactGroupedView";
 import ContactList from "@/components/contacts/ContactList";
 import Today from "@/components/contacts/Today";
 import Modal from "@/components/ui/Modal";
@@ -287,7 +287,7 @@ export default function ContactsPage() {
               <button
                 onClick={() => setLayout("list")}
                 aria-pressed={layout === "list"}
-                title="List view"
+                title="Directory · dense list"
                 className="inline-flex items-center justify-center w-7 h-7 rounded transition-colors"
                 style={{
                   background:
@@ -311,7 +311,7 @@ export default function ContactsPage() {
               <button
                 onClick={() => setLayout("grid")}
                 aria-pressed={layout === "grid"}
-                title="Grid view"
+                title="Progress · grouped by stage"
                 className="inline-flex items-center justify-center w-7 h-7 rounded transition-colors"
                 style={{
                   background:
@@ -337,7 +337,7 @@ export default function ContactsPage() {
             </div>
           </div>
 
-          {/* Contacts — list or grid */}
+          {/* Contacts — list (dense) or grouped (progress) */}
           <section>
             {layout === "list" ? (
               <ContactList
@@ -346,7 +346,7 @@ export default function ContactsPage() {
                 onOpenContact={handleViewDetail}
               />
             ) : (
-              <ContactGrid
+              <ContactGroupedView
                 contacts={filteredContacts}
                 isLoading={isLoading}
                 onOpenSession={handleOpenSession}
