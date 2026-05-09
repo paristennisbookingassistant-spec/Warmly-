@@ -14,12 +14,17 @@
  *  9. Return both messages + created artifacts
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { z } from "zod";
 import { getSupabaseServerClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import { processCoachingMessage, detectArtifactTrigger } from "@/lib/ai/coaching";
 import { generateArtifact } from "@/lib/ai/generation";
 import { summarizeConversation, SUMMARIZATION_THRESHOLD } from "@/lib/ai/context";
+import {
+  buildInitialProfile,
+  enrichProfile,
+  looksLikeIdentityDisclosure,
+} from "@/lib/ai/profile";
 import { searchCompanyIntel } from "@/lib/search";
 import {
   unauthorized,
@@ -310,6 +315,19 @@ export async function POST(
     return internalError("Failed to save message");
   }
 
+  // 5b. Schedule profile_md bootstrap or enrichment (async via after()).
+  // This is the wiring that makes the coach actually remember who you are.
+  // Two paths:
+  //   - Bootstrap: profile_md is empty → build it from chat history once
+  //   - Enrich: profile_md exists + this message looks identity-revealing →
+  //              merge the new context into the existing markdown
+  // Both run AFTER the response is sent so they never add chat latency.
+  scheduleProfileUpdate({
+    user: userTyped,
+    newMessageContent: parsed.data.content,
+    supabase,
+  });
+
   // 6. Check if rolling summarization is needed
   let conversationSummaryText: string | null = null;
 
@@ -558,6 +576,147 @@ export async function POST(
   };
 
   return NextResponse.json(response, { status: 201 });
+}
+
+// ---------------------------------------------------------------------------
+// Async profile_md updater — bootstrap on first chat, enrich on identity reveals
+// ---------------------------------------------------------------------------
+
+/**
+ * Schedules a profile_md update via Next's after() hook. Decides between:
+ *
+ *   - BOOTSTRAP: profile_md is empty AND user has ≥3 prior messages →
+ *     build the initial markdown from career/education/goals + last 30
+ *     general-thread messages (the "about me" free-text seed).
+ *
+ *   - ENRICH: profile_md already exists AND the new message looks like
+ *     identity disclosure (regex-gated) → merge the new context in.
+ *
+ * Both fire-and-forget. Failures log + leave profile_md untouched. The chat
+ * response has already been sent, so the user sees nothing if either fails.
+ */
+function scheduleProfileUpdate(args: {
+  user: User;
+  newMessageContent: string;
+  supabase: SupabaseServerClient;
+}): void {
+  const { user, newMessageContent, supabase } = args;
+  const profileMd = user.profile_md ?? null;
+
+  if (!profileMd || profileMd.trim().length === 0) {
+    // Bootstrap path
+    after(async () => {
+      try {
+        await bootstrapProfileMd(user, supabase);
+      } catch (err) {
+        console.error("Profile bootstrap failed:", err);
+      }
+    });
+    return;
+  }
+
+  // Enrichment path — only if message looks identity-relevant
+  if (looksLikeIdentityDisclosure(newMessageContent)) {
+    after(async () => {
+      try {
+        const updated = await enrichProfile(profileMd, newMessageContent);
+        if (updated && updated.trim().length > 0 && updated !== profileMd) {
+          await supabase
+            .from("users")
+            .update({ profile_md: updated })
+            .eq("id", user.id);
+          console.log(`profile_md enriched for user ${user.id}`);
+        }
+      } catch (err) {
+        console.error("Profile enrichment failed:", err);
+      }
+    });
+  }
+}
+
+/**
+ * Builds the initial profile_md from the user's structured data + recent
+ * general-thread messages. Runs once per user. Idempotency guard: if another
+ * concurrent request already populated profile_md, we don't overwrite.
+ */
+async function bootstrapProfileMd(
+  user: User,
+  supabase: SupabaseServerClient
+): Promise<void> {
+  // Race guard — re-read profile_md before writing
+  const { data: fresh } = await supabase
+    .from("users")
+    .select("profile_md")
+    .eq("id", user.id)
+    .single();
+  if (fresh?.profile_md && (fresh.profile_md as string).trim().length > 0) {
+    // Another request beat us to it
+    return;
+  }
+
+  // Find user's general thread (most recent) and pull their last user-role
+  // messages. We only count user messages — agent replies don't seed identity.
+  const { data: generalConv } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("type", "general")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let aboutText = "";
+  let userMessageCount = 0;
+
+  if (generalConv) {
+    const { data: msgs } = await supabase
+      .from("conversation_messages")
+      .select("content, role, created_at")
+      .eq("conversation_id", generalConv.id as string)
+      .eq("role", "user")
+      .order("created_at", { ascending: false })
+      .limit(30);
+
+    const userMsgs = (msgs ?? []) as Array<{ content: string }>;
+    userMessageCount = userMsgs.length;
+    // Reverse so oldest first — natural reading order for the LLM
+    aboutText = userMsgs
+      .reverse()
+      .map((m) => m.content)
+      .join("\n\n---\n\n");
+  }
+
+  // Threshold: don't fire for users who've barely used the product.
+  // 3 user messages is enough signal to extract identity.
+  if (userMessageCount < 3 && (!user.career_history || user.career_history.length === 0)) {
+    return;
+  }
+
+  const profileMd = await buildInitialProfile({
+    career_history: user.career_history ?? [],
+    education: user.education ?? [],
+    goals: user.goals,
+    networking_preferences: user.networking_preferences,
+    about_text: aboutText || undefined,
+  });
+
+  if (!profileMd || profileMd.trim().length === 0) {
+    console.warn(`Profile bootstrap returned empty markdown for user ${user.id}`);
+    return;
+  }
+
+  const { error } = await supabase
+    .from("users")
+    .update({ profile_md: profileMd })
+    .eq("id", user.id);
+
+  if (error) {
+    console.error("Failed to save bootstrapped profile_md:", error);
+  } else {
+    console.log(
+      `profile_md bootstrapped for user ${user.id} (${profileMd.length} chars from ${userMessageCount} messages)`
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

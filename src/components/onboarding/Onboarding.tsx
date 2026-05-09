@@ -156,13 +156,25 @@ export default function Onboarding({ onDone, onSkip }: OnboardingProps) {
         answers.agentName ?? "Warmly"
       }.`;
       setTranscript([...next, { from: "agent", text: farewell }]);
-      // Persist answers to localStorage (mock — real backend later)
+      const merged: Answers = { ...answers, [step.field]: value as never };
+      // Local cache so we can show the user what they entered if needed.
       try {
-        const merged = { ...answers, [step.field]: value as never };
         localStorage.setItem("warmly.onboarding.answers", JSON.stringify(merged));
       } catch {
         // ignore
       }
+      // Server: build profile_md from the answers so the coach actually has
+      // memory on the very next chat turn. Fire-and-forget; we don't block
+      // the transition into the app on the LLM call (which can take a few
+      // seconds). The bootstrap path in the messages route also covers us
+      // if this request happens to fail.
+      void fetch("/api/users/me/onboarding-complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(merged),
+      }).catch((err) => {
+        console.error("onboarding-complete POST failed:", err);
+      });
       setTimeout(onDone, 1200);
     }
   }
