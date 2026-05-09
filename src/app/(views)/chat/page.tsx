@@ -34,11 +34,15 @@ function ChatPage() {
     isLoadingMessages,
     isSending,
     createError,
+    sendError,
+    canRetry,
     selectConversation,
     createConversation,
     renameConversation,
     deleteConversation,
     sendMessage,
+    retryLastMessage,
+    clearSendError,
     artifactsForMessage,
     updateArtifact,
   } = useChat();
@@ -254,6 +258,39 @@ function ChatPage() {
                 borderTop: "1px solid var(--line-soft)",
               }}
             >
+              {sendError && (
+                <div
+                  className="mb-3 flex items-start gap-3 px-3.5 py-2.5 rounded-lg text-[12.5px]"
+                  style={{
+                    background: "color-mix(in oklch, var(--bad) 8%, var(--surface))",
+                    border: "1px solid color-mix(in oklch, var(--bad) 30%, var(--line))",
+                    color: "var(--ink-2)",
+                  }}
+                  role="alert"
+                >
+                  <span className="flex-1 leading-snug">{sendError}</span>
+                  {canRetry && (
+                    <button
+                      onClick={() => void retryLastMessage()}
+                      className="px-2.5 py-1 rounded-md text-[11.5px] font-medium transition-colors flex-shrink-0"
+                      style={{
+                        background: "var(--ink)",
+                        color: "var(--bg)",
+                      }}
+                    >
+                      Retry
+                    </button>
+                  )}
+                  <button
+                    onClick={clearSendError}
+                    className="text-[16px] leading-none flex-shrink-0 -mt-0.5"
+                    style={{ color: "var(--ink-3)" }}
+                    aria-label="Dismiss error"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
               <ChatInput onSend={sendMessage} isLoading={isSending} />
             </div>
           </>

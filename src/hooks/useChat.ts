@@ -17,6 +17,8 @@ export function useChat() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [lastFailedMessage, setLastFailedMessage] = useState<string | null>(null);
 
   // Load conversations on mount
   useEffect(() => {
@@ -101,6 +103,8 @@ export function useChat() {
     if (!activeConversation || isSending) return;
 
     setIsSending(true);
+    setSendError(null);
+    setLastFailedMessage(null);
 
     // Optimistically add user message
     const tempUserMsg: ConversationMessage = {
@@ -113,6 +117,12 @@ export function useChat() {
     };
     setMessages((prev) => [...prev, tempUserMsg]);
 
+    const failGracefully = (msg: string) => {
+      setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id));
+      setSendError(msg);
+      setLastFailedMessage(content);
+    };
+
     try {
       const res = await fetch(
         `/api/conversations/${activeConversation.id}/messages`,
@@ -122,31 +132,63 @@ export function useChat() {
           body: JSON.stringify({ content }),
         }
       );
-      const json = await res.json();
-      if (json.data) {
-        // Replace temp message with real user message + add agent response
-        setMessages((prev) => [
-          ...prev.filter((m) => m.id !== tempUserMsg.id),
-          json.data.user_message,
-          json.data.agent_message,
-        ]);
-        // Accumulate any artifacts created in this message exchange
-        if (json.data.artifacts_created.length > 0) {
-          setArtifacts((prev) => [...prev, ...json.data.artifacts_created]);
-        }
-        // Update conversation updated_at in sidebar
-        setConversations((prev) =>
-          prev.map((c) =>
-            c.id === activeConversation.id
-              ? { ...c, updated_at: new Date().toISOString() }
-              : c
-          )
-        );
+
+      let json: { data?: { user_message: ConversationMessage; agent_message: ConversationMessage; artifacts_created: Artifact[] }; error?: { message?: string } } | null = null;
+      try {
+        json = await res.json();
+      } catch {
+        // Non-JSON response (e.g., plain-text 502 from edge)
       }
+
+      if (!res.ok || !json?.data) {
+        const reason =
+          json?.error?.message ??
+          (res.status === 429
+            ? "You're sending messages too quickly. Wait a moment and try again."
+            : res.status >= 500
+              ? "The coach is having trouble responding. Please try again."
+              : `Request failed (${res.status}). Please try again.`);
+        failGracefully(reason);
+        return;
+      }
+
+      // Replace temp message with real user message + add agent response
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== tempUserMsg.id),
+        json!.data!.user_message,
+        json!.data!.agent_message,
+      ]);
+      // Accumulate any artifacts created in this message exchange
+      if (json.data.artifacts_created.length > 0) {
+        setArtifacts((prev) => [...prev, ...json!.data!.artifacts_created]);
+      }
+      // Update conversation updated_at in sidebar
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeConversation.id
+            ? { ...c, updated_at: new Date().toISOString() }
+            : c
+        )
+      );
+    } catch {
+      failGracefully("Couldn't reach the coach — check your connection and try again.");
     } finally {
       setIsSending(false);
     }
   }, [activeConversation, isSending]);
+
+  const clearSendError = useCallback(() => {
+    setSendError(null);
+    setLastFailedMessage(null);
+  }, []);
+
+  const retryLastMessage = useCallback(async () => {
+    if (!lastFailedMessage) return;
+    const content = lastFailedMessage;
+    setSendError(null);
+    setLastFailedMessage(null);
+    await sendMessage(content);
+  }, [lastFailedMessage, sendMessage]);
 
   const renameConversation = useCallback(async (conversationId: string, newTitle: string): Promise<boolean> => {
     try {
@@ -215,11 +257,15 @@ export function useChat() {
     isLoadingMessages,
     isSending,
     createError,
+    sendError,
+    canRetry: lastFailedMessage !== null,
     selectConversation,
     createConversation,
     renameConversation,
     deleteConversation,
     sendMessage,
+    retryLastMessage,
+    clearSendError,
     artifactsForMessage,
     updateArtifact,
   };
