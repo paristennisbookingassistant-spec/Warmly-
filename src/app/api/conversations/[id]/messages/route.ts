@@ -267,6 +267,32 @@ export async function POST(
   const recentMessages = ((recentMessagesData ?? []) as ConversationMessage[]).reverse();
   const messageCount = totalMessageCount ?? 0;
 
+  // 4b. For contact sessions, also pull recent messages from the user's
+  // general coaching thread. This is cross-session memory — without it the
+  // coach would re-ask "who are you?" in every contact session, even though
+  // the user has already told it everything in the general thread.
+  let generalThreadExcerpt: ConversationMessage[] = [];
+  if (conv.type === "contact_session") {
+    const { data: generalConv } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("type", "general")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (generalConv) {
+      const { data: genMsgs } = await supabase
+        .from("conversation_messages")
+        .select("*")
+        .eq("conversation_id", generalConv.id as string)
+        .order("created_at", { ascending: false })
+        .limit(15);
+      generalThreadExcerpt = ((genMsgs ?? []) as ConversationMessage[]).reverse();
+    }
+  }
+
   // 5. Save user message to DB
   const { data: savedUserMessage, error: userMsgError } = await supabase
     .from("conversation_messages")
@@ -443,8 +469,13 @@ export async function POST(
             networking_preferences: userTyped.networking_preferences,
           },
           user_memory: userTyped.user_memory,
+          user_profile_md: userTyped.profile_md,
           conversation_summary: conversationSummaryText,
           recent_messages: recentMessages.map((m) => ({
+            role: m.role as "user" | "agent",
+            content: m.content,
+          })),
+          general_thread_excerpt: generalThreadExcerpt.map((m) => ({
             role: m.role as "user" | "agent",
             content: m.content,
           })),

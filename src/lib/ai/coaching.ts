@@ -31,15 +31,97 @@ function isStrategicCoachingRequest(message: string): boolean {
  * whether to run a full coaching LLM call. When a trigger fires, we skip
  * coaching entirely and let the artifact generation be the single source
  * of truth — see Session 8 in PROJECT_MEMORY.md for why.
+ *
+ * Order matters: the more specific patterns are checked first (meeting prep,
+ * follow-up, etc.) so that a generic "draft" word doesn't preempt them.
  */
 export function detectArtifactTrigger(message: string): ArtifactType | null {
   const lower = message.toLowerCase();
-  if (lower.includes("connection note") || lower.includes("connection request")) return "connection_note";
-  if (lower.includes("outreach") || lower.includes("message to") || lower.includes("draft a message")) return "outreach_draft";
-  if (lower.includes("meeting prep") || lower.includes("prepare for") || lower.includes("briefing")) return "meeting_prep";
-  if (lower.includes("meeting notes") || lower.includes("took notes") || lower.includes("had a call")) return "meeting_notes";
-  if (lower.includes("action plan") || lower.includes("next steps") || lower.includes("what should i do")) return "action_plan";
-  if (lower.includes("follow up") || lower.includes("follow-up")) return "follow_up_draft";
+
+  // Connection note — most specific, check first
+  if (
+    lower.includes("connection note") ||
+    lower.includes("connection request") ||
+    /connect\b.*note/.test(lower)
+  ) {
+    return "connection_note";
+  }
+
+  // Meeting prep
+  if (
+    lower.includes("meeting prep") ||
+    lower.includes("prep for") ||
+    lower.includes("prepare for") ||
+    lower.includes("briefing") ||
+    lower.includes("brief me") ||
+    /\bprep\b/.test(lower)
+  ) {
+    return "meeting_prep";
+  }
+
+  // Meeting notes — past-tense signals
+  if (
+    lower.includes("meeting notes") ||
+    lower.includes("took notes") ||
+    lower.includes("had a call") ||
+    lower.includes("just spoke") ||
+    lower.includes("just met") ||
+    lower.includes("captured what we discussed")
+  ) {
+    return "meeting_notes";
+  }
+
+  // Follow-up
+  if (
+    lower.includes("follow up") ||
+    lower.includes("follow-up") ||
+    lower.includes("followup") ||
+    lower.includes("thank-you") ||
+    lower.includes("thank you note") ||
+    lower.includes("after the meeting")
+  ) {
+    return "follow_up_draft";
+  }
+
+  // Action plan
+  if (
+    lower.includes("action plan") ||
+    lower.includes("next steps") ||
+    lower.includes("what should i do") ||
+    lower.includes("plan for") ||
+    lower.includes("game plan") ||
+    lower.includes("how do i play this")
+  ) {
+    return "action_plan";
+  }
+
+  // Outreach — broadest, check last. In a contact session, generic verbs like
+  // "draft", "write", "message" almost always mean an outreach draft.
+  if (
+    lower.includes("outreach") ||
+    lower.includes("message to") ||
+    lower.includes("draft a message") ||
+    lower.includes("draft an") ||
+    lower.includes("draft me") ||
+    lower.includes("write a message") ||
+    lower.includes("write me") ||
+    lower.includes("write him") ||
+    lower.includes("write her") ||
+    lower.includes("write them") ||
+    lower.includes("compose") ||
+    lower.includes("intro message") ||
+    lower.includes("introduction") ||
+    lower.includes("first message") ||
+    lower.includes("reach out") ||
+    lower.includes("send him") ||
+    lower.includes("send her") ||
+    lower.includes("send them") ||
+    /^draft\b/.test(lower) ||
+    /\bdraft\b.*\b(message|email|note|intro)\b/.test(lower)
+  ) {
+    return "outreach_draft";
+  }
+
   return null;
 }
 
@@ -74,36 +156,61 @@ export async function processCoachingMessage(
 }
 
 function buildCoachingSystemPrompt(request: CoachingRequest): string {
-  const { user_memory } = request.context;
+  const { user_memory, user_profile_md } = request.context;
 
   const memorySection = user_memory?.learned_patterns.successful_hooks.length
     ? `\n\nUser history: Their most successful outreach hooks are ${user_memory.learned_patterns.successful_hooks.map((h) => `${h.hook_type} (${Math.round(h.success_rate * 100)}% success)`).join(", ")}.`
     : "";
 
+  // Inject the persistent identity narrative directly in the system prompt so
+  // the coach treats it as load-bearing context, not optional flavor. This is
+  // the single most important hedge against the coach asking "who are you?"
+  // when we already know.
+  const identitySection = user_profile_md
+    ? `\n\n--- WHO THE USER IS (read this before asking anything about them) ---\n${user_profile_md}\n--- end identity ---`
+    : "";
+
   return `You are an expert AI networking coach. You guide professionals through the full networking lifecycle: discovering contacts, crafting outreach, preparing for meetings, and maintaining relationships.
 
 Your communication style: warm, direct, actionable. Never generic — always reference the user's specific context.
-Be concise but thorough. Use bullet points for action items.${memorySection}
+Be concise but thorough. Use bullet points for action items.${memorySection}${identitySection}
 
-If the user asks you to generate an artifact (draft a message, prep for a meeting, etc.), acknowledge you'll do it and describe what you'll create — the system will handle generation separately.`;
+If the user asks you to generate an artifact (draft a message, prep for a meeting, follow-up, action plan, etc.), DO NOT write the artifact content inline in your reply. Acknowledge briefly that you'll prepare it ("Drafting that for you now…") and stop — the system handles generation separately and shows the artifact as an editable card. Writing the artifact inline produces a duplicate that diverges from the canonical version.
+
+Never ask the user to introduce themselves or describe their background if any of these are populated: their identity narrative above, the structured profile, recent messages, or the general-thread excerpt. Use what you have.`;
 }
 
 function buildCoachingUserPrompt(request: CoachingRequest): string {
   const { context, user_message } = request;
   const parts: string[] = [];
 
+  // Structured profile — only include if it has actual content. An empty
+  // object adds no signal and tempts the LLM to ask the user to fill it in.
   if (context.user_profile) {
-    parts.push(`User profile: ${JSON.stringify(context.user_profile)}`);
+    const hasContent =
+      (context.user_profile.career_history?.length ?? 0) > 0 ||
+      (context.user_profile.education?.length ?? 0) > 0 ||
+      Object.keys(context.user_profile.goals ?? {}).length > 0;
+    if (hasContent) {
+      parts.push(`Structured profile: ${JSON.stringify(context.user_profile)}`);
+    }
   }
   if (context.contact_profile) {
-    parts.push(`Contact: ${JSON.stringify(context.contact_profile)}`);
+    parts.push(`Contact you're discussing: ${JSON.stringify(context.contact_profile)}`);
+  }
+  if (context.general_thread_excerpt && context.general_thread_excerpt.length > 0) {
+    parts.push(
+      `--- Recent excerpts from the user's general coaching thread (cross-session memory; this is what they've already told you about themselves and their goals) ---\n${context.general_thread_excerpt
+        .map((m) => `${m.role}: ${m.content}`)
+        .join("\n")}\n--- end excerpts ---`
+    );
   }
   if (context.conversation_summary) {
     parts.push(`Conversation history summary: ${context.conversation_summary}`);
   }
   if (context.recent_messages.length > 0) {
     parts.push(
-      `Recent messages:\n${context.recent_messages.map((m) => `${m.role}: ${m.content}`).join("\n")}`
+      `Recent messages in this thread:\n${context.recent_messages.map((m) => `${m.role}: ${m.content}`).join("\n")}`
     );
   }
 

@@ -194,9 +194,21 @@ export interface GenerationResponse {
 export interface CoachingContext {
   user_profile: UserProfileForScoring;
   user_memory: UserMemory | null;
+  /**
+   * The user's persistent identity narrative (markdown), built from
+   * onboarding + enriched over time from chat. The coach should read
+   * this BEFORE asking who the user is.
+   */
+  user_profile_md?: string | null;
   conversation_summary: string | null;
   recent_messages: Array<{ role: "user" | "agent"; content: string }>;
   contact_profile?: ContactProfileForScoring;
+  /**
+   * For contact sessions only: recent messages from the user's general
+   * coaching thread, surfaced as cross-session memory so the coach knows
+   * who the user is without asking again. Empty for general sessions.
+   */
+  general_thread_excerpt?: Array<{ role: "user" | "agent"; content: string }>;
 }
 
 export interface CoachingRequest {
