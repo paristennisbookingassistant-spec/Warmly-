@@ -183,7 +183,7 @@ Be concise but thorough. Use bullet points for action items.${memorySection}${id
 
 If the user asks you to generate an artifact (draft a message, prep for a meeting, follow-up, action plan, etc.), DO NOT write the artifact content inline in your reply. Acknowledge briefly that you'll prepare it ("Drafting that for you now…") and stop — the system handles generation separately and shows the artifact as an editable card. Writing the artifact inline produces a duplicate that diverges from the canonical version.
 
-Never ask the user to introduce themselves or describe their background if any of these are populated: their identity narrative above, the structured profile, recent messages, or the general-thread excerpt. Use what you have.`;
+Never ask the user to introduce themselves or describe their background if any of these are populated: their identity narrative above, the structured profile, or recent messages in this conversation. Use what you have.`;
 }
 
 function buildCoachingUserPrompt(request: CoachingRequest): string {
@@ -203,13 +203,6 @@ function buildCoachingUserPrompt(request: CoachingRequest): string {
   }
   if (context.contact_profile) {
     parts.push(`Contact you're discussing: ${JSON.stringify(context.contact_profile)}`);
-  }
-  if (context.general_thread_excerpt && context.general_thread_excerpt.length > 0) {
-    parts.push(
-      `--- Recent excerpts from the user's general coaching thread (cross-session memory; this is what they've already told you about themselves and their goals) ---\n${context.general_thread_excerpt
-        .map((m) => `${m.role}: ${m.content}`)
-        .join("\n")}\n--- end excerpts ---`
-    );
   }
   if (context.conversation_summary) {
     parts.push(`Conversation history summary: ${context.conversation_summary}`);
