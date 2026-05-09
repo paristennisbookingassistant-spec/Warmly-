@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import type { Artifact } from "@/types/database";
 import { useChat } from "@/hooks/useChat";
 import SessionSidebar from "@/components/chat/SessionSidebar";
@@ -52,17 +52,30 @@ function ChatPage() {
   const [openArtifact, setOpenArtifact] = useState<Artifact | null>(null);
 
   const searchParams = useSearchParams();
+  const router = useRouter();
   const bottomRef = useRef<HTMLDivElement>(null);
-  const contactHandled = useRef(false);
+  // Track the last contact ID we've already handled. Using the ID (not a
+  // boolean) means switching from one contact to another via the URL fires
+  // again — earlier behaviour was a boolean latch that ignored every
+  // contact param after the first, so "Open session" always showed the
+  // first contact you ever opened.
+  const lastHandledContactId = useRef<string | null>(null);
 
   // Handle ?contact=ID param — open/create a session for this contact
   useEffect(() => {
     const contactId = searchParams.get("contact");
-    if (contactId && !isLoadingConversations && !contactHandled.current) {
-      contactHandled.current = true;
+    if (
+      contactId &&
+      !isLoadingConversations &&
+      lastHandledContactId.current !== contactId
+    ) {
+      lastHandledContactId.current = contactId;
       createConversation(contactId);
+      // Clean the URL so back-button + revisit don't re-trigger the same
+      // contact — keeps the chat URL canonical for the active conversation.
+      router.replace("/chat", { scroll: false });
     }
-  }, [searchParams, isLoadingConversations, createConversation]);
+  }, [searchParams, isLoadingConversations, createConversation, router]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
