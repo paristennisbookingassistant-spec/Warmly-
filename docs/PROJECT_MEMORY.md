@@ -3,7 +3,7 @@
 
 **Purpose:** This file preserves the accumulated context, decisions, debates, and learnings from all working sessions on this project. Read this file at the start of every new session to restore context. Update it at the end of every session with new learnings.
 
-**Last updated:** April 3, 2026 (Session 4)
+**Last updated:** May 9, 2026 (Session 10)
 
 ---
 
@@ -813,3 +813,240 @@ USER PROMPT
 **For Thursday's co-founder sync:**
 - See `docs/COFOUNDER_SYNC.md` for the agenda. Production matches the demo experience the partner will see. The skill architecture is documented in `docs/PROMPT_INVENTORY.md` (extended with Phase B/C/D content). First-week task split for partner is in the COFOUNDER_SYNC.md.
 - Partner's first PR candidates: onboarding rebuild, CV upload endpoint, Settings UI for profile/learnings. All natural backend + frontend work, all unblocked by what shipped today.
+
+### Session 10 — May 9, 2026
+
+**Topics covered:**
+
+Big-shipment day. The "Meetings + full editorial refresh" plan and a long
+chain of follow-on bug fixes. 8 commits on `claude/zen-robinson-233760`,
+all passing tsc + build, ready to merge to main.
+
+**1. Diagnose + fix chat silent failure (`a5c731d`)**
+
+Liyang opened a chat session, sent a message, nothing happened — no agent
+reply, no error, no spinner. Two compounding bugs:
+- The `/api/conversations/[id]/messages` POST had no try/catch around
+  `processCoachingMessage()`. When MiniMax threw (e.g. quota / network /
+  payload), Next.js returned a bare 500 with no JSON body.
+- `useChat.sendMessage` only handled `json.data` on success. On any error
+  response (no `json.data`), the optimistic user bubble stayed orphaned and
+  no error UI rendered.
+
+Fix: detect non-OK responses in the hook, remove the orphan bubble, render
+a contextual error banner above the composer (status-specific copy: 429 /
+500 / generic / network), add a Retry button that re-sends the failed
+message verbatim. Independent of any backend root cause — even if MiniMax
+recovers, future failures won't disappear silently.
+
+**2. Surface real LLM error reason (`aff9c6f`)**
+
+After Part 1, banner still showed "trouble responding" — too generic.
+Wrapped the coaching path in try/catch in the route, deletes the orphan
+user message from DB on failure (so the conversation doesn't end up with
+a hanging user-only bubble), and returns the actual error string in the
+JSON envelope: `{ error: { message: "Coach is unavailable: <reason>" } }`.
+Banner copy now says "Click Retry to resend your message" so user knows
+their text isn't lost.
+
+**3. Meetings view + onboarding gate + detail/contacts polish (`5d2343d`)**
+
+Full implementation of the "Meetings + full editorial refresh" plan
+(scope chosen by Liyang via AskUserQuestion). All on mock data per
+explicit user direction ("backend later").
+
+Files added/changed (16):
+- `src/types/meeting.ts` — Recording, Action, Mention, TranscriptSegment
+- `src/lib/mock/recordings.ts` — 4 sample recordings (Marie, Priya, David, Sara)
+- `src/app/(views)/meetings/page.tsx` — tabs orchestrator (library | recap | capture)
+- `src/components/meetings/Library.tsx` — list rows with sentiment dots, topics, action counts
+- `src/components/meetings/Recap.tsx` — rich summary with inline action checkboxes (parsed from `**bold**` markers in summaryRich), expandable transcript, mentions sidebar with deep-links to contacts, coach's read
+- `src/components/meetings/Capture.tsx` — live mode with running timer + animated CSS waveform; upload mode with progress bar and 4-step status
+- `src/components/meetings/EmptyState.tsx`
+- `src/components/meetings/UsageMeter.tsx` — free-tier minutes meter (cosmetic)
+- `src/components/meetings/SentimentDot.tsx`
+- `src/components/contacts/MeetingStrip.tsx` — meetings-for-this-contact section in detail page
+- `src/components/contacts/ContactGroupedView.tsx` — Progress layout (Needs attention / In motion / Recently discovered) replaces the old grid mode
+- `src/components/onboarding/Onboarding.tsx` — 6-step conversational flow with live ~/memory/user.md preview on the right; Skip button on top-right strip; localStorage gate via `warmly.onboarded`
+- Sidebar gets Meetings nav (G M shortcut) + Replay-onboarding hover button
+- Contact detail gets the meetings strip and a generated Next-steps sidebar block (deterministic from contact stage)
+
+Deep-link via `?id=rec-xxx` on the meetings route, used from contact pages.
+All recap action-checkbox state is local React state — backend wiring
+deferred. The "free 90 min/month" usage meter is purely cosmetic.
+
+**4. Coaching context + artifact triggers (`b870f80`)**
+
+Liyang reported two real bugs:
+- Contact-session coach asked "who are you?" even after he'd shared
+  extensive identity in the general thread.
+- Draft outreach kept appearing as inline chat text instead of an artifact
+  card despite the prior Session 8 fix.
+
+Root causes:
+- Contact sessions only loaded `recent_messages` from their own
+  conversation. Identity disclosures live in the general thread (or in
+  `users.profile_md`, which the coaching path also never read). Fresh
+  contact session = zero context.
+- `detectArtifactTrigger()` was a narrow keyword list. Phrases like
+  "draft me an intro", "write him something", "compose a note", or bare
+  "draft" failed to match — coaching LLM produced inline drafts despite
+  the system prompt discouraging it.
+
+Fixes:
+- Added `user_profile_md` and `general_thread_excerpt` to `CoachingContext`
+- Inject identity narrative under "WHO THE USER IS" header in system
+  prompt so the LLM treats it as load-bearing, not optional flavour
+- For contact sessions, load latest 15 messages from the user's most-recent
+  general thread and surface them as cross-session memory
+- Strengthened anti-inline-draft rule in system prompt
+- Skip empty structured-profile JSON (was tempting the LLM to ask user to
+  fill it in)
+- Broadened `detectArtifactTrigger`: "prep", "write me/him/her", "compose",
+  "intro message", "first message", "reach out", "send him", bare "draft"
+  anchored at start of message, etc., across all six artifact types
+
+**5. Wire profile_md properly (`b497555`)**
+
+The cross-thread excerpt from #4 was a band-aid — the right answer was
+`profile_md`. The infrastructure for it had existed since Phase B
+(Session 9): `buildInitialProfile`, `enrichProfile`,
+`looksLikeIdentityDisclosure` in `lib/ai/profile.ts`. But: NEVER CALLED
+ANYWHERE. `users.profile_md` stayed NULL forever.
+
+Three wiring points landed in this commit:
+
+a) **Auto-bootstrap on first chat** — in `messages/route.ts`, after
+saving the user message, schedule `buildInitialProfile()` via Next 16's
+`after()` hook if `profile_md` is empty AND user has ≥3 prior user
+messages. Reads structured fields + last 30 messages from the user's
+general thread (concatenated as `about_text` seed). Idempotent — re-reads
+profile_md before writing as a race guard. Fixes the existing user
+(Liyang) on his very next message.
+
+b) **Ongoing enrichment on identity disclosure** — same route. If
+`profile_md` exists AND `looksLikeIdentityDisclosure()` matches the new
+message (regex gate on phrases like "I'm pivoting", "my career", "I
+studied at"), schedule `enrichProfile()` via `after()`. Fires on roughly
+5-10% of messages.
+
+c) **Onboarding completion endpoint** — new `POST /api/users/me/onboarding-complete`
+accepts the answers JSON, updates `networking_preferences.style`, builds
+initial `profile_md` from structured fields + the free-text "about/goal/gaps"
+answers, persists. The Onboarding component now POSTs to it on done in
+addition to the localStorage write. Future users get profile_md immediately.
+
+All async via `after()` so chat latency unchanged. Failures log + leave
+profile_md untouched.
+
+Cost: bootstrap fires once per user lifetime (~$0.01). Enrichment ~$0.005
+per fire. Onboarding ~$0.01 per new user.
+
+**6. Empty artifact + dash-in-coaching (`4f0b98f`)**
+
+Liyang shipped a screenshot: connection_note artifact card was empty;
+agent then drafted inline ("It looks like the draft didn't come through")
+WITH em-dashes. Two issues compounded.
+
+The empty-card cause: `generation.ts` assumed the LLM always returns
+`{ "message": "..." }`. If MiniMax used an alternate key (`note`, `body`,
+`draft`, `text`) or omitted the field entirely, the artifact got saved
+with `content.message` missing and `ArtifactCard` fell back to "Open to
+view full content" — looked empty.
+
+Fixes:
+- Strip ` ```json ... ``` ` code fences before regex JSON extraction
+- On JSON parse failure, log first 500 chars of raw response so future
+  cases are diagnosable from Vercel logs
+- Try fallback keys (`note`, `body`, `text`, `draft`, `content`) when
+  message is missing/empty after parse — hoist whichever non-empty value
+  exists into `message` and continue
+- After sanitization, **throw** if outreach-family artifact has empty/missing
+  message. The route's existing catch turns this into the deterministic
+  "I tried to draft something but it failed" reply — far better UX than
+  saving a broken card and letting the user discover it
+- Run `stripDashes()` on coaching `agent_message` before returning. Both
+  artifact JSON and coaching prose are now em-dash-free regardless of
+  which path the user's request took
+
+**7. Open-session bug (`ce232c0`)**
+
+Clicking "Open session" on a different contact kept showing the first
+contact you ever opened. Cause: `chat/page.tsx` guarded the `?contact=ID`
+handler with a boolean ref (`contactHandled`) that latched true on first
+navigation, so subsequent contact params were ignored.
+
+Replaced the boolean with last-handled contact ID — the handler fires
+again whenever the URL contact ID differs from what we processed last.
+Also `router.replace("/chat")` after handling so back-button + revisit
+don't re-trigger the same contact.
+
+**8. Drop cross-thread excerpt (`<this commit>`)**
+
+Now that profile_md is auto-built and enriched, the cross-thread
+band-aid from #4 is redundant AND was contaminating contact sessions
+with general-thread chatter ("when discussing Marie, I see you mentioned
+Dominik earlier..."). Removed:
+- `general_thread_excerpt` field from `CoachingContext`
+- The 15-message general-thread loader in `messages/route.ts`
+- The "cross-session memory" injection in `coaching.ts` user prompt
+- The reference to it in the system prompt's anti-re-introduce rule
+
+profile_md is now the canonical identity source. Contact sessions stay
+scoped to their own conversation.
+
+**Key decisions:**
+- Onboarding answers go to BOTH localStorage AND a backend endpoint that
+  builds profile_md. Two writes is cheap and gives us a usable mock-mode
+  flow even if the LLM call fails.
+- Used Next 16's `after()` (now stable, was `unstable_after`) for both
+  profile bootstrap and enrichment. Confirmed available by inspecting
+  `node_modules/next/dist/server/web/exports/index.d.ts`.
+- For contact-session memory: profile_md > cross-thread excerpts. The
+  excerpts work as a band-aid but break scope (the contact session
+  shouldn't know about other contacts the user has discussed).
+- For artifact JSON robustness: prefer fallback-key hoisting + post-sanitize
+  validation over retry. Cheaper than re-prompting; better UX (user gets
+  a clear "try again" message instead of a broken card).
+- Defense-in-depth dash policy: prompt + sanitizer for artifacts, sanitizer
+  also runs on coaching prose. The model will misbehave occasionally; the
+  sanitizer is the only deterministic gate.
+
+**Key learnings:**
+- Today's biggest single insight: **infrastructure that exists in code but
+  is never wired is worse than no infrastructure at all** — it creates the
+  illusion of capability without the function. `profile_md`, `enrichProfile`,
+  `looksLikeIdentityDisclosure` were all production-grade since Session 9
+  but dead code in the live request path. Wiring them was 30 mins of work
+  and unlocked the entire "coach has memory" experience.
+- Silent UI failures are far worse than loud errors. Liyang assumed the
+  whole stack was broken when in fact the backend was fine — the chat just
+  ate the error response. The fix is cheap (10 lines of error UI), the cost
+  of NOT having it is user trust.
+- Plan mode is high-leverage when a session has many moving parts. Today's
+  Meetings + editorial refresh started with a 6-part plan, scope was locked
+  via AskUserQuestion before any code, all 6 parts shipped in one merge.
+- `useRef(false)` as a "did this fire?" guard is a recurring foot-gun. Two
+  separate bugs caught today (`contactHandled` and the implicit re-fire
+  guard logic). Default to ID-comparison or just letting the effect re-run
+  honestly.
+
+**Status (end of May 9):**
+- 8 commits on `claude/zen-robinson-233760`. tsc + build clean.
+- Vercel preview URL has been the rolling test surface all day.
+- Ready to merge to main and roll forward.
+
+**Immediate next steps (next session):**
+1. **Settings UI for profile_md** — let user inspect + edit what the coach
+   knows about them. Already flagged as Part 5 in today's plan, deferred.
+2. **CV upload endpoint** — `buildInitialProfile` accepts `cv_text` but
+   there's no upload UI yet.
+3. **Wire meetings backend** — currently mock data only. Backend = Whisper
+   transcription + action extraction + Supabase persistence. Big chunk of
+   work; good co-founder PR candidate.
+4. **Test the dash sanitizer in production** — the coaching strip should
+   eliminate em-dashes from chat replies, but watch logs for edge cases.
+5. **Profile preview in onboarding** — the live `~/memory/user.md` preview
+   on the right side of onboarding is currently rendered from local answers.
+   It would be more truthful to fetch the actually-built profile_md after
+   completion. Polish, not blocker.
