@@ -78,7 +78,15 @@ async function apiFetch<T>(
       return null;
     }
 
-    return response.json() as Promise<T>;
+    // Backend routes use the standard { data, error } envelope. Unwrap so
+    // callers get the actual payload and not the envelope. Falls back to
+    // the raw body for legacy routes that returned T directly.
+    const body = await response.json() as { data?: T; error?: unknown } | T;
+    if (body && typeof body === "object" && "data" in (body as Record<string, unknown>)) {
+      const env = body as { data: T | null; error?: unknown };
+      return env.data ?? null;
+    }
+    return body as T;
   } catch (err) {
     console.error(`[API Client] Network error for ${path}:`, err);
     return null;
@@ -181,4 +189,35 @@ export async function uploadProfile(
 ): Promise<string | null> {
   const contact = await saveDiscoveredProfile(profile, discoverySessionId);
   return contact?.id ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Batch ranking — runs after discovery saves N candidates so the popup can
+// show "picked because: shared INSEAD class, same Bain → growth VC pivot..."
+// rather than opaque scores. One LLM call, comparative ranking using
+// profile_md as the primary "who is the user" signal.
+// ---------------------------------------------------------------------------
+
+export interface BatchRankResult {
+  contact_id: string;
+  rank: number;
+  score: number;
+  tier: 1 | 2 | 3;
+  reasoning: string;
+  hook: string;
+}
+
+export async function rankContactsBatch(
+  contactIds: string[],
+  topN = 10
+): Promise<BatchRankResult[]> {
+  if (contactIds.length === 0) return [];
+  const result = await apiFetch<{ rankings: BatchRankResult[] }>(
+    "/api/ai/rank-batch",
+    {
+      method: "POST",
+      body: JSON.stringify({ contact_ids: contactIds, top_n: topN }),
+    }
+  );
+  return result?.rankings ?? [];
 }

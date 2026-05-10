@@ -46,6 +46,22 @@ interface PopupState {
   rateLimitWaitMs: number | null;
   /** Profiles discovered in the last completed session */
   lastSessionProfiles: number | null;
+  /** Ranked picks with one-line rationale, populated on completion */
+  lastSessionRankings: SessionRanking[] | null;
+}
+
+/** A single ranked candidate from /api/ai/rank-batch surfaced in the popup. */
+interface SessionRanking {
+  contact_id: string;
+  rank: number;
+  score: number;
+  tier: 1 | 2 | 3;
+  reasoning: string;
+  hook: string;
+  /** Display data — fetched separately by the popup after the rankings arrive. */
+  name?: string;
+  current_title?: string;
+  company?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -300,6 +316,7 @@ export default function Popup() {
     maxSessionsPerDay: 2,
     rateLimitWaitMs: null,
     lastSessionProfiles: null,
+    lastSessionRankings: null,
   });
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
@@ -378,6 +395,8 @@ export default function Popup() {
       if (msg.type === "SESSION_PROGRESS") {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic
         const data = msg.data as any;
+        const rankingsFromMsg = (data?.rankings as SessionRanking[] | undefined) ?? null;
+
         setPs((prev) => {
           if (!prev.session) return prev;
           return {
@@ -402,8 +421,33 @@ export default function Popup() {
               data?.state === "COMPLETED"
                 ? data?.profilesDiscovered ?? null
                 : prev.lastSessionProfiles,
+            lastSessionRankings:
+              data?.state === "COMPLETED"
+                ? rankingsFromMsg ?? prev.lastSessionRankings
+                : prev.lastSessionRankings,
           };
         });
+
+        // After rankings arrive, fetch each contact's display data so we
+        // can show "Name · role at company" alongside the rationale.
+        if (data?.state === "COMPLETED" && Array.isArray(rankingsFromMsg) && rankingsFromMsg.length > 0) {
+          chrome.runtime.sendMessage(
+            { type: "FETCH_CONTACTS_FOR_RANKINGS", payload: { ids: rankingsFromMsg.map((r) => r.contact_id) } },
+            (resp: { ok: boolean; contacts?: Array<{ id: string; name: string; current_title: string | null; company: string | null }> }) => {
+              if (chrome.runtime.lastError || !resp?.ok || !resp.contacts) return;
+              const byId = new Map(resp.contacts.map((c) => [c.id, c]));
+              setPs((prev) => ({
+                ...prev,
+                lastSessionRankings: prev.lastSessionRankings?.map((r) => {
+                  const c = byId.get(r.contact_id);
+                  return c
+                    ? { ...r, name: c.name, current_title: c.current_title ?? undefined, company: c.company ?? undefined }
+                    : r;
+                }) ?? null,
+              }));
+            }
+          );
+        }
       }
     };
 
@@ -757,6 +801,70 @@ export default function Popup() {
               </p>
             </div>
           )}
+
+          {/* Top picks with rationale */}
+          {ps.lastSessionRankings && ps.lastSessionRankings.length > 0 && (
+            <div style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px", textAlign: "left" }}>
+              <p style={{ fontSize: "10.5px", textTransform: "uppercase", letterSpacing: "0.08em", color: "#6b7280", fontWeight: 600 }}>
+                Top picks for you
+              </p>
+              {ps.lastSessionRankings
+                .slice()
+                .sort((a, b) => a.rank - b.rank)
+                .slice(0, 5)
+                .map((r) => (
+                  <button
+                    key={r.contact_id}
+                    onClick={() => chrome.tabs.create({ url: `${getWebAppUrl()}/contacts/${r.contact_id}` })}
+                    style={{
+                      textAlign: "left",
+                      padding: "8px 10px",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: "8px",
+                      backgroundColor: "#fff",
+                      cursor: "pointer",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "3px",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "baseline", gap: "6px" }}>
+                      <span style={{ fontSize: "10px", color: "#9ca3af", fontFamily: "ui-monospace, monospace", minWidth: "14px" }}>
+                        {r.rank}
+                      </span>
+                      <span style={{ fontSize: "12px", fontWeight: 600, color: "#111827", flex: 1 }}>
+                        {r.name ?? "(loading…)"}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: "10px",
+                          padding: "1px 5px",
+                          borderRadius: "4px",
+                          backgroundColor: r.tier === 1 ? "#dcfce7" : r.tier === 2 ? "#fef3c7" : "#f3f4f6",
+                          color: r.tier === 1 ? "#166534" : r.tier === 2 ? "#92400e" : "#6b7280",
+                          fontWeight: 600,
+                        }}
+                      >
+                        T{r.tier}
+                      </span>
+                    </div>
+                    {(r.current_title || r.company) && (
+                      <div style={{ fontSize: "11px", color: "#6b7280", paddingLeft: "20px" }}>
+                        {r.current_title ?? ""}
+                        {r.current_title && r.company ? " · " : ""}
+                        {r.company ?? ""}
+                      </div>
+                    )}
+                    {r.reasoning && (
+                      <div style={{ fontSize: "10.5px", color: "#374151", paddingLeft: "20px", lineHeight: 1.4, fontStyle: "italic" }}>
+                        {r.reasoning}
+                      </div>
+                    )}
+                  </button>
+                ))}
+            </div>
+          )}
+
           <button
             style={{ ...S.btnPrimary, marginTop: "4px" }}
             onClick={() => chrome.tabs.create({ url: `${getWebAppUrl()}/contacts` })}

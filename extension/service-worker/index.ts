@@ -23,6 +23,8 @@ import {
   createDiscoverySession,
   updateDiscoverySession,
   bookmarkProfile,
+  rankContactsBatch,
+  type BatchRankResult,
 } from "./api-client";
 import type { ExtractedProfile } from "../shared/types";
 import {
@@ -320,6 +322,40 @@ async function handleMessage(
       // the current profile and return it. The content script handles this
       // directly in its own message listener (index.ts).
       return { ok: true };
+    }
+
+    // ---- Fetch display data for ranked contacts ---------------------------
+    case "FETCH_CONTACTS_FOR_RANKINGS": {
+      // Popup uses this after rankings arrive to enrich the display rows
+      // with name + role + company. Goes through the authenticated api-client.
+      const ids = (message.payload as { ids?: string[] })?.ids ?? [];
+      if (ids.length === 0) return { ok: true, contacts: [] };
+      try {
+        const { getAuthHeader } = await import("./auth");
+        const { getBackendUrl } = await import("./api-client");
+        const authHeader = await getAuthHeader();
+        if (!authHeader) return { ok: false, error: "Not authenticated" };
+
+        const baseUrl = await getBackendUrl();
+        const params = new URLSearchParams({ ids: ids.join(",") });
+        const res = await fetch(`${baseUrl}/api/contacts?${params.toString()}`, {
+          headers: { Authorization: authHeader },
+        });
+        if (!res.ok) return { ok: false, error: `Backend ${res.status}` };
+        const body = await res.json() as {
+          data?: { items?: Array<{ id: string; name: string; current_title: string | null; company: string | null }> };
+        };
+        const items = body.data?.items ?? [];
+        // Return only the ones the user asked for (in case the contacts
+        // listing returned more than requested).
+        const idSet = new Set(ids);
+        return {
+          ok: true,
+          contacts: items.filter((c) => idSet.has(c.id)),
+        };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
     }
 
     // ---- CDP test (Module 1 verification) -----------------------------------
@@ -712,7 +748,7 @@ async function handleMessage(
         }
 
         // Step 3: Visit each profile, extract data, save to backend
-        const saved: Array<{ name: string; url: string }> = [];
+        const saved: Array<{ name: string; url: string; id: string }> = [];
         const errors: string[] = [];
 
         for (let i = 0; i < profiles.length; i++) {
@@ -901,7 +937,7 @@ async function handleMessage(
             });
 
             if (contact) {
-              saved.push({ name: finalData.name, url: rawData.linkedinUrl });
+              saved.push({ name: finalData.name, url: rawData.linkedinUrl, id: contact.id });
               errors.push(`${diagPrefix} → minimax: ${expCount} exp, ${eduCount} edu → SAVED`);
             } else {
               errors.push(`${diagPrefix} → minimax: ${expCount} exp, ${eduCount} edu → save failed`);
@@ -919,10 +955,39 @@ async function handleMessage(
           }
         }
 
+        // Step 4: Rank the saved candidates in a single LLM call. Uses
+        // profile_md + comparative reasoning so the popup can show "picked
+        // because: shared INSEAD class, same Bain → growth VC pivot..."
+        // rather than opaque scores. Non-fatal — discovery succeeds even
+        // if ranking fails.
+        let rankings: BatchRankResult[] = [];
+        if (saved.length > 0) {
+          try {
+            chrome.runtime.sendMessage({
+              type: "SESSION_PROGRESS",
+              data: { profilesVisited: profiles.length, profilesDiscovered: saved.length, total: profiles.length, state: "RANKING" },
+            }).catch(() => {});
+
+            rankings = await rankContactsBatch(
+              saved.map((s) => s.id),
+              Math.min(saved.length, 10)
+            );
+            console.debug(`[CDP] Ranked ${rankings.length} contacts`);
+          } catch (rankErr) {
+            console.warn("[CDP] Rank batch threw:", rankErr);
+          }
+        }
+
         // Broadcast completion
         chrome.runtime.sendMessage({
           type: "SESSION_PROGRESS",
-          data: { profilesVisited: profiles.length, profilesDiscovered: saved.length, total: profiles.length, state: "COMPLETED" },
+          data: {
+            profilesVisited: profiles.length,
+            profilesDiscovered: saved.length,
+            total: profiles.length,
+            state: "COMPLETED",
+            rankings,
+          },
         }).catch(() => {});
 
         await detach();
@@ -935,6 +1000,7 @@ async function handleMessage(
           count: profiles.length,
           saved: saved.length,
           savedProfiles: saved,
+          rankings,
           errors: errors.length > 0 ? errors : undefined,
         };
       } catch (err) {

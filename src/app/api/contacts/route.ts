@@ -42,6 +42,12 @@ const ListContactsQuerySchema = z.object({
     .default("discovered_at"),
   sort_order: z.enum(["asc", "desc"]).optional().default("desc"),
   search: z.string().optional(),
+  /**
+   * Comma-separated UUIDs. When present, restricts the result to exactly
+   * these contacts. Used by the extension popup after batch ranking to
+   * fetch display data (name, role, company) for the ranked picks.
+   */
+  ids: z.string().optional(),
 });
 
 const CreateContactSchema = z.object({
@@ -82,7 +88,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const { page, per_page, status, company, tier, discovered_after, sort_by, sort_order, search } =
+  const { page, per_page, status, company, tier, discovered_after, sort_by, sort_order, search, ids } =
     parsed.data;
 
   const from = (page - 1) * per_page;
@@ -101,6 +107,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     query = query.or(
       `name.ilike.%${search}%,company.ilike.%${search}%,current_title.ilike.%${search}%`
     );
+  }
+  if (ids) {
+    const idList = ids
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .slice(0, 50);
+    if (idList.length > 0) {
+      query = query.in("id", idList);
+    }
   }
 
   // Handle nullable sort columns — null values always go last
