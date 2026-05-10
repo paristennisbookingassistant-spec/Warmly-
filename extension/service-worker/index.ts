@@ -620,35 +620,30 @@ async function handleMessage(
           );
         };
 
-        // If the popup pre-resolved the slug via the picker, skip the
-        // guess-then-LLM dance — go straight there.
-        const slugs = presetSlug
-          ? [presetSlug]
-          : [...new Set([
-              (() => {
-                const base = companyName.toLowerCase().replace(/[^a-z0-9\s&-]/g, "").trim();
-                return base.replace(/[&]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-");
-              })(),
-              companyName.toLowerCase().replace(/[^a-z0-9\s&-]/g, "").trim().replace(/[&\s-]/g, ""),
-              companyName.toLowerCase().replace(/[^a-z0-9\s&-]/g, "").trim().split(/\s+/)[0],
-            ])];
-
+        // Resolution strategy: ALWAYS go through LinkedIn search + LLM
+        // disambiguation, except when the popup pre-resolved a slug via
+        // the picker (presetSlug). The previous "slug guess first" code
+        // was a footgun on common names: "wonderful" successfully
+        // resolves to /company/wonderful but that's a different company
+        // than wonderfulcx (the AI agent startup). The cache layer in
+        // /api/discovery/resolve-company makes repeat lookups instant
+        // (zero LLM call) so the cost of going LLM-first is one-time
+        // per company name.
         let companyId: string | null = null;
         let resolvedName: string = companyName;
 
-        for (const slug of slugs) {
-          await navigate(`https://www.linkedin.com/company/${slug}/`);
+        if (presetSlug) {
+          // Picker already chose the slug — go directly. Trust the user's pick.
+          await navigate(`https://www.linkedin.com/company/${presetSlug}/`);
           await sleep(2000);
           const id = await tryExtractId();
           if (id) {
-            // If we landed on a valid company page (not /unavailable), accept it.
-            // The user typed the name/slug — trust their input.
             const name = await evaluate<string | null>(`document.querySelector('h1')?.innerText?.trim() ?? null`);
             companyId = id;
             resolvedName = name ?? companyName;
-            break;
           }
         }
+        // No presetSlug → fall through to LinkedIn search + LLM resolver below.
 
         // Fallback: LinkedIn search + LLM disambiguation with structured candidates
         if (!companyId) {

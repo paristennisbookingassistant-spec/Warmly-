@@ -977,23 +977,28 @@ export default function Popup() {
               }}
               onKeyDown={(e) => e.key === "Enter" && handleStartDiscovery()}
             />
-            <input
-              value={companyHint}
-              onChange={(e) => setCompanyHint(e.target.value)}
-              placeholder='Optional: what does the company do? (e.g. "AI agent startup")'
-              style={{
-                width: "100%",
-                padding: "6px 10px",
-                fontSize: "11.5px",
-                border: "1.5px solid #e5e7eb",
-                borderRadius: "8px",
-                outline: "none",
-                color: "#374151",
-                backgroundColor: "#f9fafb",
-                boxSizing: "border-box",
-              }}
-              onKeyDown={(e) => e.key === "Enter" && handleStartDiscovery()}
-            />
+            <div>
+              <label style={{ fontSize: "10px", color: "#6b7280", fontWeight: 500, display: "block", marginBottom: "2px", paddingLeft: "2px" }}>
+                What does the company do? <span style={{ color: "#9ca3af", fontWeight: 400 }}>(helps when name is generic)</span>
+              </label>
+              <input
+                value={companyHint}
+                onChange={(e) => setCompanyHint(e.target.value)}
+                placeholder='e.g. "AI agent startup", "Paris VC fund"'
+                style={{
+                  width: "100%",
+                  padding: "7px 10px",
+                  fontSize: "12px",
+                  border: "1.5px solid #e5e7eb",
+                  borderRadius: "8px",
+                  outline: "none",
+                  color: "#374151",
+                  backgroundColor: "#fffbeb",
+                  boxSizing: "border-box",
+                }}
+                onKeyDown={(e) => e.key === "Enter" && handleStartDiscovery()}
+              />
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <label style={{ fontSize: "11px", color: "#6b7280", whiteSpace: "nowrap", minWidth: "44px" }}>
                 School:
