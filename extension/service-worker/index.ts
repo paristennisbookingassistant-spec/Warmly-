@@ -590,12 +590,17 @@ async function handleMessage(
         schoolId?: string;
         userContext?: string;
         companySlug?: string;
+        locationGeoUrn?: string;
+        functionKeywords?: string;
       };
       const companyName = p?.companyName?.trim();
       const schoolId = p?.schoolId ?? "5176";
       const userContext = p?.userContext?.trim() || undefined;
       // Pre-resolved slug from the disambiguation picker — bypasses LLM resolution.
       const presetSlug = p?.companySlug?.trim() || undefined;
+      // Optional filters from the popup form
+      const locationGeoUrn = p?.locationGeoUrn?.trim() || undefined;
+      const functionKeywords = p?.functionKeywords?.trim() || undefined;
       if (!companyName) return { ok: false, error: "Company name required" };
 
       try {
@@ -701,10 +706,13 @@ async function handleMessage(
           return { ok: false, error: `Could not find company "${companyName}" on LinkedIn` };
         }
 
-        // Step 2: Search profiles with company ID + school ID
+        // Step 2: Search profiles with company ID + school ID + optional filters
         const params = new URLSearchParams();
         params.set("currentCompany", `["${companyId}"]`);
         if (schoolId) params.set("schoolFilter", `["${schoolId}"]`);
+        if (locationGeoUrn) params.set("geoUrn", `["${locationGeoUrn}"]`);
+        // function filter goes in keywords (LinkedIn's industry filter is brittle)
+        if (functionKeywords) params.set("keywords", functionKeywords);
         const searchUrl = `https://www.linkedin.com/search/results/people/?${params.toString()}`;
 
         console.debug("[CDP] Searching profiles:", searchUrl);

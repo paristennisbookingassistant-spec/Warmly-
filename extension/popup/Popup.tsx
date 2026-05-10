@@ -16,6 +16,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { DiscoverySessionState } from "../shared/types";
+import { LOCATION_GEO_URN, FUNCTION_KEYWORDS } from "../shared/linkedin-filters";
 
 // Injected at build time by esbuild — see build.mjs
 declare const __BACKEND_URL__: string;
@@ -323,6 +324,8 @@ export default function Popup() {
   const [companyName, setCompanyName] = useState("");
   const [companyHint, setCompanyHint] = useState(""); // user context to disambiguate
   const [schoolId, setSchoolId] = useState("5176"); // INSEAD default
+  const [locationKey, setLocationKey] = useState(""); // "" = any
+  const [functionKey, setFunctionKey] = useState(""); // "" = any
   // When the LLM can't auto-pick a company (low confidence), we surface the
   // top candidates here so the user can disambiguate manually.
   const [companyPicker, setCompanyPicker] = useState<{
@@ -505,6 +508,13 @@ export default function Popup() {
       },
     }));
 
+    const locationGeoUrn = locationKey
+      ? LOCATION_GEO_URN[locationKey]?.geoUrn
+      : undefined;
+    const functionKeywords = functionKey
+      ? FUNCTION_KEYWORDS[functionKey]?.keywords
+      : undefined;
+
     chrome.runtime.sendMessage(
       {
         type: "CDP_DISCOVER",
@@ -513,6 +523,9 @@ export default function Popup() {
           schoolId: schoolId || "5176", // dropdown default = INSEAD
           // Optional disambiguator. Empty string → undefined.
           userContext: companyHint.trim() || undefined,
+          // Optional filters — empty → no filter applied.
+          locationGeoUrn,
+          functionKeywords,
         },
       },
       (response) => {
@@ -540,7 +553,7 @@ export default function Popup() {
         // final SESSION_PROGRESS with state COMPLETED flips the view.
       }
     );
-  }, [companyName, companyHint, schoolId]);
+  }, [companyName, companyHint, schoolId, locationKey, functionKey]);
 
   /**
    * User picked a candidate from the disambiguation UI. Re-run discovery
@@ -982,7 +995,7 @@ export default function Popup() {
               onKeyDown={(e) => e.key === "Enter" && handleStartDiscovery()}
             />
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <label style={{ fontSize: "11px", color: "#6b7280", whiteSpace: "nowrap" }}>
+              <label style={{ fontSize: "11px", color: "#6b7280", whiteSpace: "nowrap", minWidth: "44px" }}>
                 School:
               </label>
               <select
@@ -1005,6 +1018,54 @@ export default function Popup() {
                 <option value="1792">Stanford GSB</option>
                 <option value="1285">Wharton</option>
                 <option value="">Any school</option>
+              </select>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <label style={{ fontSize: "11px", color: "#6b7280", whiteSpace: "nowrap", minWidth: "44px" }}>
+                Where:
+              </label>
+              <select
+                value={locationKey}
+                onChange={(e) => setLocationKey(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: "5px 8px",
+                  fontSize: "12px",
+                  border: "1.5px solid #e5e7eb",
+                  borderRadius: "6px",
+                  color: "#111827",
+                  backgroundColor: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">Any location</option>
+                {Object.entries(LOCATION_GEO_URN).map(([k, { label }]) => (
+                  <option key={k} value={k}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <label style={{ fontSize: "11px", color: "#6b7280", whiteSpace: "nowrap", minWidth: "44px" }}>
+                Doing:
+              </label>
+              <select
+                value={functionKey}
+                onChange={(e) => setFunctionKey(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: "5px 8px",
+                  fontSize: "12px",
+                  border: "1.5px solid #e5e7eb",
+                  borderRadius: "6px",
+                  color: "#111827",
+                  backgroundColor: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">Any function</option>
+                {Object.entries(FUNCTION_KEYWORDS).map(([k, { label }]) => (
+                  <option key={k} value={k}>{label}</option>
+                ))}
               </select>
             </div>
             <button
