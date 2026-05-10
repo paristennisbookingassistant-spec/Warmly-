@@ -42,6 +42,74 @@ import { DEFAULT_BACKEND_URL } from "../shared/constants";
 // ---------------------------------------------------------------------------
 
 /**
+ * JS snippet executed inside the LinkedIn page (via CDP `Runtime.evaluate`)
+ * that scrapes the company-search results page into structured rows.
+ * Returns a JSON string of CompanyCandidate[] (parsed by the caller).
+ *
+ * Used in two places:
+ *   - CDP_GET_COMPANY_ID (slug-failed fallback)
+ *   - CDP_DISCOVER (slug-failed fallback)
+ *
+ * Multi-selector strategy (data-attrs first, then known structural patterns)
+ * because LinkedIn's class names churn frequently — same defense the profile
+ * extractor uses.
+ */
+const SCRAPE_COMPANY_CANDIDATES_JS = `(() => {
+  const links = Array.from(document.querySelectorAll('a[href*="/company/"]'))
+    .filter(a => {
+      const h = a.href;
+      return !h.includes('/search/') && !h.includes('/unavailable') && h.includes('linkedin.com/company/');
+    });
+
+  const seen = new Set();
+  const rows = [];
+  for (const link of links) {
+    const slug = (() => {
+      try {
+        const u = new URL(link.href);
+        return u.pathname.split('/company/')[1]?.replace(/\\/.*$/, '').replace(/\\/$/, '');
+      } catch {
+        return null;
+      }
+    })();
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+
+    const container = link.closest('li, .reusable-search__result-container, [class*="entity-result"]') || link.parentElement;
+
+    const nameEl = container?.querySelector('[class*="title-text"], [class*="entity-result__title"]') || link;
+    const name = (nameEl?.textContent || link.textContent || '').trim().split('\\n')[0].trim();
+
+    const tagline = container?.querySelector('[class*="primary-subtitle"], [class*="entity-result__primary-subtitle"]')?.textContent?.trim() || '';
+    const location = container?.querySelector('[class*="secondary-subtitle"], [class*="entity-result__secondary-subtitle"]')?.textContent?.trim() || '';
+    const followers = container?.querySelector('[class*="insight-text"], [class*="entity-result__simple-insight"]')?.textContent?.trim() || '';
+
+    if (name && slug) {
+      rows.push({
+        name: name.slice(0, 200),
+        tagline: tagline.slice(0, 500),
+        location: location.slice(0, 200),
+        followers: followers.slice(0, 100),
+        slug,
+        url: 'https://www.linkedin.com/company/' + slug + '/',
+      });
+    }
+    if (rows.length >= 10) break;
+  }
+
+  return JSON.stringify(rows);
+})()`;
+
+interface CompanyCandidate {
+  name: string;
+  tagline: string;
+  location: string;
+  followers: string;
+  slug: string;
+  url: string;
+}
+
+/**
  * Finds the best LinkedIn tab to attach CDP to.
  * Priority: active tab in current window (if it's LinkedIn) → any LinkedIn tab.
  */
@@ -273,8 +341,9 @@ async function handleMessage(
 
     // ---- CDP Module 2: Company ID extraction --------------------------------
     case "CDP_GET_COMPANY_ID": {
-      const p = message.payload as { companyName?: string };
+      const p = message.payload as { companyName?: string; userContext?: string };
       const companyName = p?.companyName?.trim();
+      const userContext = p?.userContext?.trim() || undefined;
       if (!companyName) return { ok: false, error: "Company name required" };
 
       // Helper: check if current page is a valid company page and extract ID
@@ -345,24 +414,19 @@ async function handleMessage(
         );
         await sleep(3000);
 
-        // Extract visible search results text (company names, descriptions, URLs)
-        const searchResultsText = await evaluate<string>(
-          `(() => {
-            const results = [];
-            const links = document.querySelectorAll('a[href*="/company/"]');
-            for (const a of links) {
-              const href = a.href;
-              if (href.includes('/search/') || href.includes('/unavailable')) continue;
-              const text = a.closest('[class]')?.innerText?.trim() ?? a.innerText.trim();
-              if (text.length > 2) {
-                results.push(href.split('?')[0] + ' — ' + text.slice(0, 200));
-              }
-            }
-            return results.slice(0, 10).join('\\n');
-          })()`
-        );
+        // Extract STRUCTURED candidates from the search results page. The
+        // backend disambiguator works far better with name + tagline +
+        // location + followers than with a single text blob.
+        const candidatesJson = await evaluate<string>(SCRAPE_COMPANY_CANDIDATES_JS);
 
-        if (!searchResultsText || searchResultsText.length < 5) {
+        let candidates: CompanyCandidate[] = [];
+        try {
+          candidates = JSON.parse(candidatesJson || "[]");
+        } catch {
+          candidates = [];
+        }
+
+        if (candidates.length === 0) {
           await detach();
           return { ok: false, error: `No LinkedIn search results for "${companyName}"` };
         }
@@ -372,7 +436,7 @@ async function handleMessage(
         const resolveRes = await fetch(`${backendUrl}/api/discovery/resolve-company`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ companyName, searchResultsText }),
+          body: JSON.stringify({ companyName, userContext, candidates }),
         });
 
         if (!resolveRes.ok) {
@@ -380,16 +444,34 @@ async function handleMessage(
           return { ok: false, error: `Backend resolve-company failed (${resolveRes.status})` };
         }
 
-        const resolveData = await resolveRes.json() as { data?: { companyUrl?: string | null; companyName?: string | null } };
+        const resolveData = await resolveRes.json() as {
+          data?: {
+            companyUrl?: string | null;
+            companySlug?: string | null;
+            companyName?: string | null;
+            confidence?: number;
+            reasoning?: string;
+            candidates?: typeof candidates;
+          }
+        };
         const resolvedUrl = resolveData.data?.companyUrl;
 
+        // Low-confidence: surface the picker. The popup will show top 3
+        // candidates so the user can pick. We return ok:false but with a
+        // structured candidates payload so the popup knows what to show.
         if (!resolvedUrl) {
           await detach();
-          return { ok: false, error: `LLM could not identify "${companyName}" in search results` };
+          return {
+            ok: false,
+            needsPicker: true,
+            candidates: resolveData.data?.candidates ?? candidates,
+            reasoning: resolveData.data?.reasoning ?? "Could not auto-resolve",
+            error: `Need user to pick which "${companyName}" they meant`,
+          };
         }
 
         // Navigate to the LLM-selected company page
-        console.debug("[CDP] LLM selected company URL:", resolvedUrl);
+        console.debug("[CDP] LLM selected company URL:", resolvedUrl, "confidence:", resolveData.data?.confidence);
         await navigate(resolvedUrl);
         await sleep(2000);
 
@@ -400,7 +482,14 @@ async function handleMessage(
         await detach();
 
         if (companyId) {
-          return { ok: true, companyId, companyName: displayName ?? resolveData.data?.companyName ?? companyName, method: "llm_search" };
+          return {
+            ok: true,
+            companyId,
+            companyName: displayName ?? resolveData.data?.companyName ?? companyName,
+            method: "llm_search",
+            reasoning: resolveData.data?.reasoning,
+            confidence: resolveData.data?.confidence,
+          };
         }
         return { ok: false, error: `Found page but could not extract company ID` };
       } catch (err) {
@@ -460,9 +549,17 @@ async function handleMessage(
 
     // ---- CDP Full Discovery Test: Company name → profile URLs ----------------
     case "CDP_DISCOVER": {
-      const p = message.payload as { companyName?: string; schoolId?: string };
+      const p = message.payload as {
+        companyName?: string;
+        schoolId?: string;
+        userContext?: string;
+        companySlug?: string;
+      };
       const companyName = p?.companyName?.trim();
       const schoolId = p?.schoolId ?? "5176";
+      const userContext = p?.userContext?.trim() || undefined;
+      // Pre-resolved slug from the disambiguation picker — bypasses LLM resolution.
+      const presetSlug = p?.companySlug?.trim() || undefined;
       if (!companyName) return { ok: false, error: "Company name required" };
 
       try {
@@ -482,13 +579,18 @@ async function handleMessage(
           );
         };
 
-        // Slug guesses
-        const base = companyName.toLowerCase().replace(/[^a-z0-9\s&-]/g, "").trim();
-        const slugs = [...new Set([
-          base.replace(/[&]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-"),
-          base.replace(/[&\s-]/g, ""),
-          base.split(/\s+/)[0],
-        ])];
+        // If the popup pre-resolved the slug via the picker, skip the
+        // guess-then-LLM dance — go straight there.
+        const slugs = presetSlug
+          ? [presetSlug]
+          : [...new Set([
+              (() => {
+                const base = companyName.toLowerCase().replace(/[^a-z0-9\s&-]/g, "").trim();
+                return base.replace(/[&]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-");
+              })(),
+              companyName.toLowerCase().replace(/[^a-z0-9\s&-]/g, "").trim().replace(/[&\s-]/g, ""),
+              companyName.toLowerCase().replace(/[^a-z0-9\s&-]/g, "").trim().split(/\s+/)[0],
+            ])];
 
         let companyId: string | null = null;
         let resolvedName: string = companyName;
@@ -507,39 +609,52 @@ async function handleMessage(
           }
         }
 
-        // Fallback: LinkedIn search + LLM
+        // Fallback: LinkedIn search + LLM disambiguation with structured candidates
         if (!companyId) {
           await navigate(`https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(companyName)}`);
           await sleep(3000);
 
-          const searchText = await evaluate<string>(
-            `(() => {
-              const results = [];
-              const links = document.querySelectorAll('a[href*="/company/"]');
-              for (const a of links) {
-                const href = a.href;
-                if (href.includes('/search/') || href.includes('/unavailable')) continue;
-                const text = a.closest('[class]')?.innerText?.trim() ?? a.innerText.trim();
-                if (text.length > 2) results.push(href.split('?')[0] + ' — ' + text.slice(0, 200));
-              }
-              return results.slice(0, 10).join('\\n');
-            })()`
-          );
+          const candJson = await evaluate<string>(SCRAPE_COMPANY_CANDIDATES_JS);
+          let candidates: CompanyCandidate[] = [];
+          try {
+            candidates = JSON.parse(candJson || "[]");
+          } catch {
+            candidates = [];
+          }
 
-          if (searchText && searchText.length > 5) {
+          if (candidates.length > 0) {
             const backendUrl = DEFAULT_BACKEND_URL;
             const res = await fetch(`${backendUrl}/api/discovery/resolve-company`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ companyName, searchResultsText: searchText }),
+              body: JSON.stringify({ companyName, userContext, candidates }),
             });
             if (res.ok) {
-              const data = await res.json() as { data?: { companyUrl?: string | null; companyName?: string | null } };
+              const data = await res.json() as {
+                data?: {
+                  companyUrl?: string | null;
+                  companyName?: string | null;
+                  confidence?: number;
+                  reasoning?: string;
+                  candidates?: CompanyCandidate[];
+                }
+              };
               if (data.data?.companyUrl) {
                 await navigate(data.data.companyUrl);
                 await sleep(2000);
                 companyId = await tryExtractId();
                 resolvedName = data.data.companyName ?? companyName;
+              } else if (data.data?.candidates) {
+                // Low-confidence — surface picker through the orchestrator's
+                // error path. Caller (popup) can read needsPicker + candidates.
+                await detach();
+                return {
+                  ok: false,
+                  needsPicker: true,
+                  candidates: data.data.candidates,
+                  reasoning: data.data.reasoning,
+                  error: `Need user to pick which "${companyName}" they meant`,
+                };
               }
             }
           }

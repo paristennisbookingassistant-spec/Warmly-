@@ -274,6 +274,19 @@ const S = {
 };
 
 // ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface CompanyPickerCandidate {
+  name: string;
+  tagline?: string;
+  location?: string;
+  followers?: string;
+  slug: string;
+  url?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -291,7 +304,14 @@ export default function Popup() {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [companyName, setCompanyName] = useState("");
+  const [companyHint, setCompanyHint] = useState(""); // user context to disambiguate
   const [schoolId, setSchoolId] = useState("5176"); // INSEAD default
+  // When the LLM can't auto-pick a company (low confidence), we surface the
+  // top candidates here so the user can disambiguate manually.
+  const [companyPicker, setCompanyPicker] = useState<{
+    candidates: CompanyPickerCandidate[];
+    reasoning: string | null;
+  } | null>(null);
   const [cdpTestResult, setCdpTestResult] = useState<string | null>(null);
   const [testCompany, setTestCompany] = useState("");
   const [companyIdResult, setCompanyIdResult] = useState<string | null>(null);
@@ -447,6 +467,8 @@ export default function Popup() {
         payload: {
           companyName: companyName.trim(),
           schoolId: schoolId || "5176", // dropdown default = INSEAD
+          // Optional disambiguator. Empty string → undefined.
+          userContext: companyHint.trim() || undefined,
         },
       },
       (response) => {
@@ -457,6 +479,15 @@ export default function Popup() {
           return;
         }
         if (response?.ok === false) {
+          // If the LLM couldn't pick a confident company, surface the picker.
+          if (response.needsPicker && Array.isArray(response.candidates)) {
+            setCompanyPicker({
+              candidates: response.candidates as CompanyPickerCandidate[],
+              reasoning: response.reasoning ?? null,
+            });
+            setPs((prev) => ({ ...prev, view: "idle" }));
+            return;
+          }
           setSavedMsg(response.error ?? "Discovery failed");
           setTimeout(() => setSavedMsg(null), 5000);
           setPs((prev) => ({ ...prev, view: "idle" }));
@@ -465,7 +496,63 @@ export default function Popup() {
         // final SESSION_PROGRESS with state COMPLETED flips the view.
       }
     );
-  }, [companyName, schoolId]);
+  }, [companyName, companyHint, schoolId]);
+
+  /**
+   * User picked a candidate from the disambiguation UI. Re-run discovery
+   * with the picked company name as a precise hint so it resolves on cache
+   * or via the slug-guess pass on first try.
+   */
+  const handlePickCompany = useCallback(
+    (cand: CompanyPickerCandidate) => {
+      setCompanyPicker(null);
+      // Update visible state so the user sees what got picked
+      setCompanyName(cand.name);
+      setCompanyHint(cand.tagline ?? companyHint);
+
+      const sessionId = crypto.randomUUID();
+      setPs((prev) => ({
+        ...prev,
+        view: "active",
+        session: {
+          session_id: sessionId,
+          user_id: "",
+          status: "running",
+          profiles_viewed: 0,
+          profiles_scored: 0,
+          profiles_saved: 0,
+          target_companies: [cand.name],
+          current_company_index: 0,
+          started_at: new Date().toISOString(),
+          last_heartbeat: new Date().toISOString(),
+          completed_companies: [],
+          processed_urls: [],
+        },
+      }));
+
+      // Pass the chosen slug so the service worker bypasses resolution
+      // and goes straight to the right company page.
+      chrome.runtime.sendMessage(
+        {
+          type: "CDP_DISCOVER",
+          payload: {
+            companyName: cand.name,
+            companySlug: cand.slug,
+            schoolId: schoolId || "5176",
+            userContext: cand.tagline ?? companyHint.trim() ?? undefined,
+          },
+        },
+        (response) => {
+          if (chrome.runtime.lastError || response?.ok === false) {
+            setSavedMsg(response?.error ?? "Discovery failed");
+            setTimeout(() => setSavedMsg(null), 5000);
+            setPs((prev) => ({ ...prev, view: "idle" }));
+          }
+        }
+      );
+    },
+    [companyHint, schoolId]
+  );
 
   const handlePause = useCallback(() => {
     chrome.runtime.sendMessage({ type: "PAUSE_DISCOVERY" });
@@ -679,6 +766,73 @@ export default function Popup() {
         </div>
       )}
 
+      {/* Company picker — surfaced when LLM confidence was too low */}
+      {view === "idle" && companyPicker && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            padding: "10px",
+            border: "1.5px solid #f3e8d4",
+            borderRadius: "10px",
+            backgroundColor: "#fffaf0",
+            marginBottom: "12px",
+          }}
+        >
+          <div>
+            <p style={{ fontSize: "12px", fontWeight: 600, color: "#111827", marginBottom: "2px" }}>
+              Which one did you mean?
+            </p>
+            <p style={{ fontSize: "10.5px", color: "#6b7280", lineHeight: 1.4 }}>
+              {companyPicker.reasoning ?? "Multiple matches found — pick the right company."}
+            </p>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            {companyPicker.candidates.slice(0, 3).map((c) => (
+              <button
+                key={c.slug}
+                onClick={() => handlePickCompany(c)}
+                style={{
+                  textAlign: "left",
+                  padding: "7px 9px",
+                  fontSize: "11.5px",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "6px",
+                  backgroundColor: "#fff",
+                  cursor: "pointer",
+                  color: "#111827",
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: "1px" }}>{c.name}</div>
+                {c.tagline && (
+                  <div style={{ fontSize: "10.5px", color: "#6b7280", lineHeight: 1.35 }}>
+                    {c.tagline}
+                  </div>
+                )}
+                <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "2px" }}>
+                  {[c.location, c.followers].filter(Boolean).join(" · ")}
+                </div>
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setCompanyPicker(null)}
+            style={{
+              alignSelf: "flex-start",
+              fontSize: "10.5px",
+              color: "#6b7280",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              textDecoration: "underline",
+            }}
+          >
+            None of these — let me re-type
+          </button>
+        </div>
+      )}
+
       {/* Idle — Discovery form */}
       {view === "idle" && (
         <>
@@ -698,6 +852,23 @@ export default function Popup() {
                 borderRadius: "8px",
                 outline: "none",
                 color: "#111827",
+                boxSizing: "border-box",
+              }}
+              onKeyDown={(e) => e.key === "Enter" && handleStartDiscovery()}
+            />
+            <input
+              value={companyHint}
+              onChange={(e) => setCompanyHint(e.target.value)}
+              placeholder='Optional: what does the company do? (e.g. "AI agent startup")'
+              style={{
+                width: "100%",
+                padding: "6px 10px",
+                fontSize: "11.5px",
+                border: "1.5px solid #e5e7eb",
+                borderRadius: "8px",
+                outline: "none",
+                color: "#374151",
+                backgroundColor: "#f9fafb",
                 boxSizing: "border-box",
               }}
               onKeyDown={(e) => e.key === "Enter" && handleStartDiscovery()}
