@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AI Networking Coach",
+  "name": "Warmly",
   "version": "0.1.0",
-  "description": "Discover relevant LinkedIn contacts and save them to your AI Networking Coach workspace.",
+  "description": "Your AI networking coach. Discover relevant LinkedIn contacts and turn them into warm intros.",
 
   "permissions": [
     "storage",
@@ -40,7 +40,7 @@
 
   "action": {
     "default_popup": "popup/index.html",
-    "default_title": "AI Networking Coach"
+    "default_title": "Warmly"
   },
 
   "web_accessible_resources": [

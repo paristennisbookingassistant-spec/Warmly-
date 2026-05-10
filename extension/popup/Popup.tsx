@@ -1,17 +1,18 @@
 /**
  * extension/popup/Popup.tsx
- * Minimal, polished popup UI (320 × 400 px).
+ * Warmly extension popup UI (320 × 400 px).
  *
  * States:
  *   - Unauthenticated → sign-in prompt
- *   - Idle           → session count, Start button
+ *   - Idle           → discovery form (company + hint + school + where + doing)
  *   - Active session → progress bar, Pause / Stop
  *   - Paused         → Resume / Stop
  *   - Rate limited   → countdown message
- *   - Completed      → summary + View in App
+ *   - Completed      → top picks with rationale + View in App
+ *   - Picker         → low-confidence company disambiguation (overlays idle)
  *
- * No React Router — pure conditional rendering.
- * Colors: #1a1a2e dark sidebar, #3b82f6 accent blue, #10b981 success green.
+ * Design tokens mirror src/app/globals.css (cream + sienna):
+ *   --bg #f4ede0 · --ink #1f1b16 · --ink-3 #6b5e4a · --accent #b87a4a · --line-soft #d9cdb4
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -20,6 +21,44 @@ import { LOCATION_GEO_URN, FUNCTION_KEYWORDS } from "../shared/linkedin-filters"
 
 // Injected at build time by esbuild — see build.mjs
 declare const __BACKEND_URL__: string;
+declare const __IS_DEV__: boolean;
+
+// Show CDP debug panel only in dev builds (localhost backend).
+// `__IS_DEV__` is a compile-time constant set by esbuild's `define`, so the
+// dev-only JSX block is dead-code-eliminated from production bundles entirely.
+const IS_DEV = typeof __IS_DEV__ !== "undefined" ? __IS_DEV__ : false;
+
+// ---------------------------------------------------------------------------
+// Warmly tokens (kept in sync with src/app/globals.css)
+// ---------------------------------------------------------------------------
+
+const T = {
+  bg: "#f4ede0",
+  bgSunk: "#ece2d0",
+  surface: "#ffffff",
+  surface2: "#faf4e8",
+  line: "#cdbf9f",
+  lineSoft: "#d9cdb4",
+
+  ink: "#1f1b16",
+  ink2: "#3d352c",
+  ink3: "#6b5e4a",
+  ink4: "#8e8170",
+
+  accent: "#b87a4a",
+  accentSoft: "#f3e2cd",
+  accentInk: "#7a4a25",
+
+  good: "#5e8d6a",
+  goodSoft: "#dcebd9",
+  goodInk: "#34553e",
+
+  warn: "#c8923a",
+  warnSoft: "#f6e7c5",
+  warnInk: "#7a521a",
+
+  bad: "#c25c4a",
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,6 +104,18 @@ interface SessionRanking {
   company?: string;
 }
 
+/** A company candidate the LLM disambiguator surfaces when confidence is low. */
+interface CompanyPickerCandidate {
+  name: string;
+  tagline?: string;
+  location?: string;
+  followers?: string;
+  slug: string;
+  url?: string;
+  /** Raw row text scraped from LinkedIn — used to render multi-line preview. */
+  rawText?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -89,10 +140,10 @@ const S = {
     display: "flex",
     flexDirection: "column" as const,
     gap: "12px",
-    backgroundColor: "#ffffff",
+    backgroundColor: T.bg,
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif",
     fontSize: "13px",
-    color: "#111827",
+    color: T.ink,
   },
   header: {
     display: "flex",
@@ -108,35 +159,40 @@ const S = {
     width: "8px",
     height: "8px",
     borderRadius: "50%",
-    backgroundColor: "#3b82f6",
+    backgroundColor: T.accent,
     flexShrink: 0,
   },
   brandName: {
-    fontWeight: 600,
-    fontSize: "13px",
-    color: "#111827",
+    fontFamily: "'Instrument Serif', 'Cormorant Garamond', Georgia, serif",
+    fontStyle: "italic" as const,
+    fontWeight: 400,
+    fontSize: "20px",
+    letterSpacing: "-0.01em",
+    color: T.ink,
+    lineHeight: 1,
   },
   subtext: {
     fontSize: "11px",
-    color: "#6b7280",
-    marginTop: "1px",
+    color: T.ink3,
+    marginTop: "3px",
   },
   linkBtn: {
     fontSize: "11px",
-    color: "#3b82f6",
+    color: T.accent,
     background: "none",
     border: "none",
     cursor: "pointer",
     padding: "0",
     textDecoration: "none",
+    fontWeight: 500,
   },
   divider: {
     height: "1px",
-    backgroundColor: "#f3f4f6",
+    backgroundColor: T.lineSoft,
     margin: "0 -16px",
   },
   sessionCard: {
-    backgroundColor: "#eff6ff",
+    backgroundColor: T.accentSoft,
     borderRadius: "10px",
     padding: "12px",
     display: "flex",
@@ -144,7 +200,7 @@ const S = {
     gap: "8px",
   },
   sessionCardPaused: {
-    backgroundColor: "#fffbeb",
+    backgroundColor: T.warnSoft,
     borderRadius: "10px",
     padding: "12px",
     display: "flex",
@@ -169,19 +225,19 @@ const S = {
   }),
   progressText: {
     fontSize: "12px",
-    color: "#1d4ed8",
+    color: T.accentInk,
     fontWeight: 500,
   },
   progressTrack: {
     height: "5px",
-    backgroundColor: "#bfdbfe",
+    backgroundColor: "#e8d6bc",
     borderRadius: "9999px",
     overflow: "hidden",
   },
   progressFill: (pct: number) => ({
     height: "100%",
     width: `${Math.min(100, pct)}%`,
-    backgroundColor: "#3b82f6",
+    backgroundColor: T.accent,
     borderRadius: "9999px",
     transition: "width 0.4s ease",
   }),
@@ -193,7 +249,7 @@ const S = {
   btnPrimary: {
     flex: 1,
     padding: "7px 12px",
-    backgroundColor: "#3b82f6",
+    backgroundColor: T.accent,
     color: "#ffffff",
     border: "none",
     borderRadius: "8px",
@@ -205,9 +261,9 @@ const S = {
   btnSecondary: {
     flex: 1,
     padding: "7px 12px",
-    backgroundColor: "#ffffff",
-    color: "#3b82f6",
-    border: "1.5px solid #bfdbfe",
+    backgroundColor: T.surface,
+    color: T.accentInk,
+    border: `1px solid ${T.line}`,
     borderRadius: "8px",
     fontSize: "12px",
     fontWeight: 600,
@@ -216,7 +272,7 @@ const S = {
   btnDanger: {
     padding: "7px 10px",
     backgroundColor: "transparent",
-    color: "#ef4444",
+    color: T.bad,
     border: "none",
     borderRadius: "8px",
     fontSize: "12px",
@@ -226,7 +282,7 @@ const S = {
   btnFull: {
     width: "100%",
     padding: "9px 12px",
-    backgroundColor: "#3b82f6",
+    backgroundColor: T.accent,
     color: "#ffffff",
     border: "none",
     borderRadius: "8px",
@@ -238,24 +294,24 @@ const S = {
   btnOutline: {
     width: "100%",
     padding: "9px 12px",
-    backgroundColor: "#ffffff",
-    color: "#374151",
-    border: "1.5px solid #e5e7eb",
+    backgroundColor: T.surface,
+    color: T.ink2,
+    border: `1px solid ${T.lineSoft}`,
     borderRadius: "8px",
     fontSize: "13px",
     fontWeight: 500,
     cursor: "pointer",
   },
   rateLimitCard: {
-    backgroundColor: "#fef9c3",
+    backgroundColor: T.warnSoft,
     borderRadius: "10px",
     padding: "12px",
     fontSize: "12px",
-    color: "#92400e",
+    color: T.warnInk,
     lineHeight: 1.5,
   },
   completedCard: {
-    backgroundColor: "#f0fdf4",
+    backgroundColor: T.goodSoft,
     borderRadius: "10px",
     padding: "12px",
     display: "flex",
@@ -265,20 +321,20 @@ const S = {
   completedCount: {
     fontSize: "22px",
     fontWeight: 700,
-    color: "#10b981",
+    color: T.goodInk,
     lineHeight: 1,
   },
   sessionMeta: {
     fontSize: "11px",
-    color: "#6b7280",
+    color: T.ink3,
     marginTop: "2px",
   },
   bookmarkBtn: {
     width: "100%",
     padding: "9px 12px",
-    backgroundColor: "#ffffff",
-    color: "#374151",
-    border: "1.5px solid #e5e7eb",
+    backgroundColor: T.surface,
+    color: T.ink2,
+    border: `1px solid ${T.lineSoft}`,
     borderRadius: "8px",
     fontSize: "12px",
     fontWeight: 500,
@@ -288,20 +344,92 @@ const S = {
     justifyContent: "center",
     gap: "6px",
   },
+  input: {
+    width: "100%",
+    padding: "8px 10px",
+    fontSize: "13px",
+    border: `1px solid ${T.lineSoft}`,
+    borderRadius: "8px",
+    outline: "none",
+    color: T.ink,
+    backgroundColor: T.surface,
+    boxSizing: "border-box" as const,
+  },
+  hintInput: {
+    width: "100%",
+    padding: "7px 10px",
+    fontSize: "12px",
+    border: `1px solid ${T.line}`,
+    borderRadius: "8px",
+    outline: "none",
+    color: T.ink2,
+    backgroundColor: T.accentSoft,
+    boxSizing: "border-box" as const,
+  },
+  fieldLabel: {
+    fontSize: "10px",
+    color: T.ink3,
+    fontWeight: 500,
+    display: "block",
+    marginBottom: "2px",
+    paddingLeft: "2px",
+  },
+  fieldHint: {
+    color: T.ink4,
+    fontWeight: 400,
+  },
+  filterRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+  },
+  filterLabel: {
+    fontSize: "11px",
+    color: T.ink3,
+    whiteSpace: "nowrap" as const,
+    minWidth: "44px",
+  },
+  select: {
+    flex: 1,
+    padding: "5px 8px",
+    fontSize: "12px",
+    border: `1px solid ${T.lineSoft}`,
+    borderRadius: "6px",
+    color: T.ink,
+    backgroundColor: T.surface,
+    cursor: "pointer",
+  },
+  pickerCard: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "8px",
+    padding: "10px",
+    border: `1px solid ${T.line}`,
+    borderRadius: "10px",
+    backgroundColor: T.surface2,
+  },
+  pickerRow: {
+    textAlign: "left" as const,
+    padding: "8px 10px",
+    fontSize: "11.5px",
+    border: `1px solid ${T.lineSoft}`,
+    borderRadius: "8px",
+    backgroundColor: T.surface,
+    cursor: "pointer",
+    color: T.ink,
+  },
+  rankingsRow: {
+    textAlign: "left" as const,
+    padding: "8px 10px",
+    border: `1px solid ${T.lineSoft}`,
+    borderRadius: "8px",
+    backgroundColor: T.surface,
+    cursor: "pointer",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "3px",
+  },
 };
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface CompanyPickerCandidate {
-  name: string;
-  tagline?: string;
-  location?: string;
-  followers?: string;
-  slug: string;
-  url?: string;
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -326,12 +454,11 @@ export default function Popup() {
   const [schoolId, setSchoolId] = useState("5176"); // INSEAD default
   const [locationKey, setLocationKey] = useState(""); // "" = any
   const [functionKey, setFunctionKey] = useState(""); // "" = any
-  // When the LLM can't auto-pick a company (low confidence), we surface the
-  // top candidates here so the user can disambiguate manually.
   const [companyPicker, setCompanyPicker] = useState<{
     candidates: CompanyPickerCandidate[];
     reasoning: string | null;
   } | null>(null);
+  // Dev-only CDP debug state
   const [cdpTestResult, setCdpTestResult] = useState<string | null>(null);
   const [testCompany, setTestCompany] = useState("");
   const [companyIdResult, setCompanyIdResult] = useState<string | null>(null);
@@ -459,6 +586,10 @@ export default function Popup() {
   }, []);
 
   // ---- Handlers ----
+  // Production discovery flow: popup → service worker (CDP_DISCOVER) →
+  // resolves company via LLM disambiguation, navigates to the school-filtered
+  // alumni search URL via Chrome DevTools Protocol, visits each profile,
+  // extracts via MiniMax, saves, and runs batch ranking.
   const handleStartDiscovery = useCallback(async () => {
     if (!companyName.trim()) return;
 
@@ -471,23 +602,6 @@ export default function Popup() {
       return;
     }
 
-    // Route through the service worker's CDP_DISCOVER handler.
-    //
-    // Why CDP and not the content-script orchestrator:
-    //   The content-script path navigates the tab via window.location.href,
-    //   which kills the content script (page reload destroys its JS context).
-    //   The orchestrator's await never resolves and discovery stalls on the
-    //   company page — exactly the "company opens but no alumni search" bug.
-    //
-    //   CDP (chrome.debugger) drives the tab from the service worker. The
-    //   browser process holds the connection — page navigations don't break
-    //   it. Same flow (resolve company → filter by school → visit profiles
-    //   → extract → save), but it actually runs to completion.
-    //
-    // We optimistically flip the popup to "active" before the response so the
-    // user sees the progress card immediately. SESSION_PROGRESS broadcasts
-    // from the SW will keep the counter updated; on completion or error the
-    // SW's final response settles the view.
     const sessionId = crypto.randomUUID();
     setPs((prev) => ({
       ...prev,
@@ -520,10 +634,8 @@ export default function Popup() {
         type: "CDP_DISCOVER",
         payload: {
           companyName: companyName.trim(),
-          schoolId: schoolId || "5176", // dropdown default = INSEAD
-          // Optional disambiguator. Empty string → undefined.
+          schoolId: schoolId || "5176",
           userContext: companyHint.trim() || undefined,
-          // Optional filters — empty → no filter applied.
           locationGeoUrn,
           functionKeywords,
         },
@@ -549,21 +661,17 @@ export default function Popup() {
           setTimeout(() => setSavedMsg(null), 5000);
           setPs((prev) => ({ ...prev, view: "idle" }));
         }
-        // ok === true: SESSION_PROGRESS handler keeps state synced;
-        // final SESSION_PROGRESS with state COMPLETED flips the view.
       }
     );
   }, [companyName, companyHint, schoolId, locationKey, functionKey]);
 
   /**
    * User picked a candidate from the disambiguation UI. Re-run discovery
-   * with the picked company name as a precise hint so it resolves on cache
-   * or via the slug-guess pass on first try.
+   * with the picked company name and slug so the SW bypasses resolution.
    */
   const handlePickCompany = useCallback(
     (cand: CompanyPickerCandidate) => {
       setCompanyPicker(null);
-      // Update visible state so the user sees what got picked
       setCompanyName(cand.name);
       setCompanyHint(cand.tagline ?? companyHint);
 
@@ -587,8 +695,13 @@ export default function Popup() {
         },
       }));
 
-      // Pass the chosen slug so the service worker bypasses resolution
-      // and goes straight to the right company page.
+      const locationGeoUrn = locationKey
+        ? LOCATION_GEO_URN[locationKey]?.geoUrn
+        : undefined;
+      const functionKeywords = functionKey
+        ? FUNCTION_KEYWORDS[functionKey]?.keywords
+        : undefined;
+
       chrome.runtime.sendMessage(
         {
           type: "CDP_DISCOVER",
@@ -597,6 +710,8 @@ export default function Popup() {
             companySlug: cand.slug,
             schoolId: schoolId || "5176",
             userContext: cand.tagline ?? companyHint.trim() ?? undefined,
+            locationGeoUrn,
+            functionKeywords,
           },
         },
         (response) => {
@@ -608,7 +723,7 @@ export default function Popup() {
         }
       );
     },
-    [companyHint, schoolId]
+    [companyHint, schoolId, locationKey, functionKey]
   );
 
   const handlePause = useCallback(() => {
@@ -645,8 +760,6 @@ export default function Popup() {
   const handleSaveProfile = useCallback(async () => {
     setSaving(true);
     setSavedMsg("Reading profile...");
-    // In real Chrome, the active tab behind the popup is the LinkedIn page.
-    // If the active tab isn't LinkedIn (e.g., Playwright E2E), fall back to any /in/ tab.
     const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const activeTab = activeTabs[0];
     const targetTab = activeTab?.url?.includes("linkedin.com/in/")
@@ -657,8 +770,6 @@ export default function Popup() {
       setSavedMsg(null);
       return;
     }
-    // Content script may take up to 4s to extract (LinkedIn SPA timing)
-    // so we keep saving=true until the callback fires.
     chrome.tabs.sendMessage(
       targetTab.id,
       { type: "PAGE_BOOKMARKED" },
@@ -681,7 +792,6 @@ export default function Popup() {
   }, []);
 
   function getWebAppUrl(): string {
-    // Injected at build time via esbuild define — see build.mjs
     return typeof __BACKEND_URL__ !== "undefined" ? __BACKEND_URL__ : "http://localhost:3000";
   }
 
@@ -691,7 +801,7 @@ export default function Popup() {
   if (view === "loading") {
     return (
       <div style={{ ...S.root, alignItems: "center", justifyContent: "center", minHeight: "80px" }}>
-        <span style={{ fontSize: "12px", color: "#9ca3af" }}>Loading...</span>
+        <span style={{ fontSize: "12px", color: T.ink4 }}>Loading...</span>
       </div>
     );
   }
@@ -701,19 +811,19 @@ export default function Popup() {
       <div style={S.root}>
         <div style={S.header}>
           <div style={S.brandRow}>
-            <div style={S.dot} />
-            <span style={S.brandName}>AI Networking Coach</span>
+            <div style={S.dot} className="warmly-pulse" />
+            <span style={S.brandName} className="warmly-wordmark">Warmly</span>
           </div>
         </div>
         <div style={S.divider} />
-        <p style={{ fontSize: "12px", color: "#6b7280", lineHeight: 1.6 }}>
+        <p style={{ fontSize: "12px", color: T.ink3, lineHeight: 1.6 }}>
           Sign in to start discovering and saving LinkedIn contacts.
         </p>
         <button
           style={S.btnFull}
           onClick={() => chrome.tabs.create({ url: `${getWebAppUrl()}/login` })}
         >
-          Sign in to AI Networking Coach
+          Sign in to Warmly
         </button>
       </div>
     );
@@ -728,8 +838,8 @@ export default function Popup() {
       <div style={S.header}>
         <div>
           <div style={S.brandRow}>
-            <div style={S.dot} />
-            <span style={S.brandName}>AI Networking Coach</span>
+            <div style={S.dot} className="warmly-pulse" />
+            <span style={S.brandName} className="warmly-wordmark">Warmly</span>
           </div>
           {userName && <p style={S.subtext}>{userName}</p>}
         </div>
@@ -760,7 +870,7 @@ export default function Popup() {
       {view === "active" && session && (
         <div style={S.sessionCard}>
           <div style={S.sessionLabel}>
-            <span style={S.badge("#1d4ed8", "#dbeafe")}>Discovering</span>
+            <span style={S.badge(T.accentInk, "#eccfa9")}>Discovering</span>
           </div>
           <p style={S.progressText}>
             {profilesViewed} / 25 profiles
@@ -783,13 +893,13 @@ export default function Popup() {
       {view === "paused" && session && (
         <div style={S.sessionCardPaused}>
           <div style={S.sessionLabel}>
-            <span style={S.badge("#92400e", "#fef3c7")}>Paused</span>
+            <span style={S.badge(T.warnInk, "#eed6a8")}>Paused</span>
           </div>
-          <p style={{ fontSize: "12px", color: "#78350f" }}>
+          <p style={{ fontSize: "12px", color: T.warnInk }}>
             {profilesViewed} / 25 profiles visited
           </p>
           <div style={S.progressTrack}>
-            <div style={{ ...S.progressFill(progressPct), backgroundColor: "#f59e0b" }} />
+            <div style={{ ...S.progressFill(progressPct), backgroundColor: T.warn }} />
           </div>
           <div style={S.btnRow}>
             <button style={S.btnPrimary} onClick={handleResume}>
@@ -805,11 +915,11 @@ export default function Popup() {
       {/* Completed */}
       {view === "completed" && (
         <div style={S.completedCard}>
-          <span style={S.badge("#065f46", "#d1fae5")}>Session complete</span>
+          <span style={S.badge(T.goodInk, "#c5dfc1")}>Session complete</span>
           {lastSessionProfiles !== null && (
             <div style={{ marginTop: "4px" }}>
               <p style={S.completedCount}>{lastSessionProfiles}</p>
-              <p style={{ fontSize: "12px", color: "#374151", marginTop: "2px" }}>
+              <p style={{ fontSize: "12px", color: T.ink2, marginTop: "2px" }}>
                 profiles discovered
               </p>
             </div>
@@ -817,8 +927,8 @@ export default function Popup() {
 
           {/* Top picks with rationale */}
           {ps.lastSessionRankings && ps.lastSessionRankings.length > 0 && (
-            <div style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px", textAlign: "left" }}>
-              <p style={{ fontSize: "10.5px", textTransform: "uppercase", letterSpacing: "0.08em", color: "#6b7280", fontWeight: 600 }}>
+            <div style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px" }}>
+              <p style={{ fontSize: "10.5px", textTransform: "uppercase", letterSpacing: "0.08em", color: T.ink3, fontWeight: 600 }}>
                 Top picks for you
               </p>
               {ps.lastSessionRankings
@@ -829,23 +939,13 @@ export default function Popup() {
                   <button
                     key={r.contact_id}
                     onClick={() => chrome.tabs.create({ url: `${getWebAppUrl()}/contacts/${r.contact_id}` })}
-                    style={{
-                      textAlign: "left",
-                      padding: "8px 10px",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: "8px",
-                      backgroundColor: "#fff",
-                      cursor: "pointer",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "3px",
-                    }}
+                    style={S.rankingsRow}
                   >
                     <div style={{ display: "flex", alignItems: "baseline", gap: "6px" }}>
-                      <span style={{ fontSize: "10px", color: "#9ca3af", fontFamily: "ui-monospace, monospace", minWidth: "14px" }}>
+                      <span style={{ fontSize: "10px", color: T.ink4, fontFamily: "ui-monospace, monospace", minWidth: "14px" }}>
                         {r.rank}
                       </span>
-                      <span style={{ fontSize: "12px", fontWeight: 600, color: "#111827", flex: 1 }}>
+                      <span style={{ fontSize: "12px", fontWeight: 600, color: T.ink, flex: 1 }}>
                         {r.name ?? "(loading…)"}
                       </span>
                       <span
@@ -853,8 +953,8 @@ export default function Popup() {
                           fontSize: "10px",
                           padding: "1px 5px",
                           borderRadius: "4px",
-                          backgroundColor: r.tier === 1 ? "#dcfce7" : r.tier === 2 ? "#fef3c7" : "#f3f4f6",
-                          color: r.tier === 1 ? "#166534" : r.tier === 2 ? "#92400e" : "#6b7280",
+                          backgroundColor: r.tier === 1 ? T.goodSoft : r.tier === 2 ? T.warnSoft : T.bgSunk,
+                          color: r.tier === 1 ? T.goodInk : r.tier === 2 ? T.warnInk : T.ink3,
                           fontWeight: 600,
                         }}
                       >
@@ -862,14 +962,14 @@ export default function Popup() {
                       </span>
                     </div>
                     {(r.current_title || r.company) && (
-                      <div style={{ fontSize: "11px", color: "#6b7280", paddingLeft: "20px" }}>
+                      <div style={{ fontSize: "11px", color: T.ink3, paddingLeft: "20px" }}>
                         {r.current_title ?? ""}
                         {r.current_title && r.company ? " · " : ""}
                         {r.company ?? ""}
                       </div>
                     )}
                     {r.reasoning && (
-                      <div style={{ fontSize: "10.5px", color: "#374151", paddingLeft: "20px", lineHeight: 1.4, fontStyle: "italic" }}>
+                      <div style={{ fontSize: "10.5px", color: T.ink2, paddingLeft: "20px", lineHeight: 1.4, fontStyle: "italic" }}>
                         {r.reasoning}
                       </div>
                     )}
@@ -887,62 +987,50 @@ export default function Popup() {
         </div>
       )}
 
-      {/* Company picker — surfaced when LLM confidence was too low */}
+      {/* Company picker — surfaced when LLM confidence is low */}
       {view === "idle" && companyPicker && (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "8px",
-            padding: "10px",
-            border: "1.5px solid #f3e8d4",
-            borderRadius: "10px",
-            backgroundColor: "#fffaf0",
-            marginBottom: "12px",
-          }}
-        >
+        <div style={S.pickerCard}>
           <div>
-            <p style={{ fontSize: "12px", fontWeight: 600, color: "#111827", marginBottom: "2px" }}>
+            <p style={{ fontSize: "12px", fontWeight: 600, color: T.ink, marginBottom: "2px" }}>
               Which one did you mean?
             </p>
-            <p style={{ fontSize: "10.5px", color: "#6b7280", lineHeight: 1.4 }}>
+            <p style={{ fontSize: "10.5px", color: T.ink3, lineHeight: 1.4 }}>
               {companyPicker.reasoning ?? "Multiple matches found — pick the right company."}
             </p>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            {companyPicker.candidates.slice(0, 3).map((c) => (
-              <button
-                key={c.slug}
-                onClick={() => handlePickCompany(c)}
-                style={{
-                  textAlign: "left",
-                  padding: "7px 9px",
-                  fontSize: "11.5px",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "6px",
-                  backgroundColor: "#fff",
-                  cursor: "pointer",
-                  color: "#111827",
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: "1px" }}>{c.name}</div>
-                {c.tagline && (
-                  <div style={{ fontSize: "10.5px", color: "#6b7280", lineHeight: 1.35 }}>
-                    {c.tagline}
+            {companyPicker.candidates.slice(0, 5).map((c) => {
+              const lines = (c.rawText ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+              return (
+                <button
+                  key={c.slug}
+                  onClick={() => handlePickCompany(c)}
+                  style={S.pickerRow}
+                >
+                  <div style={{ fontWeight: 600, marginBottom: "2px", color: T.ink }}>{c.name}</div>
+                  {c.tagline && (
+                    <div style={{ fontSize: "10.5px", color: T.ink3, lineHeight: 1.35 }}>
+                      {c.tagline}
+                    </div>
+                  )}
+                  {!c.tagline && lines.length > 1 && (
+                    <div style={{ fontSize: "10.5px", color: T.ink3, lineHeight: 1.35 }}>
+                      {lines.slice(1, 3).join(" · ")}
+                    </div>
+                  )}
+                  <div style={{ fontSize: "10px", color: T.ink4, marginTop: "2px" }}>
+                    {[c.location, c.followers].filter(Boolean).join(" · ")}
                   </div>
-                )}
-                <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "2px" }}>
-                  {[c.location, c.followers].filter(Boolean).join(" · ")}
-                </div>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
           <button
             onClick={() => setCompanyPicker(null)}
             style={{
               alignSelf: "flex-start",
               fontSize: "10.5px",
-              color: "#6b7280",
+              color: T.ink3,
               background: "none",
               border: "none",
               cursor: "pointer",
@@ -958,64 +1046,34 @@ export default function Popup() {
       {view === "idle" && (
         <>
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            <p style={{ fontSize: "12px", fontWeight: 600, color: "#111827" }}>
+            <p style={{ fontSize: "12px", fontWeight: 600, color: T.ink }}>
               Find alumni at a company
             </p>
             <input
               value={companyName}
               onChange={(e) => setCompanyName(e.target.value)}
               placeholder="Company name (e.g. McKinsey)"
-              style={{
-                width: "100%",
-                padding: "8px 10px",
-                fontSize: "13px",
-                border: "1.5px solid #e5e7eb",
-                borderRadius: "8px",
-                outline: "none",
-                color: "#111827",
-                boxSizing: "border-box",
-              }}
+              style={S.input}
               onKeyDown={(e) => e.key === "Enter" && handleStartDiscovery()}
             />
             <div>
-              <label style={{ fontSize: "10px", color: "#6b7280", fontWeight: 500, display: "block", marginBottom: "2px", paddingLeft: "2px" }}>
-                What does the company do? <span style={{ color: "#9ca3af", fontWeight: 400 }}>(helps when name is generic)</span>
+              <label style={S.fieldLabel}>
+                What does the company do? <span style={S.fieldHint}>(helps when name is generic)</span>
               </label>
               <input
                 value={companyHint}
                 onChange={(e) => setCompanyHint(e.target.value)}
                 placeholder='e.g. "AI agent startup", "Paris VC fund"'
-                style={{
-                  width: "100%",
-                  padding: "7px 10px",
-                  fontSize: "12px",
-                  border: "1.5px solid #e5e7eb",
-                  borderRadius: "8px",
-                  outline: "none",
-                  color: "#374151",
-                  backgroundColor: "#fffbeb",
-                  boxSizing: "border-box",
-                }}
+                style={S.hintInput}
                 onKeyDown={(e) => e.key === "Enter" && handleStartDiscovery()}
               />
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <label style={{ fontSize: "11px", color: "#6b7280", whiteSpace: "nowrap", minWidth: "44px" }}>
-                School:
-              </label>
+            <div style={S.filterRow}>
+              <label style={S.filterLabel}>School:</label>
               <select
                 value={schoolId}
                 onChange={(e) => setSchoolId(e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: "5px 8px",
-                  fontSize: "12px",
-                  border: "1.5px solid #e5e7eb",
-                  borderRadius: "6px",
-                  color: "#111827",
-                  backgroundColor: "#fff",
-                  cursor: "pointer",
-                }}
+                style={S.select}
               >
                 <option value="5176">INSEAD</option>
                 <option value="1219">Harvard Business School</option>
@@ -1025,23 +1083,12 @@ export default function Popup() {
                 <option value="">Any school</option>
               </select>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <label style={{ fontSize: "11px", color: "#6b7280", whiteSpace: "nowrap", minWidth: "44px" }}>
-                Where:
-              </label>
+            <div style={S.filterRow}>
+              <label style={S.filterLabel}>Where:</label>
               <select
                 value={locationKey}
                 onChange={(e) => setLocationKey(e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: "5px 8px",
-                  fontSize: "12px",
-                  border: "1.5px solid #e5e7eb",
-                  borderRadius: "6px",
-                  color: "#111827",
-                  backgroundColor: "#fff",
-                  cursor: "pointer",
-                }}
+                style={S.select}
               >
                 <option value="">Any location</option>
                 {Object.entries(LOCATION_GEO_URN).map(([k, { label }]) => (
@@ -1049,23 +1096,12 @@ export default function Popup() {
                 ))}
               </select>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <label style={{ fontSize: "11px", color: "#6b7280", whiteSpace: "nowrap", minWidth: "44px" }}>
-                Doing:
-              </label>
+            <div style={S.filterRow}>
+              <label style={S.filterLabel}>Doing:</label>
               <select
                 value={functionKey}
                 onChange={(e) => setFunctionKey(e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: "5px 8px",
-                  fontSize: "12px",
-                  border: "1.5px solid #e5e7eb",
-                  borderRadius: "6px",
-                  color: "#111827",
-                  backgroundColor: "#fff",
-                  cursor: "pointer",
-                }}
+                style={S.select}
               >
                 <option value="">Any function</option>
                 {Object.entries(FUNCTION_KEYWORDS).map(([k, { label }]) => (
@@ -1109,12 +1145,21 @@ export default function Popup() {
         </>
       )}
 
-      {/* CDP Module 1 Test — remove after verification */}
-      {(
+      {/*
+        CDP debug panel — DEV ONLY. Hidden in production builds.
+        The "Discover INSEAD alumni" button below hardcodes schoolId "5176"
+        and goes through a separate CDP-based test path used during Module 1-3
+        development. The real production flow is the "Start Discovery" button
+        in the idle view above. Do not rely on this panel for real discovery.
+      */}
+      {IS_DEV && (
         <>
           <div style={S.divider} />
+          <p style={{ fontSize: "10px", color: T.ink4, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+            Dev tools
+          </p>
           <button
-            style={{ ...S.linkBtn, fontSize: "10px", color: "#9ca3af" }}
+            style={{ ...S.linkBtn, fontSize: "10px", color: T.ink4 }}
             onClick={() => {
               setCdpTestResult("Testing CDP...");
               chrome.runtime.sendMessage({ type: "CDP_TEST" }, (res) => {
@@ -1129,17 +1174,16 @@ export default function Popup() {
             Test CDP connection
           </button>
           {cdpTestResult && (
-            <p style={{ fontSize: "10px", color: cdpTestResult.includes("works") ? "#10b981" : "#ef4444", marginTop: "2px" }}>
+            <p style={{ fontSize: "10px", color: cdpTestResult.includes("works") ? T.good : T.bad, marginTop: "2px" }}>
               {cdpTestResult}
             </p>
           )}
-          {/* Module 2 test: Company ID */}
           <div style={{ display: "flex", gap: "4px", marginTop: "4px" }}>
             <input
               value={testCompany}
               onChange={(e) => setTestCompany(e.target.value)}
               placeholder="Company name..."
-              style={{ flex: 1, fontSize: "10px", padding: "3px 6px", border: "1px solid #e5e7eb", borderRadius: "4px" }}
+              style={{ flex: 1, fontSize: "10px", padding: "3px 6px", border: `1px solid ${T.lineSoft}`, borderRadius: "4px", color: T.ink, backgroundColor: T.surface }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && testCompany.trim()) {
                   setCompanyIdResult("Looking up...");
@@ -1157,7 +1201,7 @@ export default function Popup() {
               }}
             />
             <button
-              style={{ fontSize: "10px", color: "#6b7280", background: "none", border: "1px solid #e5e7eb", borderRadius: "4px", padding: "2px 6px", cursor: "pointer" }}
+              style={{ fontSize: "10px", color: T.ink3, background: "none", border: `1px solid ${T.lineSoft}`, borderRadius: "4px", padding: "2px 6px", cursor: "pointer" }}
               onClick={() => {
                 if (!testCompany.trim()) return;
                 setCompanyIdResult("Looking up...");
@@ -1177,13 +1221,12 @@ export default function Popup() {
             </button>
           </div>
           {companyIdResult && (
-            <p style={{ fontSize: "10px", color: companyIdResult.includes("ID:") ? "#10b981" : companyIdResult === "Looking up..." ? "#6b7280" : "#ef4444", marginTop: "2px" }}>
+            <p style={{ fontSize: "10px", color: companyIdResult.includes("ID:") ? T.good : companyIdResult === "Looking up..." ? T.ink3 : T.bad, marginTop: "2px" }}>
               {companyIdResult}
             </p>
           )}
-          {/* Module 3 test: Full discovery (company → search → profile URLs) */}
           <button
-            style={{ fontSize: "10px", color: "#6b7280", background: "none", border: "1px solid #e5e7eb", borderRadius: "4px", padding: "2px 6px", cursor: "pointer", marginTop: "4px", width: "100%" }}
+            style={{ fontSize: "10px", color: T.ink3, background: "none", border: `1px solid ${T.lineSoft}`, borderRadius: "4px", padding: "2px 6px", cursor: "pointer", marginTop: "4px", width: "100%" }}
             onClick={() => {
               if (!testCompany.trim()) return;
               setDiscoverResult("Discovering... (finding company → searching alumni)");
@@ -1202,12 +1245,12 @@ export default function Popup() {
               );
             }}
           >
-            Discover INSEAD alumni
+            Discover INSEAD alumni (dev)
           </button>
           {discoverResult && (
             <p style={{
               fontSize: "10px",
-              color: discoverResult.includes("SAVED") ? "#10b981" : discoverResult.startsWith("Discovering") ? "#6b7280" : "#525252",
+              color: discoverResult.includes("SAVED") ? T.good : discoverResult.startsWith("Discovering") ? T.ink3 : T.ink2,
               marginTop: "2px",
               whiteSpace: "pre-wrap",
               maxHeight: "200px",

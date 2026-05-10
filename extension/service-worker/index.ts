@@ -45,16 +45,18 @@ import { DEFAULT_BACKEND_URL } from "../shared/constants";
 
 /**
  * JS snippet executed inside the LinkedIn page (via CDP `Runtime.evaluate`)
- * that scrapes the company-search results page into structured rows.
- * Returns a JSON string of CompanyCandidate[] (parsed by the caller).
+ * that scrapes the company-search results page into rows.
+ *
+ * Strategy: pull the slug from each company link's href (stable, derives
+ * from the URL path), then grab the row's raw `innerText` (whatever LinkedIn
+ * is rendering this week). The LLM downstream is good at parsing
+ * semi-structured text into name + industry + location + followers — far
+ * more robust than chasing LinkedIn's churning CSS class names with
+ * brittle multi-selector strategies.
  *
  * Used in two places:
  *   - CDP_GET_COMPANY_ID (slug-failed fallback)
  *   - CDP_DISCOVER (slug-failed fallback)
- *
- * Multi-selector strategy (data-attrs first, then known structural patterns)
- * because LinkedIn's class names churn frequently — same defense the profile
- * extractor uses.
  */
 const SCRAPE_COMPANY_CANDIDATES_JS = `(() => {
   const links = Array.from(document.querySelectorAll('a[href*="/company/"]'))
@@ -77,23 +79,21 @@ const SCRAPE_COMPANY_CANDIDATES_JS = `(() => {
     if (!slug || seen.has(slug)) continue;
     seen.add(slug);
 
+    // Find the row container — try a few wrappers, fall back to the link's parent.
     const container = link.closest('li, .reusable-search__result-container, [class*="entity-result"]') || link.parentElement;
+    const rawText = (container?.innerText || link.innerText || '').trim();
 
-    const nameEl = container?.querySelector('[class*="title-text"], [class*="entity-result__title"]') || link;
-    const name = (nameEl?.textContent || link.textContent || '').trim().split('\\n')[0].trim();
+    // Heuristic: the FIRST line of the row text is almost always the company
+    // name, even when the rest of the row varies. Fall back to the link text.
+    const firstLine = rawText.split('\\n').map(s => s.trim()).filter(Boolean)[0] || (link.innerText || '').trim();
 
-    const tagline = container?.querySelector('[class*="primary-subtitle"], [class*="entity-result__primary-subtitle"]')?.textContent?.trim() || '';
-    const location = container?.querySelector('[class*="secondary-subtitle"], [class*="entity-result__secondary-subtitle"]')?.textContent?.trim() || '';
-    const followers = container?.querySelector('[class*="insight-text"], [class*="entity-result__simple-insight"]')?.textContent?.trim() || '';
-
-    if (name && slug) {
+    if (firstLine && slug) {
       rows.push({
-        name: name.slice(0, 200),
-        tagline: tagline.slice(0, 500),
-        location: location.slice(0, 200),
-        followers: followers.slice(0, 100),
+        name: firstLine.slice(0, 200),
         slug,
         url: 'https://www.linkedin.com/company/' + slug + '/',
+        // Trimmed to keep prompt size bounded — typical row is under 250 chars
+        rawText: rawText.replace(/\\s+\\n/g, '\\n').slice(0, 400),
       });
     }
     if (rows.length >= 10) break;
@@ -104,11 +104,9 @@ const SCRAPE_COMPANY_CANDIDATES_JS = `(() => {
 
 interface CompanyCandidate {
   name: string;
-  tagline: string;
-  location: string;
-  followers: string;
   slug: string;
   url: string;
+  rawText: string;
 }
 
 /**

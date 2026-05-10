@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI Networking Coach</title>
+    <title>Warmly</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap"
+      rel="stylesheet"
+    />
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -11,11 +17,34 @@
         width: 320px;
         min-height: 160px;
         font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
-        background: #ffffff;
-        color: #111827;
+        background: #f4ede0;
+        color: #1f1b16;
         font-size: 13px;
         line-height: 1.5;
         -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      .warmly-wordmark {
+        font-family: "Instrument Serif", "Cormorant Garamond", Georgia, serif;
+        font-style: italic;
+        font-weight: 400;
+        letter-spacing: -0.01em;
+      }
+
+      @keyframes warmlyPulse {
+        0%, 100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.55;
+          transform: scale(0.85);
+        }
+      }
+
+      .warmly-pulse {
+        animation: warmlyPulse 2.4s ease-in-out infinite;
       }
     </style>
   </head>

@@ -1,12 +1,16 @@
 /**
- * esbuild build script for the AI Networking Coach Chrome extension.
+ * esbuild build script for the Warmly Chrome extension.
  *
  * Outputs to dist/ — load that folder as an unpacked extension in Chrome.
  *
  * Usage:
- *   npm run build          → builds against localhost:3000 (dev)
- *   npm run build:prod     → builds against https://ai-networking-coach.vercel.app
- *   npm run watch          → rebuilds on file changes (dev)
+ *   npm run build          → builds against the prod backend (default)
+ *   BACKEND_URL=http://localhost:3000 npm run build  → dev build
+ *   npm run watch          → rebuilds on file changes
+ *
+ * Dev builds (any backend URL containing "localhost") set __IS_DEV__=true
+ * so the dev-only CDP debug panel renders. Production bundles strip it
+ * via esbuild constant-folding.
  */
 
 import esbuild from "esbuild";
@@ -23,12 +27,16 @@ mkdirSync(`${dist}/service-worker`, { recursive: true });
 mkdirSync(`${dist}/popup`, { recursive: true });
 
 /** Shared esbuild options */
+const isDev = backendUrl.includes("localhost");
 const shared = {
   bundle: true,
   target: "chrome120",
   define: {
     // Injects the backend URL at build time so the extension talks to the right server
     __BACKEND_URL__: JSON.stringify(backendUrl),
+    // Build-time flag — esbuild constant-folds `if (false)` blocks so dev-only UI
+    // (e.g. CDP test panel) is stripped entirely from production bundles.
+    __IS_DEV__: JSON.stringify(isDev),
   },
 };
 

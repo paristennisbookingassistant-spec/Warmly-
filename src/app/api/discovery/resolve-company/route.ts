@@ -47,10 +47,17 @@ const MIN_CONFIDENCE = 0.6;
 
 const CandidateSchema = z.object({
   name: z.string().trim().min(1).max(200),
+  slug: z.string().trim().min(1).max(200),
+  /**
+   * Raw row text scraped from LinkedIn search. Multi-line, semi-structured.
+   * Higher signal than chasing CSS class names — the LLM parses it directly.
+   */
+  rawText: z.string().trim().max(800).optional().nullable(),
+  // Legacy structured fields — accepted for backwards compat with older
+  // extension builds. Newer builds send rawText instead.
   tagline: z.string().trim().max(500).optional().nullable(),
   location: z.string().trim().max(200).optional().nullable(),
   followers: z.string().trim().max(100).optional().nullable(),
-  slug: z.string().trim().min(1).max(200),
   url: z.string().trim().max(500).optional().nullable(),
 });
 
@@ -146,43 +153,51 @@ function buildPrompt(
   candidatesBlock: string
 ): string {
   const ctxLine = userContext
-    ? `User added context: "${userContext}". Use this to disambiguate.`
+    ? `User added context: "${userContext}". This is the disambiguator — find the candidate whose description matches.`
     : `No extra user context provided — pick the most likely match for "${companyName}".`;
 
   return `The user wants to find the LinkedIn page for the company "${companyName}".
 
 ${ctxLine}
 
-Below are candidate companies returned by LinkedIn search. Pick the BEST match. Return ONLY a JSON object:
-
-{
-  "slug": string | null,        // LinkedIn company slug (the "wonderfulcx" part of "linkedin.com/company/wonderfulcx/")
-  "url": string | null,          // Full company URL, e.g. "https://www.linkedin.com/company/wonderfulcx/"
-  "name": string | null,         // Company name as shown in candidate
-  "confidence": number,          // 0.0 to 1.0
-  "reasoning": string            // ONE sentence explaining your pick. Specific. Cite the signal you used (tagline, location, follower count, exact name match, etc.)
-}
-
-If NO candidate clearly matches, return slug=null url=null name=null confidence=0 reasoning="No clear match in results — recommend asking the user".
-
-Confidence calibration:
-- 0.9-1.0: exact name match + supporting signals (tagline, user-context hint)
-- 0.7-0.9: strong match but some ambiguity (e.g., name matches but tagline isn't clear evidence)
-- 0.5-0.7: best of several plausible options
-- < 0.5: no good match — return null
+Below are candidates from LinkedIn search. Each block contains the slug (from the URL) followed by the row's raw text — usually the company name, then industry, location, follower count, and a short description.
 
 Candidates:
-${candidatesBlock}`;
+${candidatesBlock}
+
+Pick the BEST match. Respond with ONLY a JSON object — no preamble, no commentary, no code fences. Schema:
+
+{
+  "slug": string | null,        // LinkedIn company slug (e.g. "wonderfulcx")
+  "url": string | null,          // Full URL, e.g. "https://www.linkedin.com/company/wonderfulcx/"
+  "name": string | null,         // Company name as shown in candidate
+  "confidence": number,          // 0.0 to 1.0
+  "reasoning": string            // ONE sentence. Cite the specific signal you used.
+}
+
+If NO candidate clearly matches, return: slug=null, url=null, name=null, confidence=0, reasoning="No clear match in results".
+
+Confidence calibration:
+- 0.9-1.0: name + user-context hint both clearly point to the same candidate
+- 0.7-0.9: strong match, minor ambiguity
+- 0.5-0.7: best of plausible options
+- < 0.5: no good match — return null`;
 }
 
 function structuredCandidatesBlock(candidates: Candidate[]): string {
   return candidates
     .map((c, i) => {
-      const parts = [`${i + 1}. ${c.name} (slug: ${c.slug})`];
-      if (c.tagline) parts.push(`   Tagline: ${c.tagline}`);
-      if (c.location) parts.push(`   Location: ${c.location}`);
-      if (c.followers) parts.push(`   ${c.followers}`);
-      return parts.join("\n");
+      const header = `=== ${i + 1}. slug=${c.slug} ===`;
+      // Prefer rawText (newer extension build); fall back to legacy
+      // structured fields for backwards compatibility.
+      if (c.rawText && c.rawText.trim().length > 0) {
+        return `${header}\n${c.rawText.trim()}`;
+      }
+      const lines: string[] = [c.name];
+      if (c.tagline) lines.push(c.tagline);
+      if (c.location) lines.push(c.location);
+      if (c.followers) lines.push(c.followers);
+      return `${header}\n${lines.join("\n")}`;
     })
     .join("\n\n");
 }
@@ -243,7 +258,11 @@ export async function POST(req: NextRequest) {
     let response;
     try {
       response = await callMiniMax([{ role: "user", content: prompt }], {
-        maxTokens: 400,
+        // 1000 leaves room for a {slug, url, name, confidence, reasoning}
+        // object plus any preamble the model writes before the JSON. The
+        // previous 400 was getting truncated mid-stream, producing
+        // "Could not parse LLM response".
+        maxTokens: 1000,
         temperature: 0.1,
       });
     } catch (err) {
@@ -258,12 +277,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const text = response.content;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const rawText = response.content;
+    // Strip ```json``` code fences if the model wraps the output in them
+    // despite the prompt telling it not to.
+    const fenced = rawText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    const candidate = fenced ? fenced[1] : rawText;
+    const jsonMatch = candidate.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.error(
-        "[resolve-company] Non-JSON LLM response:",
-        text.slice(0, 500)
+        "[resolve-company] Non-JSON LLM response. Raw output (first 800 chars):",
+        rawText.slice(0, 800)
       );
       return NextResponse.json({
         data: {
@@ -289,8 +312,11 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.error(
         "[resolve-company] JSON parse error:",
-        err,
-        jsonMatch[0].slice(0, 300)
+        err instanceof Error ? err.message : err,
+        "\nMatched chunk (first 500 chars):",
+        jsonMatch[0].slice(0, 500),
+        "\nRaw output (first 800 chars):",
+        rawText.slice(0, 800)
       );
       return NextResponse.json({
         data: {
