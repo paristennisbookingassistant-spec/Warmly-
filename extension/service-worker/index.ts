@@ -111,58 +111,106 @@ interface CompanyCandidate {
 
 /**
  * JS snippet executed inside a LinkedIn company page that extracts the
- * MOST FREQUENT `fsd_company:NUMBER` URN found in the page's HTML.
+ * MOST FREQUENT company URN found in the page's HTML.
  *
- * Why most-frequent and not first-match:
- *   The page's main company URN is referenced *everywhere* — logo,
- *   top-card, about section, employees widget, posts list, "see all
- *   employees" link, etc. Easily 20-50 occurrences on a real company
- *   page. Sidebar references (recommended companies, "people also
- *   follow", related-brand widgets) appear once or twice. So the
- *   most-frequent ID is essentially always the page's main company.
+ * Matches all three URN formats LinkedIn uses interchangeably:
+ *   - urn:li:fs_company:NUMBER    (older — often used for the page's MAIN entity in inline data)
+ *   - urn:li:fsd_company:NUMBER   ("feed shared data" — sidebar widgets, recommended-companies)
+ *   - urn:li:company:NUMBER       (yet another, sometimes in structured data)
  *
- *   The previous `.match()` (first hit) approach grabbed whatever URN
- *   happened to appear earliest in document order — frequently a
- *   sidebar/recommended-company reference. That's how "navigate to
- *   parent Bain & Company" still ended up filtering people-search by
- *   Bain Brazil's ID.
+ * Earlier versions only matched `fsd_company:`. On some company pages
+ * (notably the global parent of multinational firms like Bain & Company),
+ * the page's main entity is tagged with `fs_company:` while the
+ * recommended-companies sidebar uses `fsd_company:` for regional sub-
+ * entities. Our regex picked up the sidebar URNs and missed the main
+ * one entirely — every "ID" we extracted was a regional Bain.
  *
- * Returns the most-frequent ID as a string, plus a debug breakdown
- * (top 5 IDs with counts) so we can diagnose surprise mismatches
- * directly from the service-worker console.
+ * Why most-frequent: the page's main URN is referenced everywhere
+ * (logo, top-card, about, employees widget, posts list, navigation),
+ * easily 20-50 times. Sidebar references appear 1-3 times.
+ *
+ * Returns the most-frequent ID + a per-format breakdown so we can
+ * diagnose surprise mismatches from the service-worker console.
  */
 const EXTRACT_COMPANY_ID_JS = `(() => {
   const html = document.documentElement.innerHTML;
-  const re = /fsd_company[%3A:]+(\\d{5,12})/g;
   const counts = new Map();
+  const byFormat = { fs_company: 0, fsd_company: 0, company: 0 };
+
+  // Match all three URN formats. The format suffix is captured so we
+  // can report a breakdown for diagnosis. URL-encoded ':' (%3A) is also
+  // allowed because LinkedIn URL-encodes URNs inside href attributes.
+  const re = /urn[%3A:]+li[%3A:]+(fs_company|fsd_company|company)[%3A:]+(\\d{5,12})/g;
   let m;
   while ((m = re.exec(html)) !== null) {
-    const id = m[1];
+    const format = m[1];
+    const id = m[2];
     counts.set(id, (counts.get(id) || 0) + 1);
+    byFormat[format] = (byFormat[format] || 0) + 1;
   }
-  if (counts.size === 0) return JSON.stringify({ id: null, breakdown: [] });
+
+  if (counts.size === 0) {
+    return JSON.stringify({
+      id: null,
+      breakdown: [],
+      byFormat,
+      title: document.title,
+      url: window.location.href,
+    });
+  }
 
   // Sort descending by count, keep top 5 for diagnostics
   const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   return JSON.stringify({
     id: sorted[0][0],
     breakdown: sorted.slice(0, 5).map(([id, count]) => ({ id, count })),
+    byFormat,
+    title: document.title,
+    url: window.location.href,
   });
 })()`;
 
 interface ExtractedIdResult {
   id: string | null;
   breakdown: Array<{ id: string; count: number }>;
+  byFormat: { fs_company: number; fsd_company: number; company: number };
+  title: string;
+  url: string;
 }
 
 /**
- * Wrapper around EXTRACT_COMPANY_ID_JS that also handles the
- * `/unavailable` page (which means we navigated to a non-existent
- * company slug) and logs the breakdown when there's ambiguity.
+ * Wrapper around EXTRACT_COMPANY_ID_JS that:
+ *   1. Bails on the `/unavailable` page (non-existent company slug)
+ *   2. Waits for the company's `<h1>` to be present before scraping —
+ *      a stronger signal that the main entity is rendered than a blind
+ *      sleep. The previous 2s blind wait sometimes scraped before the
+ *      page's main URN was injected into the DOM, leaving only sidebar
+ *      widgets in our results.
+ *   3. Logs the full diagnostic breakdown (per-URN-format counts, page
+ *      title, post-wait URL) so mismatches are debuggable in one glance.
  */
 async function extractMainCompanyId(diagLabel: string): Promise<string | null> {
   const pageUrl = await evaluate<string>("window.location.href");
   if (pageUrl.includes("/unavailable")) return null;
+
+  // Wait up to 6s for the company page's <h1> to render. LinkedIn's
+  // company pages are React-rendered; the main entity URN often gets
+  // injected into the DOM after initial paint, around the time h1
+  // (company name) shows up. Polling avoids racing the render.
+  const h1Ready = await evaluate<boolean>(
+    `(async () => {
+      const start = Date.now();
+      while (Date.now() - start < 6000) {
+        const h1 = document.querySelector('h1');
+        if (h1 && h1.innerText && h1.innerText.trim().length > 0) return true;
+        await new Promise(r => setTimeout(r, 200));
+      }
+      return false;
+    })()`
+  );
+  if (!h1Ready) {
+    console.warn(`[CDP] ${diagLabel}: h1 never appeared on ${pageUrl} — scraping anyway`);
+  }
 
   const raw = await evaluate<string>(EXTRACT_COMPANY_ID_JS);
   let parsed: ExtractedIdResult;
@@ -173,16 +221,16 @@ async function extractMainCompanyId(diagLabel: string): Promise<string | null> {
     return null;
   }
 
-  // Diagnostic: log the breakdown so surprise mismatches are debuggable.
-  // Quiet on the common case (only 1 ID), loud when there's ambiguity.
-  if (parsed.breakdown.length > 1) {
-    console.debug(
-      `[CDP] ${diagLabel}: extracted company ID=${parsed.id} (most-frequent of ${parsed.breakdown.length} candidates):`,
-      parsed.breakdown
-    );
-  } else if (parsed.id) {
-    console.debug(`[CDP] ${diagLabel}: extracted company ID=${parsed.id} (only candidate)`);
-  } else {
+  // Diagnostic dump — gives us page title, redirect destination, and
+  // per-format counts so we can tell at a glance which URN format LinkedIn
+  // is using on this specific page.
+  console.debug(
+    `[CDP] ${diagLabel}: extracted company ID=${parsed.id} | title="${parsed.title}" | url=${parsed.url}`,
+    "| byFormat:", parsed.byFormat,
+    "| breakdown:", parsed.breakdown
+  );
+
+  if (!parsed.id) {
     console.warn(`[CDP] ${diagLabel}: no company ID found on page ${pageUrl}`);
   }
 
