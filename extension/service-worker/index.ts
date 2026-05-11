@@ -590,12 +590,23 @@ async function handleMessage(
         companySlug?: string;
         locationGeoUrn?: string;
         functionKeywords?: string;
+        // Human-readable labels for the LLM resolver's downstream-filters
+        // reasoning ("with Paris filter applied, prefer the global parent").
+        schoolLabel?: string;
+        locationLabel?: string;
+        functionLabel?: string;
       };
       const companyName = p?.companyName?.trim();
       const schoolId = p?.schoolId ?? "5176";
       const userContext = p?.userContext?.trim() || undefined;
       // Pre-resolved slug from the disambiguation picker — bypasses LLM resolution.
       const presetSlug = p?.companySlug?.trim() || undefined;
+      // Human-readable filter labels for the LLM resolver
+      const downstreamFilters = {
+        schoolLabel: p?.schoolLabel?.trim() || undefined,
+        locationLabel: p?.locationLabel?.trim() || undefined,
+        functionLabel: p?.functionLabel?.trim() || undefined,
+      };
       // Optional filters from the popup form
       const locationGeoUrn = p?.locationGeoUrn?.trim() || undefined;
       const functionKeywords = p?.functionKeywords?.trim() || undefined;
@@ -643,30 +654,36 @@ async function handleMessage(
         }
         // No presetSlug → fall through to LinkedIn search + LLM resolver below.
 
+        // Candidates from the LLM resolver — hoisted so the zero-result
+        // safety net (Step 2 check) can re-surface them in the picker if
+        // people-search returns 0 alumni for the picked slug.
+        let resolveCandidates: CompanyCandidate[] = [];
+        let resolvedSlug: string | null = presetSlug ?? null;
+
         // Fallback: LinkedIn search + LLM disambiguation with structured candidates
         if (!companyId) {
           await navigate(`https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(companyName)}`);
           await sleep(3000);
 
           const candJson = await evaluate<string>(SCRAPE_COMPANY_CANDIDATES_JS);
-          let candidates: CompanyCandidate[] = [];
           try {
-            candidates = JSON.parse(candJson || "[]");
+            resolveCandidates = JSON.parse(candJson || "[]");
           } catch {
-            candidates = [];
+            resolveCandidates = [];
           }
 
-          if (candidates.length > 0) {
+          if (resolveCandidates.length > 0) {
             const backendUrl = DEFAULT_BACKEND_URL;
             const res = await fetch(`${backendUrl}/api/discovery/resolve-company`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ companyName, userContext, candidates }),
+              body: JSON.stringify({ companyName, userContext, candidates: resolveCandidates, downstreamFilters }),
             });
             if (res.ok) {
               const data = await res.json() as {
                 data?: {
                   companyUrl?: string | null;
+                  companySlug?: string | null;
                   companyName?: string | null;
                   confidence?: number;
                   reasoning?: string;
@@ -678,6 +695,7 @@ async function handleMessage(
                 await sleep(2000);
                 companyId = await tryExtractId();
                 resolvedName = data.data.companyName ?? companyName;
+                resolvedSlug = data.data.companySlug ?? resolvedSlug;
               } else if (data.data?.candidates) {
                 // Low-confidence — surface picker through the orchestrator's
                 // error path. Caller (popup) can read needsPicker + candidates.
@@ -744,8 +762,49 @@ async function handleMessage(
         );
 
         if (profiles.length === 0) {
+          // Zero results — most often this means we picked the wrong company
+          // entity (e.g., Bain & Company Brasil when the user meant the parent
+          // Bain & Company). If we have the original candidate list from the
+          // LLM resolver, surface the picker so the user can correct without
+          // restarting from scratch. The failed slug gets marked so they
+          // don't pick it again.
           await detach();
+          if (resolveCandidates.length > 0) {
+            return {
+              ok: false,
+              needsPicker: true,
+              candidates: resolveCandidates,
+              failedSlug: resolvedSlug,
+              reasoning: `Tried ${resolvedName} but found 0 alumni matching your filters. Pick a different company:`,
+              error: `Zero alumni at "${resolvedName}" with these filters`,
+            };
+          }
+          // No candidates available (e.g., presetSlug path with no LLM call)
+          // — fall back to the old behavior: report 0-saved as a success.
           return { ok: true, companyId, companyName: resolvedName, profiles: [], count: 0, saved: 0 };
+        }
+
+        // Layer 3: cache-on-pick. If we got here via presetSlug (user picked
+        // from the disambiguation picker) AND people-search returned actual
+        // results, the user's pick is ground truth. Write it to the cache so
+        // next discovery for the same (companyName, userContext) tuple skips
+        // the LLM call entirely and goes straight to the right company.
+        // Fire-and-forget — failures here don't block discovery.
+        if (presetSlug && profiles.length > 0) {
+          const cacheBackend = DEFAULT_BACKEND_URL;
+          fetch(`${cacheBackend}/api/discovery/resolve-company`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              companyName,
+              userContext,
+              forceSlug: presetSlug,
+              forceName: resolvedName,
+              forceReasoning: "User-picked from disambiguation picker",
+            }),
+          }).catch((err) => {
+            console.warn("[CDP] Cache-on-pick write failed (non-fatal):", err);
+          });
         }
 
         // Step 3: Visit each profile, extract data, save to backend

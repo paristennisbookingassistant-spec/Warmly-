@@ -19,6 +19,19 @@ import { useState, useEffect, useCallback } from "react";
 import type { DiscoverySessionState } from "../shared/types";
 import { LOCATION_GEO_URN, FUNCTION_KEYWORDS } from "../shared/linkedin-filters";
 
+/**
+ * Human-readable school names for downstream-filter context in the LLM
+ * resolver prompt. Kept in sync with the <option> values in the school
+ * dropdown below.
+ */
+const SCHOOL_LABELS: Record<string, string> = {
+  "5176": "INSEAD",
+  "1219": "Harvard Business School",
+  "1552": "London Business School",
+  "1792": "Stanford GSB",
+  "1285": "Wharton",
+};
+
 // Injected at build time by esbuild — see build.mjs
 declare const __BACKEND_URL__: string;
 declare const __IS_DEV__: boolean;
@@ -457,6 +470,8 @@ export default function Popup() {
   const [companyPicker, setCompanyPicker] = useState<{
     candidates: CompanyPickerCandidate[];
     reasoning: string | null;
+    /** Slug we just tried that returned 0 alumni — greyed out in the UI. */
+    failedSlug?: string | null;
   } | null>(null);
   // Dev-only CDP debug state
   const [cdpTestResult, setCdpTestResult] = useState<string | null>(null);
@@ -625,9 +640,16 @@ export default function Popup() {
     const locationGeoUrn = locationKey
       ? LOCATION_GEO_URN[locationKey]?.geoUrn
       : undefined;
+    const locationLabel = locationKey
+      ? LOCATION_GEO_URN[locationKey]?.label
+      : undefined;
     const functionKeywords = functionKey
       ? FUNCTION_KEYWORDS[functionKey]?.keywords
       : undefined;
+    const functionLabel = functionKey
+      ? FUNCTION_KEYWORDS[functionKey]?.label
+      : undefined;
+    const schoolLabel = SCHOOL_LABELS[schoolId] ?? undefined;
 
     chrome.runtime.sendMessage(
       {
@@ -638,6 +660,10 @@ export default function Popup() {
           userContext: companyHint.trim() || undefined,
           locationGeoUrn,
           functionKeywords,
+          // Human-readable labels for the LLM resolver's downstream-filters context
+          schoolLabel,
+          locationLabel,
+          functionLabel,
         },
       },
       (response) => {
@@ -648,11 +674,15 @@ export default function Popup() {
           return;
         }
         if (response?.ok === false) {
-          // If the LLM couldn't pick a confident company, surface the picker.
+          // If the LLM couldn't pick a confident company OR the picked
+          // company returned 0 alumni, surface the picker. The
+          // `failedSlug` field tells us which row to grey out so the
+          // user doesn't pick the same wrong one again.
           if (response.needsPicker && Array.isArray(response.candidates)) {
             setCompanyPicker({
               candidates: response.candidates as CompanyPickerCandidate[],
               reasoning: response.reasoning ?? null,
+              failedSlug: response.failedSlug ?? null,
             });
             setPs((prev) => ({ ...prev, view: "idle" }));
             return;
@@ -698,9 +728,16 @@ export default function Popup() {
       const locationGeoUrn = locationKey
         ? LOCATION_GEO_URN[locationKey]?.geoUrn
         : undefined;
+      const locationLabel = locationKey
+        ? LOCATION_GEO_URN[locationKey]?.label
+        : undefined;
       const functionKeywords = functionKey
         ? FUNCTION_KEYWORDS[functionKey]?.keywords
         : undefined;
+      const functionLabel = functionKey
+        ? FUNCTION_KEYWORDS[functionKey]?.label
+        : undefined;
+      const schoolLabel = SCHOOL_LABELS[schoolId] ?? undefined;
 
       chrome.runtime.sendMessage(
         {
@@ -712,10 +749,26 @@ export default function Popup() {
             userContext: cand.tagline ?? companyHint.trim() ?? undefined,
             locationGeoUrn,
             functionKeywords,
+            schoolLabel,
+            locationLabel,
+            functionLabel,
           },
         },
         (response) => {
           if (chrome.runtime.lastError || response?.ok === false) {
+            // If zero-result fallback fires for the picked slug, the
+            // service worker returns needsPicker again with failedSlug.
+            // Re-render the picker, this time greying out the slug we
+            // just failed on.
+            if (response?.ok === false && response.needsPicker && Array.isArray(response.candidates)) {
+              setCompanyPicker({
+                candidates: response.candidates as CompanyPickerCandidate[],
+                reasoning: response.reasoning ?? null,
+                failedSlug: response.failedSlug ?? cand.slug,
+              });
+              setPs((prev) => ({ ...prev, view: "idle" }));
+              return;
+            }
             setSavedMsg(response?.error ?? "Discovery failed");
             setTimeout(() => setSavedMsg(null), 5000);
             setPs((prev) => ({ ...prev, view: "idle" }));
@@ -1001,13 +1054,30 @@ export default function Popup() {
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             {companyPicker.candidates.slice(0, 5).map((c) => {
               const lines = (c.rawText ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+              const isFailed = companyPicker.failedSlug === c.slug;
               return (
                 <button
                   key={c.slug}
-                  onClick={() => handlePickCompany(c)}
-                  style={S.pickerRow}
+                  onClick={() => {
+                    if (isFailed) return;
+                    handlePickCompany(c);
+                  }}
+                  disabled={isFailed}
+                  style={{
+                    ...S.pickerRow,
+                    opacity: isFailed ? 0.5 : 1,
+                    cursor: isFailed ? "not-allowed" : "pointer",
+                    backgroundColor: isFailed ? T.bgSunk : T.surface,
+                  }}
                 >
-                  <div style={{ fontWeight: 600, marginBottom: "2px", color: T.ink }}>{c.name}</div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "6px", marginBottom: "2px" }}>
+                    <span style={{ fontWeight: 600, color: T.ink, flex: 1 }}>{c.name}</span>
+                    {isFailed && (
+                      <span style={{ fontSize: "9.5px", color: T.bad, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        0 alumni
+                      </span>
+                    )}
+                  </div>
                   {c.tagline && (
                     <div style={{ fontSize: "10.5px", color: T.ink3, lineHeight: 1.35 }}>
                       {c.tagline}

@@ -61,6 +61,12 @@ const CandidateSchema = z.object({
   url: z.string().trim().max(500).optional().nullable(),
 });
 
+const DownstreamFiltersSchema = z.object({
+  schoolLabel: z.string().trim().max(200).optional(),
+  locationLabel: z.string().trim().max(200).optional(),
+  functionLabel: z.string().trim().max(200).optional(),
+});
+
 const InputSchema = z.object({
   companyName: z.string().trim().min(1).max(200),
   /**
@@ -69,6 +75,13 @@ const InputSchema = z.object({
    * Iris Capital. Optional but high-signal when present.
    */
   userContext: z.string().trim().max(500).optional(),
+  /**
+   * Filters the user will apply AFTER picking the company. Passing these
+   * lets the LLM reason "with Paris filter, the global parent is more
+   * important than the regional sub-entity" — sharpens the parent-vs-
+   * regional disambiguation. Human-readable labels (not geoUrns/IDs).
+   */
+  downstreamFilters: DownstreamFiltersSchema.optional(),
   /**
    * NEW path: DOM-scraped candidates from LinkedIn's company search.
    * If present, takes precedence over searchResultsText.
@@ -79,6 +92,16 @@ const InputSchema = z.object({
    * compatibility with the existing extension build.
    */
   searchResultsText: z.string().trim().min(10).max(10_000).optional(),
+  /**
+   * Cache-write shortcut: when the user picks a candidate from the popup's
+   * disambiguation UI (either after low-confidence or zero-results), the
+   * service worker fires a forceSlug call to write the pick to the cache
+   * without re-running the LLM. Next discovery for the same searchKey
+   * hits the cache instantly.
+   */
+  forceSlug: z.string().trim().min(1).max(200).optional(),
+  forceName: z.string().trim().max(200).optional(),
+  forceReasoning: z.string().trim().max(500).optional(),
 });
 
 type Candidate = z.infer<typeof CandidateSchema>;
@@ -150,38 +173,60 @@ async function writeCache(
 function buildPrompt(
   companyName: string,
   userContext: string | undefined,
-  candidatesBlock: string
+  candidatesBlock: string,
+  downstreamFilters?: z.infer<typeof DownstreamFiltersSchema>
 ): string {
+  const filterLines: string[] = [];
+  if (downstreamFilters?.schoolLabel) filterLines.push(`  - school: ${downstreamFilters.schoolLabel}`);
+  if (downstreamFilters?.locationLabel) filterLines.push(`  - location: ${downstreamFilters.locationLabel}`);
+  if (downstreamFilters?.functionLabel) filterLines.push(`  - function: ${downstreamFilters.functionLabel}`);
+  const filtersBlock = filterLines.length > 0
+    ? `Downstream filters that will be applied AFTER you pick:\n${filterLines.join("\n")}\n`
+    : "";
+
   const ctxLine = userContext
-    ? `User added context: "${userContext}". This is the disambiguator — find the candidate whose description matches.`
-    : `No extra user context provided — pick the most likely match for "${companyName}".`;
+    ? `User hint: "${userContext}".`
+    : `No user hint provided.`;
 
-  return `The user wants to find the LinkedIn page for the company "${companyName}".
+  return `The user is searching for a LinkedIn company page to use as an ALUMNI SEARCH FILTER. After you pick, their search will filter the company's people by school and possibly location.
 
+User input: "${companyName}"
 ${ctxLine}
+${filtersBlock}
+YOUR GOAL: Pick the LinkedIn company page whose ALUMNI POOL most likely contains people matching the user's downstream filters. This is NOT a "match the name" task — it's "pick the page that will return the right people".
 
-Below are candidates from LinkedIn search. Each block contains the slug (from the URL) followed by the row's raw text — usually the company name, then industry, location, follower count, and a short description.
+DISAMBIGUATION RULES (in priority order):
 
-Candidates:
+1. BRAND FAMILIES. When you see multiple candidates that share a brand stem (e.g., "Bain & Company", "Bain & Company Brasil", "Bain & Company India", "Bain Belgium"), prefer the GLOBAL PARENT — typically the candidate whose name does NOT contain a country or region suffix. Regional sub-entities have SEGREGATED employee lists; the parent page contains all employees worldwide.
+
+   Critical for alumni search: an INSEAD grad working at Bain's Paris office is listed under the parent "Bain & Company" — NOT under "Bain & Company Brasil" or any regional sub-page. If you pick a regional entity, the user's school + location filter will return zero results even if the brand has plenty of alumni globally.
+
+   EXCEPTION: if the user's hint explicitly names a region ("Bain's Brazil practice", "the Mumbai office", "their São Paulo team"), the regional entity is correct.
+
+2. USER HINT. Match the user's hint to each candidate's industry/description text in the rawText. e.g., hint "AI agent startup" → the candidate whose tagline mentions AI/agents. Hint "consulting company" generally points to a parent firm rather than a regional subsidiary.
+
+3. FOLLOWER COUNT. Tie-breaker. The candidate with materially more followers (often 10-100x more) is usually the parent. e.g., "Bain & Company" with 4M followers vs. "Bain & Company Brasil" with 80K followers → the parent.
+
+Candidates (numbered, with slug + raw row text from LinkedIn search):
 ${candidatesBlock}
 
-Pick the BEST match. Respond with ONLY a JSON object — no preamble, no commentary, no code fences. Schema:
+Respond with ONLY a JSON object — no preamble, no commentary, no code fences:
 
 {
-  "slug": string | null,        // LinkedIn company slug (e.g. "wonderfulcx")
-  "url": string | null,          // Full URL, e.g. "https://www.linkedin.com/company/wonderfulcx/"
-  "name": string | null,         // Company name as shown in candidate
+  "slug": string | null,        // LinkedIn company slug (e.g. "bain-and-company")
+  "url": string | null,          // Full URL, e.g. "https://www.linkedin.com/company/bain-and-company/"
+  "name": string | null,         // Company name as shown in the candidate
   "confidence": number,          // 0.0 to 1.0
-  "reasoning": string            // ONE sentence. Cite the specific signal you used.
+  "reasoning": string            // ONE sentence. Cite the specific signal you used (parent vs regional, hint match, follower count).
 }
 
-If NO candidate clearly matches, return: slug=null, url=null, name=null, confidence=0, reasoning="No clear match in results".
+If NO candidate is clearly right: slug=null, url=null, name=null, confidence=0, reasoning="No clear match — surface picker".
 
-Confidence calibration:
-- 0.9-1.0: name + user-context hint both clearly point to the same candidate
-- 0.7-0.9: strong match, minor ambiguity
-- 0.5-0.7: best of plausible options
-- < 0.5: no good match — return null`;
+CONFIDENCE CALIBRATION:
+- 0.9-1.0: clear winner — parent (or unambiguous brand) + hint match + dominant follower count
+- 0.7-0.9: strong pick with minor ambiguity (parent absent, picked best regional)
+- 0.5-0.7: multiple plausible candidates, picked best
+- < 0.5: real ambiguity — return null and let user pick`;
 }
 
 function structuredCandidatesBlock(candidates: Candidate[]): string {
@@ -218,7 +263,41 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { companyName, userContext, candidates, searchResultsText } = parsed.data;
+    const {
+      companyName,
+      userContext,
+      downstreamFilters,
+      candidates,
+      searchResultsText,
+      forceSlug,
+      forceName,
+      forceReasoning,
+    } = parsed.data;
+
+    // ---- Cache-write shortcut: user picked from the popup's disambiguation UI ----
+    // No LLM call, no cache lookup — the user's pick IS the ground truth.
+    // Writes to `company_slug_cache` so next discovery for the same searchKey
+    // hits the cache instantly.
+    if (forceSlug) {
+      const searchKey = buildSearchKey(companyName, userContext);
+      await writeCache(searchKey, {
+        slug: forceSlug,
+        url: `https://www.linkedin.com/company/${forceSlug}/`,
+        name: forceName ?? null,
+        reasoning: forceReasoning ?? "User-corrected pick",
+      });
+      return NextResponse.json({
+        data: {
+          companyUrl: `https://www.linkedin.com/company/${forceSlug}/`,
+          companySlug: forceSlug,
+          companyName: forceName ?? null,
+          confidence: 1.0,
+          reasoning: forceReasoning ?? "User-corrected pick",
+          fromCache: false,
+          written: true,
+        },
+      });
+    }
 
     if (!candidates && !searchResultsText) {
       return NextResponse.json(
@@ -252,7 +331,7 @@ export async function POST(req: NextRequest) {
     const candidatesBlock = candidates
       ? structuredCandidatesBlock(candidates)
       : `(legacy raw text format)\n${searchResultsText}`;
-    const prompt = buildPrompt(companyName, userContext, candidatesBlock);
+    const prompt = buildPrompt(companyName, userContext, candidatesBlock, downstreamFilters);
 
     // ---- Call MiniMax ----
     let response;
