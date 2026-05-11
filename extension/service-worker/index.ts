@@ -110,6 +110,86 @@ interface CompanyCandidate {
 }
 
 /**
+ * JS snippet executed inside a LinkedIn company page that extracts the
+ * MOST FREQUENT `fsd_company:NUMBER` URN found in the page's HTML.
+ *
+ * Why most-frequent and not first-match:
+ *   The page's main company URN is referenced *everywhere* — logo,
+ *   top-card, about section, employees widget, posts list, "see all
+ *   employees" link, etc. Easily 20-50 occurrences on a real company
+ *   page. Sidebar references (recommended companies, "people also
+ *   follow", related-brand widgets) appear once or twice. So the
+ *   most-frequent ID is essentially always the page's main company.
+ *
+ *   The previous `.match()` (first hit) approach grabbed whatever URN
+ *   happened to appear earliest in document order — frequently a
+ *   sidebar/recommended-company reference. That's how "navigate to
+ *   parent Bain & Company" still ended up filtering people-search by
+ *   Bain Brazil's ID.
+ *
+ * Returns the most-frequent ID as a string, plus a debug breakdown
+ * (top 5 IDs with counts) so we can diagnose surprise mismatches
+ * directly from the service-worker console.
+ */
+const EXTRACT_COMPANY_ID_JS = `(() => {
+  const html = document.documentElement.innerHTML;
+  const re = /fsd_company[%3A:]+(\\d{5,12})/g;
+  const counts = new Map();
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const id = m[1];
+    counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  if (counts.size === 0) return JSON.stringify({ id: null, breakdown: [] });
+
+  // Sort descending by count, keep top 5 for diagnostics
+  const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  return JSON.stringify({
+    id: sorted[0][0],
+    breakdown: sorted.slice(0, 5).map(([id, count]) => ({ id, count })),
+  });
+})()`;
+
+interface ExtractedIdResult {
+  id: string | null;
+  breakdown: Array<{ id: string; count: number }>;
+}
+
+/**
+ * Wrapper around EXTRACT_COMPANY_ID_JS that also handles the
+ * `/unavailable` page (which means we navigated to a non-existent
+ * company slug) and logs the breakdown when there's ambiguity.
+ */
+async function extractMainCompanyId(diagLabel: string): Promise<string | null> {
+  const pageUrl = await evaluate<string>("window.location.href");
+  if (pageUrl.includes("/unavailable")) return null;
+
+  const raw = await evaluate<string>(EXTRACT_COMPANY_ID_JS);
+  let parsed: ExtractedIdResult;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.warn(`[CDP] ${diagLabel}: failed to parse ID extraction result:`, raw);
+    return null;
+  }
+
+  // Diagnostic: log the breakdown so surprise mismatches are debuggable.
+  // Quiet on the common case (only 1 ID), loud when there's ambiguity.
+  if (parsed.breakdown.length > 1) {
+    console.debug(
+      `[CDP] ${diagLabel}: extracted company ID=${parsed.id} (most-frequent of ${parsed.breakdown.length} candidates):`,
+      parsed.breakdown
+    );
+  } else if (parsed.id) {
+    console.debug(`[CDP] ${diagLabel}: extracted company ID=${parsed.id} (only candidate)`);
+  } else {
+    console.warn(`[CDP] ${diagLabel}: no company ID found on page ${pageUrl}`);
+  }
+
+  return parsed.id;
+}
+
+/**
  * Finds the best LinkedIn tab to attach CDP to.
  * Priority: active tab in current window (if it's LinkedIn) → any LinkedIn tab.
  */
@@ -380,18 +460,11 @@ async function handleMessage(
       const userContext = p?.userContext?.trim() || undefined;
       if (!companyName) return { ok: false, error: "Company name required" };
 
-      // Helper: check if current page is a valid company page and extract ID
-      const extractIdFromCurrentPage = async (): Promise<string | null> => {
-        const pageUrl = await evaluate<string>("window.location.href");
-        if (pageUrl.includes("/unavailable")) return null;
-
-        return evaluate<string | null>(
-          `(() => {
-            const m = document.documentElement.innerHTML.match(/fsd_company[%3A:]+(\\d{5,12})/);
-            return m ? m[1] : null;
-          })()`
-        );
-      };
+      // Helper: check if current page is a valid company page and extract
+      // the MAIN company's ID (most-frequent URN, not first-match — see
+      // EXTRACT_COMPANY_ID_JS for the rationale).
+      const extractIdFromCurrentPage = (): Promise<string | null> =>
+        extractMainCompanyId("CDP_GET_COMPANY_ID");
 
       try {
         const tabId = await findLinkedInTab();
@@ -620,14 +693,13 @@ async function handleMessage(
         }
         await attachToTab(tabId);
 
-        // Helper to extract company ID from current page
-        const tryExtractId = async (): Promise<string | null> => {
-          const pageUrl = await evaluate<string>("window.location.href");
-          if (pageUrl.includes("/unavailable")) return null;
-          return evaluate<string | null>(
-            `(() => { const m = document.documentElement.innerHTML.match(/fsd_company[%3A:]+(\\d{5,12})/); return m ? m[1] : null; })()`
-          );
-        };
+        // Helper to extract company ID from current page. Uses the
+        // most-frequent URN heuristic (see EXTRACT_COMPANY_ID_JS) instead
+        // of first-match, which was grabbing sidebar/recommended-company
+        // references on the parent page and causing "navigate to Bain &
+        // Company" → "filter people by Bain Brazil ID" mismatches.
+        const tryExtractId = (): Promise<string | null> =>
+          extractMainCompanyId("CDP_DISCOVER");
 
         // Resolution strategy: ALWAYS go through LinkedIn search + LLM
         // disambiguation, except when the popup pre-resolved a slug via
