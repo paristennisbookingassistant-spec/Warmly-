@@ -111,58 +111,84 @@ interface CompanyCandidate {
 
 /**
  * JS snippet executed inside a LinkedIn company page that extracts the
- * MOST FREQUENT company URN found in the page's HTML.
+ * canonical company ID.
  *
- * Matches all three URN formats LinkedIn uses interchangeably:
- *   - urn:li:fs_company:NUMBER    (older — often used for the page's MAIN entity in inline data)
- *   - urn:li:fsd_company:NUMBER   ("feed shared data" — sidebar widgets, recommended-companies)
- *   - urn:li:company:NUMBER       (yet another, sometimes in structured data)
+ * Strategy (primary signal): LinkedIn writes deeplink meta tags
+ * server-side for iOS / Android app links, pointing to the page's
+ * canonical entity:
  *
- * Earlier versions only matched `fsd_company:`. On some company pages
- * (notably the global parent of multinational firms like Bain & Company),
- * the page's main entity is tagged with `fs_company:` while the
- * recommended-companies sidebar uses `fsd_company:` for regional sub-
- * entities. Our regex picked up the sidebar URNs and missed the main
- * one entirely — every "ID" we extracted was a regional Bain.
+ *   <meta property="al:ios:url" content="linkedin://CompanyProfile/8074">
+ *   <meta property="al:android:url" content="...companyId=8074...">
  *
- * Why most-frequent: the page's main URN is referenced everywhere
- * (logo, top-card, about, employees widget, posts list, navigation),
- * easily 20-50 times. Sidebar references appear 1-3 times.
+ * These are guaranteed to be the page's primary company:
+ *   - Written server-side from the URL slug, not the React DOM
+ *   - Unaffected by sidebar widgets (Affiliated pages, recommended,
+ *     etc.) that poison URN-counting heuristics
+ *   - Stable across LinkedIn UI churn — they're part of LinkedIn's
+ *     open social graph API contract
  *
- * Returns the most-frequent ID + a per-format breakdown so we can
- * diagnose surprise mismatches from the service-worker console.
+ * Fallback: if for some reason the meta tag is missing (unusual page
+ * layout, edge case), count URN references in the body HTML. The
+ * fallback is the previous strategy — kept as a safety net but rarely
+ * exercised in practice.
+ *
+ * Returns the extracted ID + diagnostic context (which source it came
+ * from, page title, current URL, fallback-breakdown if used) so
+ * surprise mismatches are debuggable from the service-worker console.
  */
 const EXTRACT_COMPANY_ID_JS = `(() => {
+  // PRIMARY: deeplink meta tags. The most reliable signal on every
+  // LinkedIn company page.
+  const metaSources = [
+    { prop: "al:ios:url", content: document.querySelector('meta[property="al:ios:url"]')?.content },
+    { prop: "al:android:url", content: document.querySelector('meta[property="al:android:url"]')?.content },
+    { prop: "og:url", content: document.querySelector('meta[property="og:url"]')?.content },
+  ];
+
+  for (const { prop, content } of metaSources) {
+    if (!content) continue;
+    // Match patterns inside these tags:
+    //   linkedin://CompanyProfile/8074
+    //   ...companyId=8074
+    //   urn:li:company:8074 / urn:li:fs_company:8074 / urn:li:fsd_company:8074
+    const m = content.match(/(?:CompanyProfile\\/|companyId=|li[%3A:]+(?:fs_company|fsd_company|company)[%3A:]+)(\\d{5,12})/);
+    if (m) {
+      return JSON.stringify({
+        id: m[1],
+        source: prop,
+        metaContent: content.slice(0, 200),
+        title: document.title,
+        url: window.location.href,
+      });
+    }
+  }
+
+  // FALLBACK: URN-count across body HTML. Less reliable on pages with
+  // prominent "Affiliated pages" sidebars (regional sub-entities can
+  // outnumber the main URN). Only hit if meta tags fail.
   const html = document.documentElement.innerHTML;
   const counts = new Map();
   const byFormat = { fs_company: 0, fsd_company: 0, company: 0 };
-
-  // Match all three URN formats. The format suffix is captured so we
-  // can report a breakdown for diagnosis. URL-encoded ':' (%3A) is also
-  // allowed because LinkedIn URL-encodes URNs inside href attributes.
   const re = /urn[%3A:]+li[%3A:]+(fs_company|fsd_company|company)[%3A:]+(\\d{5,12})/g;
   let m;
   while ((m = re.exec(html)) !== null) {
-    const format = m[1];
-    const id = m[2];
-    counts.set(id, (counts.get(id) || 0) + 1);
-    byFormat[format] = (byFormat[format] || 0) + 1;
+    counts.set(m[2], (counts.get(m[2]) || 0) + 1);
+    byFormat[m[1]] = (byFormat[m[1]] || 0) + 1;
   }
 
   if (counts.size === 0) {
     return JSON.stringify({
       id: null,
-      breakdown: [],
-      byFormat,
+      source: "none",
       title: document.title,
       url: window.location.href,
     });
   }
 
-  // Sort descending by count, keep top 5 for diagnostics
   const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   return JSON.stringify({
     id: sorted[0][0],
+    source: "urn-count-fallback",
     breakdown: sorted.slice(0, 5).map(([id, count]) => ({ id, count })),
     byFormat,
     title: document.title,
@@ -172,8 +198,10 @@ const EXTRACT_COMPANY_ID_JS = `(() => {
 
 interface ExtractedIdResult {
   id: string | null;
-  breakdown: Array<{ id: string; count: number }>;
-  byFormat: { fs_company: number; fsd_company: number; company: number };
+  source: string;
+  metaContent?: string;
+  breakdown?: Array<{ id: string; count: number }>;
+  byFormat?: { fs_company: number; fsd_company: number; company: number };
   title: string;
   url: string;
 }
@@ -221,17 +249,24 @@ async function extractMainCompanyId(diagLabel: string): Promise<string | null> {
     return null;
   }
 
-  // Diagnostic dump — gives us page title, redirect destination, and
-  // per-format counts so we can tell at a glance which URN format LinkedIn
-  // is using on this specific page.
-  console.debug(
-    `[CDP] ${diagLabel}: extracted company ID=${parsed.id} | title="${parsed.title}" | url=${parsed.url}`,
-    "| byFormat:", parsed.byFormat,
-    "| breakdown:", parsed.breakdown
-  );
-
-  if (!parsed.id) {
-    console.warn(`[CDP] ${diagLabel}: no company ID found on page ${pageUrl}`);
+  // Diagnostic dump — title, post-wait URL, and which signal we used.
+  // The `source` field tells us at a glance whether the meta-tag fast
+  // path worked or we had to fall back to URN counting.
+  if (parsed.source.startsWith("al:") || parsed.source === "og:url") {
+    console.debug(
+      `[CDP] ${diagLabel}: extracted ID=${parsed.id} from meta[${parsed.source}] | title="${parsed.title}" | url=${parsed.url} | meta="${parsed.metaContent ?? ""}"`
+    );
+  } else if (parsed.source === "urn-count-fallback") {
+    console.debug(
+      `[CDP] ${diagLabel}: extracted ID=${parsed.id} via URN-count fallback (meta tags missing) | title="${parsed.title}" | url=${parsed.url}`,
+      "| byFormat:", parsed.byFormat,
+      "| breakdown:", parsed.breakdown
+    );
+  } else {
+    console.warn(
+      `[CDP] ${diagLabel}: no company ID found on page ${pageUrl}`,
+      parsed
+    );
   }
 
   return parsed.id;
