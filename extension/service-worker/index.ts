@@ -65,6 +65,50 @@ const SCRAPE_COMPANY_CANDIDATES_JS = `(() => {
       return !h.includes('/search/') && !h.includes('/unavailable') && h.includes('linkedin.com/company/');
     });
 
+  /**
+   * Extract the company numeric ID from a SINGLE search result row.
+   *
+   * Three independent signals, first non-null wins:
+   *   1. data-chameleon-result-urn / data-entity-urn attribute on the row
+   *      container — LinkedIn writes this server-side for click tracking
+   *   2. Most-frequent urn:li:(fs_company|fsd_company|company):NUMBER inside
+   *      the row's outerHTML — scoped to one row, ~5-15 KB, so the right
+   *      company URN wins by overwhelming margin (vs full-page scrape that
+   *      gets polluted by Affiliated-pages sidebar widgets)
+   *   3. URL-encoded urn:li:fsd_company in tracking-ping URLs inside the row
+   *
+   * Returns { id: string, source: 'attr' | 'urn-count' | 'tracking' } or null.
+   */
+  function extractRowCompanyId(container) {
+    if (!container) return null;
+
+    // Signal 1: explicit URN attributes
+    const attrUrn = container.getAttribute('data-chameleon-result-urn')
+      || container.getAttribute('data-entity-urn')
+      || '';
+    const attrMatch = attrUrn.match(/(?:fs_company|fsd_company|company)[%3A:]+(\\d{5,12})/);
+    if (attrMatch) return { id: attrMatch[1], source: 'attr' };
+
+    // Signal 2: most-frequent URN within row HTML
+    const html = container.outerHTML;
+    const counts = new Map();
+    const re = /urn[%3A:]+li[%3A:]+(?:fs_company|fsd_company|company)[%3A:]+(\\d{5,12})/g;
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      counts.set(m[1], (counts.get(m[1]) || 0) + 1);
+    }
+    if (counts.size > 0) {
+      const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+      return { id: sorted[0][0], source: 'urn-count' };
+    }
+
+    // Signal 3: anything resembling a company-id-like pattern in tracking URLs
+    const trackMatch = html.match(/companyId[=%3D]+(\\d{5,12})/);
+    if (trackMatch) return { id: trackMatch[1], source: 'tracking' };
+
+    return null;
+  }
+
   const seen = new Set();
   const rows = [];
   for (const link of links) {
@@ -87,6 +131,9 @@ const SCRAPE_COMPANY_CANDIDATES_JS = `(() => {
     // name, even when the rest of the row varies. Fall back to the link text.
     const firstLine = rawText.split('\\n').map(s => s.trim()).filter(Boolean)[0] || (link.innerText || '').trim();
 
+    // Row-scoped URN extraction — see extractRowCompanyId above for rationale.
+    const idResult = extractRowCompanyId(container);
+
     if (firstLine && slug) {
       rows.push({
         name: firstLine.slice(0, 200),
@@ -94,6 +141,8 @@ const SCRAPE_COMPANY_CANDIDATES_JS = `(() => {
         url: 'https://www.linkedin.com/company/' + slug + '/',
         // Trimmed to keep prompt size bounded — typical row is under 250 chars
         rawText: rawText.replace(/\\s+\\n/g, '\\n').slice(0, 400),
+        companyId: idResult?.id ?? null,
+        companyIdSource: idResult?.source ?? null,
       });
     }
     if (rows.length >= 10) break;
@@ -107,6 +156,13 @@ interface CompanyCandidate {
   slug: string;
   url: string;
   rawText: string;
+  /** Numeric LinkedIn company ID, scraped from the row's HTML. Null if none of
+   *  the three extraction signals fired — caller should fall through to
+   *  navigation-based extraction in that case. */
+  companyId?: string | null;
+  /** Diagnostic: which signal yielded the companyId. Useful in production logs
+   *  to know which extraction path is firing reliably. */
+  companyIdSource?: string | null;
 }
 
 /**
@@ -782,6 +838,7 @@ async function handleMessage(
         schoolId?: string;
         userContext?: string;
         companySlug?: string;
+        companyId?: string;
         locationGeoUrn?: string;
         functionKeywords?: string;
         // Human-readable labels for the LLM resolver's downstream-filters
@@ -795,6 +852,9 @@ async function handleMessage(
       const userContext = p?.userContext?.trim() || undefined;
       // Pre-resolved slug from the disambiguation picker — bypasses LLM resolution.
       const presetSlug = p?.companySlug?.trim() || undefined;
+      // Pre-resolved company ID — when popup picker has both slug AND numeric ID,
+      // we skip BOTH the company-page navigation AND the page scrape entirely.
+      const presetCompanyId = p?.companyId?.trim() || undefined;
       // Human-readable filter labels for the LLM resolver
       const downstreamFilters = {
         schoolLabel: p?.schoolLabel?.trim() || undefined,
@@ -835,15 +895,26 @@ async function handleMessage(
         let resolvedName: string = companyName;
 
         if (presetSlug) {
-          // Picker already chose the slug — go directly to /about/ to
-          // avoid LinkedIn's redirect to /posts/. Trust the user's pick.
-          await navigate(toAboutUrl(presetSlug));
-          await sleep(2000);
-          const id = await tryExtractId();
-          if (id) {
-            const name = await evaluate<string | null>(`document.querySelector('h1')?.innerText?.trim() ?? null`);
-            companyId = id;
-            resolvedName = name ?? companyName;
+          if (presetCompanyId) {
+            // Best path: picker provided both slug AND numeric ID. Skip
+            // company-page navigation entirely. The ID came from the
+            // search-row scrape during the LLM disambiguation step, which
+            // is structurally guaranteed to be the right entity.
+            companyId = presetCompanyId;
+            resolvedName = companyName;
+            console.debug(
+              `[CDP] Got company ID ${presetCompanyId} from picker (no navigation needed)`
+            );
+          } else {
+            // Slug-only fallback — navigate to /about/ and scrape.
+            await navigate(toAboutUrl(presetSlug));
+            await sleep(2000);
+            const id = await tryExtractId();
+            if (id) {
+              const name = await evaluate<string | null>(`document.querySelector('h1')?.innerText?.trim() ?? null`);
+              companyId = id;
+              resolvedName = name ?? companyName;
+            }
           }
         }
         // No presetSlug → fall through to LinkedIn search + LLM resolver below.
@@ -878,21 +949,40 @@ async function handleMessage(
                 data?: {
                   companyUrl?: string | null;
                   companySlug?: string | null;
+                  companyId?: string | null;
+                  companyIdSource?: string | null;
                   companyName?: string | null;
                   confidence?: number;
                   reasoning?: string;
                   candidates?: CompanyCandidate[];
+                  fromCache?: boolean;
                 }
               };
               if (data.data?.companyUrl) {
-                // /about/ subpath to avoid LinkedIn redirecting to /posts/
-                const aboutUrl = toAboutUrl(data.data.companyUrl);
-                console.debug("[CDP] Navigating to /about/ for clean ID extraction:", aboutUrl);
-                await navigate(aboutUrl);
-                await sleep(2000);
-                companyId = await tryExtractId();
-                resolvedName = data.data.companyName ?? companyName;
-                resolvedSlug = data.data.companySlug ?? resolvedSlug;
+                // FAST PATH: resolver returned the numeric companyId directly
+                // from the search-row scrape (or from cache). Skip the
+                // company-page navigation entirely — the row-scoped URN is
+                // structurally guaranteed to be the right entity.
+                if (data.data.companyId) {
+                  companyId = data.data.companyId;
+                  resolvedName = data.data.companyName ?? companyName;
+                  resolvedSlug = data.data.companySlug ?? resolvedSlug;
+                  const src = data.data.fromCache ? "cache" : `search-row scrape (source=${data.data.companyIdSource ?? "unknown"})`;
+                  console.debug(
+                    `[CDP] Got company ID ${companyId} from ${src}, skipping /about/ navigation`
+                  );
+                } else {
+                  // Fallback path: resolver couldn't get an ID from row scrape
+                  // (rare — happens if the row HTML lacked URN attributes).
+                  // Navigate to /about/ and scrape the page directly.
+                  const aboutUrl = toAboutUrl(data.data.companyUrl);
+                  console.debug("[CDP] No companyId from row scrape — falling back to /about/ navigation:", aboutUrl);
+                  await navigate(aboutUrl);
+                  await sleep(2000);
+                  companyId = await tryExtractId();
+                  resolvedName = data.data.companyName ?? companyName;
+                  resolvedSlug = data.data.companySlug ?? resolvedSlug;
+                }
               } else if (data.data?.candidates) {
                 // Low-confidence — surface picker through the orchestrator's
                 // error path. Caller (popup) can read needsPicker + candidates.

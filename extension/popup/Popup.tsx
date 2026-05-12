@@ -127,6 +127,10 @@ interface CompanyPickerCandidate {
   url?: string;
   /** Raw row text scraped from LinkedIn — used to render multi-line preview. */
   rawText?: string;
+  /** Numeric LinkedIn company ID extracted from the search-result row. When
+   *  passed along on pick, the service worker skips all company-page
+   *  navigation and goes straight to people-search with this ID. */
+  companyId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -745,6 +749,9 @@ export default function Popup() {
           payload: {
             companyName: cand.name,
             companySlug: cand.slug,
+            // Pass the row-scraped company ID through too. SW uses it
+            // directly for people-search filter — skips all navigation.
+            companyId: cand.companyId ?? undefined,
             schoolId: schoolId || "5176",
             userContext: cand.tagline ?? companyHint.trim() ?? undefined,
             locationGeoUrn,

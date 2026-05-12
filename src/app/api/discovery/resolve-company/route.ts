@@ -53,6 +53,16 @@ const CandidateSchema = z.object({
    * Higher signal than chasing CSS class names — the LLM parses it directly.
    */
   rawText: z.string().trim().max(800).optional().nullable(),
+  /**
+   * Numeric LinkedIn company ID scraped DIRECTLY from the search-result row.
+   * When present, the caller can use it as the people-search filter value
+   * (`currentCompany=[ID]`) without ever navigating to the company page.
+   * The structural fix for the Bain "navigate to global, get regional ID"
+   * problem — see plan in docs.
+   */
+  companyId: z.string().regex(/^\d{5,12}$/).optional().nullable(),
+  /** Diagnostic: which signal yielded the companyId during scrape. */
+  companyIdSource: z.string().max(40).optional().nullable(),
   // Legacy structured fields — accepted for backwards compat with older
   // extension builds. Newer builds send rawText instead.
   tagline: z.string().trim().max(500).optional().nullable(),
@@ -102,6 +112,10 @@ const InputSchema = z.object({
   forceSlug: z.string().trim().min(1).max(200).optional(),
   forceName: z.string().trim().max(200).optional(),
   forceReasoning: z.string().trim().max(500).optional(),
+  /** Numeric company ID to cache alongside forceSlug — populated when the
+   *  user picks from the disambiguation UI. Lets future cache hits skip
+   *  company-page navigation entirely. */
+  forceCompanyId: z.string().regex(/^\d{5,12}$/).optional(),
 });
 
 type Candidate = z.infer<typeof CandidateSchema>;
@@ -125,6 +139,7 @@ interface CachedResolution {
   resolved_slug: string;
   resolved_url: string;
   resolved_name: string | null;
+  resolved_company_id: string | null;
   reasoning: string | null;
 }
 
@@ -135,7 +150,7 @@ async function lookupCache(
     const supabase = await getSupabaseServerClient();
     const { data } = await supabase
       .from("company_slug_cache")
-      .select("resolved_slug, resolved_url, resolved_name, reasoning")
+      .select("resolved_slug, resolved_url, resolved_name, resolved_company_id, reasoning")
       .eq("search_key", searchKey)
       .maybeSingle();
     return (data as CachedResolution) ?? null;
@@ -147,7 +162,13 @@ async function lookupCache(
 
 async function writeCache(
   searchKey: string,
-  resolved: { slug: string; url: string; name: string | null; reasoning: string | null }
+  resolved: {
+    slug: string;
+    url: string;
+    name: string | null;
+    companyId?: string | null;
+    reasoning: string | null;
+  }
 ): Promise<void> {
   try {
     // Use service-role client so the write bypasses RLS. The cache is global
@@ -160,6 +181,7 @@ async function writeCache(
         resolved_slug: resolved.slug,
         resolved_url: resolved.url,
         resolved_name: resolved.name,
+        resolved_company_id: resolved.companyId ?? null,
         reasoning: resolved.reasoning,
       },
       { onConflict: "search_key" }
@@ -272,6 +294,7 @@ export async function POST(req: NextRequest) {
       forceSlug,
       forceName,
       forceReasoning,
+      forceCompanyId,
     } = parsed.data;
 
     // ---- Cache-write shortcut: user picked from the popup's disambiguation UI ----
@@ -284,12 +307,14 @@ export async function POST(req: NextRequest) {
         slug: forceSlug,
         url: `https://www.linkedin.com/company/${forceSlug}/`,
         name: forceName ?? null,
+        companyId: forceCompanyId ?? null,
         reasoning: forceReasoning ?? "User-corrected pick",
       });
       return NextResponse.json({
         data: {
           companyUrl: `https://www.linkedin.com/company/${forceSlug}/`,
           companySlug: forceSlug,
+          companyId: forceCompanyId ?? null,
           companyName: forceName ?? null,
           confidence: 1.0,
           reasoning: forceReasoning ?? "User-corrected pick",
@@ -319,6 +344,7 @@ export async function POST(req: NextRequest) {
         data: {
           companyUrl: cached.resolved_url,
           companySlug: cached.resolved_slug,
+          companyId: cached.resolved_company_id,
           companyName: cached.resolved_name,
           confidence: 1.0, // cached → trusted
           reasoning: cached.reasoning ?? "Resolved previously",
@@ -417,6 +443,13 @@ export async function POST(req: NextRequest) {
 
     const confidence = Math.max(0, Math.min(1, Number(llmResult.confidence) || 0));
 
+    // Look up the picked candidate to surface its row-scraped companyId.
+    // The candidate.companyId comes from the row-scoped URN extraction in the
+    // extension — when present, the caller can use it directly as the
+    // people-search filter value and skip company-page navigation entirely.
+    const pickedCandidate = candidates?.find((c) => c.slug === llmResult.slug);
+    const pickedCompanyId = pickedCandidate?.companyId ?? null;
+
     // Low confidence → tell caller to surface picker. Don't cache low-confidence
     // results because the right answer is "ask the user".
     if (confidence < MIN_CONFIDENCE || !finalUrl || !llmResult.slug) {
@@ -424,6 +457,7 @@ export async function POST(req: NextRequest) {
         data: {
           companyUrl: null,
           companySlug: null,
+          companyId: null,
           companyName: llmResult.name,
           confidence,
           reasoning:
@@ -438,6 +472,7 @@ export async function POST(req: NextRequest) {
       slug: llmResult.slug,
       url: finalUrl,
       name: llmResult.name,
+      companyId: pickedCompanyId,
       reasoning: llmResult.reasoning,
     });
 
@@ -445,6 +480,8 @@ export async function POST(req: NextRequest) {
       data: {
         companyUrl: finalUrl,
         companySlug: llmResult.slug,
+        companyId: pickedCompanyId,
+        companyIdSource: pickedCandidate?.companyIdSource ?? null,
         companyName: llmResult.name,
         confidence,
         reasoning: llmResult.reasoning,
