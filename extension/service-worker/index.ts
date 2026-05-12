@@ -360,6 +360,116 @@ async function extractMainCompanyId(diagLabel: string): Promise<string | null> {
 }
 
 /**
+ * Resolve a LinkedIn company slug → numeric ID via the voyager API.
+ *
+ * The voyager API is LinkedIn's internal REST endpoint that its own frontend
+ * uses. Calling it from within the LinkedIn tab (via CDP `Runtime.evaluate`)
+ * means we get the user's existing session cookies "for free" and don't need
+ * to reverse-engineer auth.
+ *
+ * Why this is the right primary path:
+ *   - Companies search-result rows DON'T contain the URN in scrapable HTML
+ *     (LinkedIn keeps it in React props). Confirmed by 5 rows returning
+ *     `companyId: null` from our row-scrape signals.
+ *   - The voyager endpoint returns the canonical entity, by definition
+ *     unambiguous: slug `bain-and-company` → the global parent's ID.
+ *   - One call, ~200ms, no navigation needed.
+ *
+ * Auth: CSRF token comes from the `JSESSIONID` cookie. LinkedIn stores it
+ * as `JSESSIONID="ajax:<numeric>"` — the entire quoted value (including
+ * the `ajax:` prefix) is the csrf-token header value.
+ *
+ * Returns the numeric company ID as a string, or null if the call fails
+ * for any reason. Callers should fall back to the existing /about/ scrape.
+ */
+async function lookupCompanyIdViaVoyager(slug: string): Promise<string | null> {
+  // Serialize slug into the JS payload safely.
+  const slugLiteral = JSON.stringify(slug);
+
+  const js = `
+    (async () => {
+      try {
+        const csrfMatch = document.cookie.match(/JSESSIONID="([^"]+)"/);
+        if (!csrfMatch) {
+          return JSON.stringify({ ok: false, error: 'no JSESSIONID cookie' });
+        }
+        const csrf = csrfMatch[1];
+        const url = '/voyager/api/organization/companies?q=universalName&universalName=' + encodeURIComponent(${slugLiteral});
+        const res = await fetch(url, {
+          headers: { 'csrf-token': csrf, 'accept': 'application/json' },
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          return JSON.stringify({ ok: false, error: 'http ' + res.status, status: res.status });
+        }
+        const json = await res.json();
+        // Response shape varies slightly by LinkedIn version. The entity URN
+        // can live at json.elements[0].entityUrn (the typical case) or
+        // json.data.entityUrn for some response wrappers. Probe both.
+        const urn = (json && json.elements && json.elements[0] && json.elements[0].entityUrn)
+          || (json && json.data && json.data.entityUrn)
+          || null;
+        // Also probe other common ID-bearing fields as a safety net.
+        const objectUrn = (json && json.elements && json.elements[0] && json.elements[0].objectUrn) || null;
+        return JSON.stringify({
+          ok: true,
+          entityUrn: urn,
+          objectUrn: objectUrn,
+          // Tiny diagnostic: 3 top-level keys so we can see the shape if extraction fails
+          shape: Object.keys(json || {}).slice(0, 5),
+        });
+      } catch (e) {
+        return JSON.stringify({ ok: false, error: 'exception: ' + (e && e.message ? e.message : String(e)) });
+      }
+    })()
+  `;
+
+  let raw: string;
+  try {
+    raw = await evaluate<string>(js);
+  } catch (err) {
+    console.warn(`[CDP] voyager call (slug=${slug}) threw:`, err);
+    return null;
+  }
+
+  let parsed: {
+    ok: boolean;
+    error?: string;
+    entityUrn?: string | null;
+    objectUrn?: string | null;
+    shape?: string[];
+    status?: number;
+  };
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.warn(`[CDP] voyager call (slug=${slug}) returned non-JSON:`, raw);
+    return null;
+  }
+
+  if (!parsed.ok) {
+    console.warn(`[CDP] voyager call (slug=${slug}) failed:`, parsed.error, parsed.status);
+    return null;
+  }
+
+  // Extract the trailing number from either entityUrn or objectUrn.
+  // Format: "urn:li:fs_normalized_company:NUMBER" or "urn:li:company:NUMBER"
+  const urn = parsed.entityUrn || parsed.objectUrn || "";
+  const m = urn.match(/:(\d{5,12})(?:[,)]|$)/);
+  if (!m) {
+    console.warn(
+      `[CDP] voyager (slug=${slug}): could not extract numeric ID from urn`,
+      { entityUrn: parsed.entityUrn, objectUrn: parsed.objectUrn, shape: parsed.shape }
+    );
+    return null;
+  }
+
+  const id = m[1];
+  console.debug(`[CDP] voyager (slug=${slug}): resolved to ID=${id}`);
+  return id;
+}
+
+/**
  * Finds the best LinkedIn tab to attach CDP to.
  * Priority: active tab in current window (if it's LinkedIn) → any LinkedIn tab.
  */
@@ -896,24 +1006,31 @@ async function handleMessage(
 
         if (presetSlug) {
           if (presetCompanyId) {
-            // Best path: picker provided both slug AND numeric ID. Skip
-            // company-page navigation entirely. The ID came from the
-            // search-row scrape during the LLM disambiguation step, which
-            // is structurally guaranteed to be the right entity.
+            // Best path: picker provided both slug AND numeric ID.
             companyId = presetCompanyId;
             resolvedName = companyName;
             console.debug(
               `[CDP] Got company ID ${presetCompanyId} from picker (no navigation needed)`
             );
           } else {
-            // Slug-only fallback — navigate to /about/ and scrape.
-            await navigate(toAboutUrl(presetSlug));
-            await sleep(2000);
-            const id = await tryExtractId();
-            if (id) {
-              const name = await evaluate<string | null>(`document.querySelector('h1')?.innerText?.trim() ?? null`);
-              companyId = id;
-              resolvedName = name ?? companyName;
+            // Picker only had slug → try voyager API to resolve canonically.
+            const voyagerId = await lookupCompanyIdViaVoyager(presetSlug);
+            if (voyagerId) {
+              companyId = voyagerId;
+              resolvedName = companyName;
+              console.debug(
+                `[CDP] Got company ID ${voyagerId} from voyager (slug=${presetSlug})`
+              );
+            } else {
+              // Last resort: navigate to /about/ and scrape.
+              await navigate(toAboutUrl(presetSlug));
+              await sleep(2000);
+              const id = await tryExtractId();
+              if (id) {
+                const name = await evaluate<string | null>(`document.querySelector('h1')?.innerText?.trim() ?? null`);
+                companyId = id;
+                resolvedName = name ?? companyName;
+              }
             }
           }
         }
@@ -959,29 +1076,50 @@ async function handleMessage(
                 }
               };
               if (data.data?.companyUrl) {
-                // FAST PATH: resolver returned the numeric companyId directly
-                // from the search-row scrape (or from cache). Skip the
-                // company-page navigation entirely — the row-scoped URN is
-                // structurally guaranteed to be the right entity.
+                // FAST PATH 1: resolver returned the numeric companyId directly
+                // from the search-row scrape (or from cache). Skip all
+                // company-page navigation — the row-scoped URN is the right
+                // entity by construction.
                 if (data.data.companyId) {
                   companyId = data.data.companyId;
                   resolvedName = data.data.companyName ?? companyName;
                   resolvedSlug = data.data.companySlug ?? resolvedSlug;
                   const src = data.data.fromCache ? "cache" : `search-row scrape (source=${data.data.companyIdSource ?? "unknown"})`;
                   console.debug(
-                    `[CDP] Got company ID ${companyId} from ${src}, skipping /about/ navigation`
+                    `[CDP] Got company ID ${companyId} from ${src}, skipping company-page navigation`
                   );
+                } else if (data.data.companySlug) {
+                  // FAST PATH 2: row scrape didn't find URN (LinkedIn keeps it
+                  // in React props on company search results). Hit the voyager
+                  // API directly to resolve slug → canonical ID. This is the
+                  // structural fix that avoids the /about/-page nonsense
+                  // entirely.
+                  const voyagerId = await lookupCompanyIdViaVoyager(data.data.companySlug);
+                  if (voyagerId) {
+                    companyId = voyagerId;
+                    resolvedName = data.data.companyName ?? companyName;
+                    resolvedSlug = data.data.companySlug;
+                    console.debug(
+                      `[CDP] Got company ID ${voyagerId} from voyager API (slug=${data.data.companySlug}), skipping company-page navigation`
+                    );
+                  } else {
+                    // LAST RESORT: voyager failed (rare — network/auth/etc).
+                    // Navigate to /about/ and scrape — accepts the regional-
+                    // URN risk we've been fighting, but better than crashing.
+                    const aboutUrl = toAboutUrl(data.data.companyUrl);
+                    console.warn(
+                      `[CDP] Both row scrape AND voyager failed — last-resort /about/ scrape:`,
+                      aboutUrl
+                    );
+                    await navigate(aboutUrl);
+                    await sleep(2000);
+                    companyId = await tryExtractId();
+                    resolvedName = data.data.companyName ?? companyName;
+                    resolvedSlug = data.data.companySlug;
+                  }
                 } else {
-                  // Fallback path: resolver couldn't get an ID from row scrape
-                  // (rare — happens if the row HTML lacked URN attributes).
-                  // Navigate to /about/ and scrape the page directly.
-                  const aboutUrl = toAboutUrl(data.data.companyUrl);
-                  console.debug("[CDP] No companyId from row scrape — falling back to /about/ navigation:", aboutUrl);
-                  await navigate(aboutUrl);
-                  await sleep(2000);
-                  companyId = await tryExtractId();
-                  resolvedName = data.data.companyName ?? companyName;
-                  resolvedSlug = data.data.companySlug ?? resolvedSlug;
+                  // No slug returned at all — fall through to picker error path.
+                  console.warn("[CDP] Resolver returned companyUrl but no slug. Cannot proceed.");
                 }
               } else if (data.data?.candidates) {
                 // Low-confidence — surface picker through the orchestrator's
