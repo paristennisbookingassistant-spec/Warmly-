@@ -207,6 +207,37 @@ interface ExtractedIdResult {
 }
 
 /**
+ * LinkedIn redirects authenticated users from `/company/SLUG/` to
+ * `/company/SLUG/posts/?feedView=all` (the feed view). The feed view:
+ *   - Does NOT contain the canonical deeplink meta tags
+ *   - Is dominated by post authors / sidebar widgets in URN refs
+ *   - Makes ID extraction unreliable for global parents
+ *
+ * The `/about/` subpath, by contrast, is stable and canonical: no
+ * redirect, full meta tags, main entity URN dominant in body. So for
+ * ID extraction we ALWAYS navigate to `/company/SLUG/about/`.
+ *
+ * Idempotent: works on bare slug URLs, URLs already ending with /,
+ * URLs with subpaths (posts/, people/, etc. — replaced with /about/),
+ * and URLs with query strings (stripped).
+ */
+function toAboutUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    // Match /company/SLUG (and anything after it)
+    const m = u.pathname.match(/^\/company\/([^/]+)/);
+    if (!m) return url;
+    return `https://www.linkedin.com/company/${m[1]}/about/`;
+  } catch {
+    // Not a URL — bare slug guess like "bain-and-company"
+    if (/^[a-z0-9-]+$/i.test(url)) {
+      return `https://www.linkedin.com/company/${url}/about/`;
+    }
+    return url;
+  }
+}
+
+/**
  * Wrapper around EXTRACT_COMPANY_ID_JS that:
  *   1. Bails on the `/unavailable` page (non-existent company slug)
  *   2. Waits for the company's `<h1>` to be present before scraping —
@@ -567,7 +598,8 @@ async function handleMessage(
 
         for (const slug of uniqueSlugs) {
           console.debug("[CDP] Trying slug:", slug);
-          await navigate(`https://www.linkedin.com/company/${slug}/`);
+          // /about/ avoids LinkedIn's redirect to /posts/ that strips meta tags.
+          await navigate(toAboutUrl(slug));
           await sleep(2000);
 
           const companyId = await extractIdFromCurrentPage();
@@ -662,7 +694,13 @@ async function handleMessage(
 
         // Navigate to the LLM-selected company page
         console.debug("[CDP] LLM selected company URL:", resolvedUrl, "confidence:", resolveData.data?.confidence);
-        await navigate(resolvedUrl);
+        // Navigate to /about/ (not the bare slug URL) — LinkedIn redirects
+        // /company/SLUG/ → /company/SLUG/posts/?feedView=all for authed
+        // users, and the posts feed has no canonical meta tags and noisy
+        // URN refs. /about/ is stable and canonical.
+        const aboutUrl = toAboutUrl(resolvedUrl);
+        console.debug("[CDP] Navigating to /about/ for clean ID extraction:", aboutUrl);
+        await navigate(aboutUrl);
         await sleep(2000);
 
         const companyId = await extractIdFromCurrentPage();
@@ -797,8 +835,9 @@ async function handleMessage(
         let resolvedName: string = companyName;
 
         if (presetSlug) {
-          // Picker already chose the slug — go directly. Trust the user's pick.
-          await navigate(`https://www.linkedin.com/company/${presetSlug}/`);
+          // Picker already chose the slug — go directly to /about/ to
+          // avoid LinkedIn's redirect to /posts/. Trust the user's pick.
+          await navigate(toAboutUrl(presetSlug));
           await sleep(2000);
           const id = await tryExtractId();
           if (id) {
@@ -846,7 +885,10 @@ async function handleMessage(
                 }
               };
               if (data.data?.companyUrl) {
-                await navigate(data.data.companyUrl);
+                // /about/ subpath to avoid LinkedIn redirecting to /posts/
+                const aboutUrl = toAboutUrl(data.data.companyUrl);
+                console.debug("[CDP] Navigating to /about/ for clean ID extraction:", aboutUrl);
+                await navigate(aboutUrl);
                 await sleep(2000);
                 companyId = await tryExtractId();
                 resolvedName = data.data.companyName ?? companyName;
