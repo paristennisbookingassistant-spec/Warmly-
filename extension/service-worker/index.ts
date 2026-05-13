@@ -71,7 +71,7 @@ const SCRAPE_COMPANY_CANDIDATES_JS = `(() => {
    * Three independent signals, first non-null wins:
    *   1. data-chameleon-result-urn / data-entity-urn attribute on the row
    *      container — LinkedIn writes this server-side for click tracking
-   *   2. Most-frequent urn:li:(fs_company|fsd_company|company):NUMBER inside
+   *   2. Most-frequent urn:li:(fs_company|fsd_company|fs_normalized_company|company):NUMBER inside
    *      the row's outerHTML — scoped to one row, ~5-15 KB, so the right
    *      company URN wins by overwhelming margin (vs full-page scrape that
    *      gets polluted by Affiliated-pages sidebar widgets)
@@ -86,13 +86,13 @@ const SCRAPE_COMPANY_CANDIDATES_JS = `(() => {
     const attrUrn = container.getAttribute('data-chameleon-result-urn')
       || container.getAttribute('data-entity-urn')
       || '';
-    const attrMatch = attrUrn.match(/(?:fs_company|fsd_company|company)[%3A:]+(\\d{5,12})/);
+    const attrMatch = attrUrn.match(/(?:fs_company|fsd_company|fs_normalized_company|company)[%3A:]+(\\d{2,12})/);
     if (attrMatch) return { id: attrMatch[1], source: 'attr' };
 
     // Signal 2: most-frequent URN within row HTML
     const html = container.outerHTML;
     const counts = new Map();
-    const re = /urn[%3A:]+li[%3A:]+(?:fs_company|fsd_company|company)[%3A:]+(\\d{5,12})/g;
+    const re = /urn[%3A:]+li[%3A:]+(?:fs_company|fsd_company|fs_normalized_company|company)[%3A:]+(\\d{2,12})/g;
     let m;
     while ((m = re.exec(html)) !== null) {
       counts.set(m[1], (counts.get(m[1]) || 0) + 1);
@@ -103,7 +103,7 @@ const SCRAPE_COMPANY_CANDIDATES_JS = `(() => {
     }
 
     // Signal 3: anything resembling a company-id-like pattern in tracking URLs
-    const trackMatch = html.match(/companyId[=%3D]+(\\d{5,12})/);
+    const trackMatch = html.match(/companyId[=%3D]+(\\d{2,12})/);
     if (trackMatch) return { id: trackMatch[1], source: 'tracking' };
 
     return null;
@@ -207,7 +207,7 @@ const EXTRACT_COMPANY_ID_JS = `(() => {
     //   linkedin://CompanyProfile/8074
     //   ...companyId=8074
     //   urn:li:company:8074 / urn:li:fs_company:8074 / urn:li:fsd_company:8074
-    const m = content.match(/(?:CompanyProfile\\/|companyId=|li[%3A:]+(?:fs_company|fsd_company|company)[%3A:]+)(\\d{5,12})/);
+    const m = content.match(/(?:CompanyProfile\\/|companyId=|li[%3A:]+(?:fs_company|fsd_company|fs_normalized_company|company)[%3A:]+)(\\d{2,12})/);
     if (m) {
       return JSON.stringify({
         id: m[1],
@@ -225,7 +225,7 @@ const EXTRACT_COMPANY_ID_JS = `(() => {
   const html = document.documentElement.innerHTML;
   const counts = new Map();
   const byFormat = { fs_company: 0, fsd_company: 0, company: 0 };
-  const re = /urn[%3A:]+li[%3A:]+(fs_company|fsd_company|company)[%3A:]+(\\d{5,12})/g;
+  const re = /urn[%3A:]+li[%3A:]+(fs_company|fsd_company|fs_normalized_company|company)[%3A:]+(\\d{2,12})/g;
   let m;
   while ((m = re.exec(html)) !== null) {
     counts.set(m[2], (counts.get(m[2]) || 0) + 1);
@@ -455,7 +455,10 @@ async function lookupCompanyIdViaVoyager(slug: string): Promise<string | null> {
   // Extract the trailing number from either entityUrn or objectUrn.
   // Format: "urn:li:fs_normalized_company:NUMBER" or "urn:li:company:NUMBER"
   const urn = parsed.entityUrn || parsed.objectUrn || "";
-  const m = urn.match(/:(\d{5,12})(?:[,)]|$)/);
+  // Match 2-12 digits — Bain's ID is 2114 (4 digits), Microsoft is 1035,
+  // Google is 1441. Early-adopter companies all have short IDs. The previous
+  // 5-12 constraint silently dropped all of them.
+  const m = urn.match(/:(\d{2,12})(?:[,)]|$)/);
   if (!m) {
     console.warn(
       `[CDP] voyager (slug=${slug}): could not extract numeric ID from urn`,

@@ -60,7 +60,7 @@ const CandidateSchema = z.object({
    * The structural fix for the Bain "navigate to global, get regional ID"
    * problem — see plan in docs.
    */
-  companyId: z.string().regex(/^\d{5,12}$/).optional().nullable(),
+  companyId: z.string().regex(/^\d{2,12}$/).optional().nullable(),
   /** Diagnostic: which signal yielded the companyId during scrape. */
   companyIdSource: z.string().max(40).optional().nullable(),
   // Legacy structured fields — accepted for backwards compat with older
@@ -115,7 +115,7 @@ const InputSchema = z.object({
   /** Numeric company ID to cache alongside forceSlug — populated when the
    *  user picks from the disambiguation UI. Lets future cache hits skip
    *  company-page navigation entirely. */
-  forceCompanyId: z.string().regex(/^\d{5,12}$/).optional(),
+  forceCompanyId: z.string().regex(/^\d{2,12}$/).optional(),
 });
 
 type Candidate = z.infer<typeof CandidateSchema>;
