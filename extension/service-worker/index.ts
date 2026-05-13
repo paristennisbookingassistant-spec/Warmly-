@@ -24,7 +24,10 @@ import {
   updateDiscoverySession,
   bookmarkProfile,
   rankContactsBatch,
+  draftReplyFromThread,
   type BatchRankResult,
+  type ThreadMessageInput,
+  type DraftReplyResult,
 } from "./api-client";
 import type { ExtractedProfile } from "../shared/types";
 import {
@@ -714,6 +717,28 @@ async function handleMessage(
           ok: true,
           contacts: items.filter((c) => idSet.has(c.id)),
         };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    }
+
+    // ---- Draft reply from a LinkedIn thread --------------------------------
+    case "DRAFT_REPLY_FROM_THREAD": {
+      const payload = message.payload as {
+        participant_name: string | null;
+        participant_linkedin_url: string | null;
+        messages: ThreadMessageInput[];
+        instruction?: string;
+      };
+      try {
+        const result = await draftReplyFromThread(payload);
+        if (!result) {
+          return {
+            ok: false,
+            error: "Draft generation failed. Check that you're signed in to Warmly.",
+          };
+        }
+        return { ok: true, result };
       } catch (err) {
         return { ok: false, error: String(err) };
       }

@@ -221,3 +221,35 @@ export async function rankContactsBatch(
   );
   return result?.rankings ?? [];
 }
+
+// ---------------------------------------------------------------------------
+// Draft reply from a captured LinkedIn thread.
+// Called from messaging.ts when the user clicks "Draft reply with Warmly"
+// inside a LinkedIn message thread.
+// ---------------------------------------------------------------------------
+
+export interface ThreadMessageInput {
+  sender_role: "user" | "them" | "unknown";
+  sender_name: string | null;
+  text: string;
+  timestamp_raw: string | null;
+}
+
+export interface DraftReplyResult {
+  draft: string;
+  reasoning: string;
+  participant_name: string | null;
+  message_count: number;
+}
+
+export async function draftReplyFromThread(payload: {
+  participant_name: string | null;
+  participant_linkedin_url: string | null;
+  messages: ThreadMessageInput[];
+  instruction?: string;
+}): Promise<DraftReplyResult | null> {
+  return apiFetch<DraftReplyResult>("/api/ai/draft-reply-from-thread", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}

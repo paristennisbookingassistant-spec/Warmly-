@@ -6,6 +6,8 @@
  * 1. Listen for control messages from popup / service worker
  * 2. Route them to the orchestrator
  * 3. Handle PAGE_BOOKMARKED (extract + forward current profile)
+ * 4. Initialize messaging-thread capture (injects "Save to Warmly"
+ *    button on /messaging/thread/* URLs)
  */
 
 import {
@@ -16,7 +18,32 @@ import {
 } from "./orchestrator";
 import { extractProfileFromDOM } from "./dom-reader";
 import { isProfilePage } from "./dom-reader";
+import { initMessagingCapture } from "./messaging";
 import type { StartDiscoveryPayload, ExtensionMessage } from "../shared/types";
+
+// ---------------------------------------------------------------------------
+// Banner log — fires unconditionally on every LinkedIn page load.
+// If you don't see this in the console, the content script is not
+// loading (extension not reloaded, or Chrome blocked it).
+// ---------------------------------------------------------------------------
+
+console.log(
+  "%c[WARMLY] content script loaded",
+  "background:#b87a4a;color:#fff;padding:2px 8px;border-radius:4px;font-weight:600;"
+);
+
+// ---------------------------------------------------------------------------
+// One-time initializations on script load
+// ---------------------------------------------------------------------------
+
+// Messaging capture polls the DOM for any LinkedIn message thread
+// (overlay bubble OR full /messaging/ page) and injects a "Save to
+// Warmly" button into each. URL-agnostic.
+try {
+  initMessagingCapture();
+} catch (err) {
+  console.error("[WARMLY] initMessagingCapture failed:", err);
+}
 
 // ---------------------------------------------------------------------------
 // Message listener
