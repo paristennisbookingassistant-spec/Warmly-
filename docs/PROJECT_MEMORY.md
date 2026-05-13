@@ -3,7 +3,7 @@
 
 **Purpose:** This file preserves the accumulated context, decisions, debates, and learnings from all working sessions on this project. Read this file at the start of every new session to restore context. Update it at the end of every session with new learnings.
 
-**Last updated:** May 9, 2026 (Session 10)
+**Last updated:** May 13, 2026 (Session 11)
 
 ---
 
@@ -1050,3 +1050,191 @@ scoped to their own conversation.
    on the right side of onboarding is currently rendered from local answers.
    It would be more truthful to fetch the actually-built profile_md after
    completion. Polish, not blocker.
+
+### Session 11 — May 10-13, 2026
+
+**Topics covered:**
+
+Four-day arc that started as "make discovery smarter" and ended as a
+deep diagnostic saga uncovering that LinkedIn's earliest company IDs
+are 4 digits, not 5+. Two distinct phases:
+
+**Phase A (May 10) — Smarter discovery feature work:**
+
+1. **Smart company resolution with LLM disambiguation** (`7c27680`).
+   Previous flow tried `linkedin.com/company/<naive-slug>` first and
+   often landed on the wrong company (e.g., "Wonderful" → some random
+   company called Wonderful instead of `wonderfulcx` the AI startup).
+   New flow: navigate to LinkedIn search, scrape structured candidates
+   from each row (name + slug + rawText + location + followers),
+   send to MiniMax with optional user-hint ("AI agent startup"), LLM
+   picks. Low-confidence → popup picker UI. New `company_slug_cache`
+   Supabase table to make repeat lookups instant (zero LLM call).
+   Files: `extension/service-worker/index.ts` (new
+   `SCRAPE_COMPANY_CANDIDATES_JS`), `extension/popup/Popup.tsx` (hint
+   input + picker UI), `src/app/api/discovery/resolve-company/route.ts`
+   (restructured), `supabase/migrations/20260509000000_add_company_slug_cache.sql`.
+
+2. **Batch contact ranking with profile_md + per-pick rationale** (`f036568`).
+   Existing `/api/ai/score` scored contacts one at a time, can't
+   compare. New `/api/ai/rank-batch` accepts contact_ids[], makes ONE
+   MiniMax REASONING call comparing all candidates against each other
+   AND against the user's profile_md narrative, returns ranked top-N
+   with per-pick reasoning. Service worker fires it after discovery
+   saves N candidates. Popup completed view renders top 5 with the
+   LLM's specific reasoning ("Picked because: shared INSEAD class,
+   same Bain → growth VC pivot you're targeting, Paris-based").
+   ~3¢ per call. Fixed pre-existing bug in `apiFetch` — it was
+   returning the full `{data, error}` envelope but type-casting as T,
+   so every caller's typed access was secretly broken.
+   Files: `src/app/api/ai/rank-batch/route.ts` (new),
+   `src/lib/ai/scoring.ts` (new `rankContactsBatch`),
+   `extension/service-worker/api-client.ts` (apiFetch fix + new
+   `rankContactsBatch` helper), `extension/popup/Popup.tsx`
+   (rankings UI in completed view + display-data enrichment via
+   new `FETCH_CONTACTS_FOR_RANKINGS` SW handler), `src/app/api/contacts/route.ts`
+   (new `ids` query param).
+
+3. **Location + function filters in popup** (`3ac1999`).
+   16 cities (geoUrn) + 12 functions mapped to LinkedIn search
+   keywords. `extension/shared/linkedin-filters.ts` carries the maps.
+   Functions use search keywords ("consultant OR consulting") rather
+   than industry codes — keywords match person titles, not company
+   industries, far more precise.
+
+**Phase B (May 11-13) — The Bain saga:**
+
+User reported discovery for "Bain" landed on Bain Brazil / Bain
+Brussels (regional sub-entities) and returned 0 results because no
+INSEAD alumni in Paris work specifically under those regional pages.
+Six failed attempts to fix:
+
+| # | Approach | Why it failed |
+|---|---|---|
+| 1 | First-match `fsd_company:N` regex on page HTML | Picked first sidebar URN |
+| 2 | Most-frequent URN counting | Picked most-mentioned regional Bain |
+| 3 | Match all 3 URN formats | Page had 0 `fs_company` URNs |
+| 4 | Navigate to `/about/` not `/` | Page was empty stub with Affiliated-pages sidebar of regional Bains |
+| 5 | Deeplink meta tags (`al:ios:url`) | Missing on /about/ pages |
+| 6 | Search-row URN scrape | Row HTML had NO URN at all (React props only) |
+
+Plan-mode re-baseline with a Plan agent surfaced the correct approach:
+**LinkedIn's internal voyager API** (`/voyager/api/organization/companies?q=universalName&universalName=SLUG`).
+Called from inside the LinkedIn tab via CDP `Runtime.evaluate` so the
+user's session cookies + CSRF token (from JSESSIONID="ajax:N" cookie)
+auth the request automatically. Returns the canonical entity URN.
+Shipped in `d36b319`.
+
+**Final root cause uncovered via diagnostic logging** (`70deb7f` →
+`f39ee98`): voyager had been returning Bain's real ID `2114` the
+whole time, but my URN parser required `\d{5,12}` digits. Bain joined
+LinkedIn in 2003-2004 when company IDs were small auto-incrementing
+integers. Every major brand from that era has a 3-4 digit ID:
+- Microsoft: 1035
+- LinkedIn itself: 1337
+- Google: 1441
+- Bain: 2114
+
+The 5-12 digit constraint silently dropped exactly the companies that
+matter most for MBA networking. Fix in `f39ee98`: relaxed
+`\d{5,12}` → `\d{2,12}` in 8 places (3 extension regexes, 2 Zod
+schemas, 3 tracking patterns) + added `fs_normalized_company` to URN
+format alternations (the format voyager actually returns).
+
+**Other Phase B work:**
+- Bug fix: "Open session" on different contact kept showing the first
+  contact ever opened (`ce232c0`). Cause: `useRef(false)` boolean
+  guard latched true on first navigation, ignored subsequent contact
+  params. Replaced with last-handled-contact-ID comparison.
+- Bug fix: chat silent failure — server errors swallowed by UI
+  (`a5c731d`, `aff9c6f`). Added contextual error banner with Retry,
+  wrapped coaching path in try/catch to surface real error reasons,
+  delete orphan user message from DB on failure.
+- Bug fix: empty artifact cards (`4f0b98f`). When LLM returned JSON
+  with field `note`/`body`/`draft` instead of `message`, artifact
+  saved empty. Added field-fallback hoisting + post-sanitize empty
+  guard that throws so route's catch produces "I tried to draft
+  something but it failed" instead of saving a broken card.
+- Restored Warmly branding (`adfbc04`). The previous Warmly rebrand
+  (224 lines) was uncommitted local changes in parent repo, never
+  pushed to main. Got rolled back during a stash conflict resolution.
+  Recovered from stash, merged with new logic, all restyled with T
+  tokens.
+- Onboarding gate, Meetings view, detail/contacts polish all
+  unaffected — already on main from Session 10.
+
+**Key decisions / learnings:**
+
+- **The diagnostic-first principle.** After 5 failed iterations on
+  the Bain bug, I added `[CDP DIAG]` logging at every step in the
+  critical path. The very next test surfaced "voyager (slug=...)
+  could not extract numeric ID from urn `urn:li:fs_normalized_company:2114`"
+  — fix was 1 line. Lesson: when an iteration fails, INSTRUMENT before
+  GUESSING. The diagnostic commit was the most valuable code I wrote
+  all week.
+
+- **Plan mode for genuinely hard problems.** After 4 iterations on
+  ID extraction, user explicitly said "pause and plan properly." The
+  Plan agent's analysis surfaced voyager API as the structural fix,
+  which I'd missed across all 4 patches. Should've reached for it
+  sooner.
+
+- **Don't impose constraints you can't justify.** The `\d{5,12}`
+  regex was added in the very first commit with no rationale. I
+  assumed all company IDs were 5+ digits. They aren't. Every
+  arbitrary numeric range in code should have a "why this bound"
+  comment, or be unbounded.
+
+- **LinkedIn's three URN formats:** `urn:li:fs_company:N` (older,
+  page-level), `urn:li:fsd_company:N` ("feed shared data", widgets),
+  `urn:li:fs_normalized_company:N` (voyager API responses). The
+  numeric portion is the same canonical company ID across all three —
+  they're different views on the same DB row.
+
+- **Voyager API is the right primary signal for slug→ID.** Used by
+  LinkedIn's own frontend, returns canonical entities, requires only
+  the user's existing session cookies. Endpoint:
+  `/voyager/api/organization/companies?q=universalName&universalName=<slug>`.
+  CSRF token comes from `JSESSIONID="ajax:..."` cookie (the entire
+  quoted value including the `ajax:` prefix).
+
+- **The "Affiliated pages" sidebar problem.** Global parents of
+  multinational firms (Bain, McKinsey, BCG, Deloitte) render a
+  prominent sidebar of regional sub-entities. URN-counting on those
+  pages is structurally broken — the sidebar contributes more URN
+  references than the page's own. Any future scrape-based ID
+  extraction needs to be row-scoped, not page-scoped.
+
+- **apiFetch envelope bug:** `apiFetch<T>()` was returning the full
+  `{data, error}` envelope but typed as T. Every caller's typed access
+  was secretly broken. Caught while wiring rank-batch. Fixed; legacy
+  callers were already accommodating the bug by accessing fields
+  via optional chaining.
+
+**Status (end of May 13):**
+- 14 commits shipped to main. Production at `f39ee98`.
+- Voyager-based discovery confirmed working — user verified Bain
+  resolves to ID 2114, matching the URL they constructed manually.
+- Diagnostic `[CDP DIAG]` logs still in production code — should be
+  cleaned in a follow-up commit once stability is confirmed.
+- Supabase migration `20260512000000_add_company_id_to_slug_cache.sql`
+  added a `resolved_company_id` column to `company_slug_cache`. Not yet
+  applied to production Supabase. Until applied, cache writes fail
+  silently and fall through to /about/ (harmless but no repeat-discovery
+  speedup). Apply via Supabase SQL editor when convenient.
+
+**Immediate next steps:**
+
+1. **Clean up `[CDP DIAG]` logs** — they were instrumentation, can be
+   removed or downgraded to `console.debug` behind a verbose flag.
+2. **Apply the slug-cache migration** to production Supabase. One-line
+   ALTER TABLE in the SQL editor.
+3. **LinkedIn conversation history capture** — highest-impact unbuilt
+   feature on the backlog. Content script for `/messaging/thread/...`
+   URLs, scroll-up extraction, "Draft reply from this thread" button
+   injected into LinkedIn's messaging UI. Coach reads thread when
+   drafting follow-ups. ~3-4h, deserves its own focused session.
+4. **Settings UI for profile_md** — let user inspect + edit what the
+   coach knows about them. APIs exist, just need a Settings view.
+5. **CV upload endpoint** — `buildInitialProfile` accepts `cv_text`
+   but no upload UI yet. ~1h.
