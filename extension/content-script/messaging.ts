@@ -513,9 +513,25 @@ async function handleCaptureClick(
       );
     }
 
-    const result = resp.result as { draft: string; reasoning: string };
+    const result = resp.result as {
+      draft: string;
+      reasoning: string;
+      voice_signals_used?: {
+        approved_learnings: number;
+        past_messages: number;
+        has_writing_style: boolean;
+        has_profile_md: boolean;
+        in_thread_user_messages: number;
+      };
+    };
     draft = result.draft;
     reasoning = result.reasoning;
+    if (result.voice_signals_used) {
+      const v = result.voice_signals_used;
+      console.log(
+        `${TAG} voice signals used: profile_md=${v.has_profile_md}, writing_style=${v.has_writing_style}, approved_learnings=${v.approved_learnings}, past_messages=${v.past_messages}, in_thread_user_messages=${v.in_thread_user_messages}`
+      );
+    }
   } catch (err) {
     console.error(`${TAG} draft request failed`, err);
     btn.disabled = false;

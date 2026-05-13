@@ -240,6 +240,13 @@ export interface DraftReplyResult {
   reasoning: string;
   participant_name: string | null;
   message_count: number;
+  voice_signals_used?: {
+    approved_learnings: number;
+    past_messages: number;
+    has_writing_style: boolean;
+    has_profile_md: boolean;
+    in_thread_user_messages: number;
+  };
 }
 
 export async function draftReplyFromThread(payload: {

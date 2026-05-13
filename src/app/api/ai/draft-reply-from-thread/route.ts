@@ -1,24 +1,25 @@
 /**
  * POST /api/ai/draft-reply-from-thread
  *
- * Takes a scraped LinkedIn message thread + the authenticated user's
- * profile_md and generates a reply draft IN THE USER'S VOICE.
+ * Takes a scraped LinkedIn message thread and generates a reply draft
+ * IN THE USER'S VOICE — using EVERY voice signal we have, not just
+ * the messages in this one thread.
  *
- * The "voice" signal is two-fold:
- *   1. profile_md captures the user's narrative identity + hooks
- *   2. The user's prior messages WITHIN THIS THREAD are the strongest
- *      voice sample we have — they're talking to this exact person in
- *      this exact context. The LLM mimics the cadence, salutation
- *      style, sign-off, and tone from those.
+ * Voice signals pulled, ranked by trust:
+ *   1. `user_learnings` (approved) — explicit rules the user has
+ *      confirmed. These OVERRIDE everything else when they apply.
+ *   2. Recent finalized outreach / follow-up artifacts — actual past
+ *      messages the user approved or shipped. The gold-standard
+ *      sample of their writing in real outreach contexts.
+ *   3. `user_memory.writing_style` — auto-learned style from edits
+ *      (tone, message length preference, signature phrases, avoids).
+ *   4. `profile_md` — narrative identity, transition story, hooks.
+ *   5. The user's own messages in THIS thread — strongest contextual
+ *      cue for this specific relationship, but limited (the thread
+ *      may be empty for a cold reply).
  *
- * Returns:
- *   - draft: the suggested reply text
- *   - reasoning: 1-2 lines on why this approach (shown to user as
- *     transparency, also useful when they hit Regenerate)
- *
- * NOT persisted. This is an ephemeral draft — the user copies it into
- * LinkedIn's compose box and edits/sends from there. We don't store
- * the thread or the draft anywhere.
+ * Returns { draft, reasoning }. Ephemeral — not persisted. The user
+ * pastes/inserts into LinkedIn's compose and edits there.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -32,7 +33,7 @@ import {
   parseJsonBody,
   logAiCall,
 } from "@/lib/api/helpers";
-import type { User } from "@/types/database";
+import type { User, Artifact, UserLearning } from "@/types/database";
 
 const MessageSchema = z.object({
   sender_role: z.enum(["user", "them", "unknown"]),
@@ -48,13 +49,111 @@ const InputSchema = z.object({
     .array(MessageSchema)
     .min(1, "At least one message is required")
     .max(200, "Thread too long — cap at 200 messages"),
-  /**
-   * Optional steer from the user — e.g. "make it shorter" or
-   * "ask about their Series A timeline". Empty on first draft, set
-   * by Regenerate-with-instruction flow.
-   */
   instruction: z.string().max(500).optional(),
 });
+
+// ---------------------------------------------------------------------------
+// Helpers — build prompt sections from each voice signal
+// ---------------------------------------------------------------------------
+
+function buildApprovedLearningsSection(learnings: UserLearning[]): string {
+  if (learnings.length === 0) return "";
+  const numbered = learnings
+    .slice(0, 20)
+    .map((l, i) => `${i + 1}. ${l.learning}`)
+    .join("\n");
+  return `## Approved voice rules (the user has explicitly confirmed these — these OVERRIDE every other signal when they apply)
+
+${numbered}`;
+}
+
+function buildPastMessagesSection(artifacts: Artifact[]): string {
+  if (artifacts.length === 0) return "";
+
+  const samples = artifacts
+    .slice(0, 5)
+    .map((a, i) => {
+      // Extract the message body from the artifact content. Different
+      // artifact types use different keys — try the common ones.
+      const c = a.content as Record<string, unknown>;
+      const body =
+        (typeof c.message === "string" && c.message) ||
+        (typeof c.body === "string" && c.body) ||
+        (typeof c.draft === "string" && c.draft) ||
+        (typeof c.note === "string" && c.note) ||
+        "";
+      if (!body) return null;
+      const trimmed = body.length > 600 ? body.slice(0, 600) + "..." : body;
+      return `### Sample ${i + 1} (${a.type}, finalized ${a.updated_at.slice(0, 10)})\n${trimmed}`;
+    })
+    .filter((s): s is string => s !== null);
+
+  if (samples.length === 0) return "";
+
+  return `## The user's actual past messages (HIGHEST FIDELITY voice samples)
+
+These are real messages the user has finalized in Warmly. They show exactly how this person writes when sending outreach or follow-ups. Match the cadence, sentence length, salutation style, sign-off, and tone of these samples above all else.
+
+${samples.join("\n\n")}`;
+}
+
+function buildWritingStyleSection(user: User): string {
+  const memory = user.user_memory;
+  if (!memory?.writing_style) {
+    return `## Default voice posture (no learned style yet)
+
+Casual but professional. Contractions are fine. Direct but warm. Not corporate-stiff. Not over-formatted.`;
+  }
+
+  const ws = memory.writing_style;
+  const lp = memory.learned_patterns;
+  const parts: string[] = ["## Learned writing style (from prior edits in Warmly)"];
+
+  if (ws.tone) parts.push(`**Tone:** ${ws.tone}`);
+  if (ws.message_length_preference)
+    parts.push(`**Length preference:** ${ws.message_length_preference}`);
+  if (ws.preferred_hooks?.length)
+    parts.push(`**Hooks they use:** ${ws.preferred_hooks.join(", ")}`);
+  if (ws.signature_phrases?.length)
+    parts.push(
+      `**Signature phrases (weave in when natural):** ${ws.signature_phrases.join(" · ")}`
+    );
+  if (ws.avoids?.length)
+    parts.push(
+      `**Vocabulary to NEVER use:** ${ws.avoids.join(" · ")}`
+    );
+  if (lp?.best_performing_tone)
+    parts.push(`**Tone that gets the best response rate:** ${lp.best_performing_tone}`);
+
+  return parts.join("\n");
+}
+
+function buildIdentitySection(profileMd: string | null | undefined): string {
+  if (!profileMd || profileMd.trim().length === 0) {
+    return "## User identity\n\n(Profile not yet built. Rely on the other voice signals.)";
+  }
+  return `## User identity (background, transition, hooks)
+
+${profileMd.trim()}
+
+Use this to ground specific references — schools, employers, transition story, hooks. Don't re-introduce them in the message itself unless it's the very first contact.`;
+}
+
+function buildInThreadVoiceSection(yourMessages: string[]): string {
+  if (yourMessages.length === 0) {
+    return "## Voice from this thread\n\n(The user hasn't sent any messages in this thread yet — this is a first reply. Lean on the higher-priority voice signals above.)";
+  }
+  const sample = yourMessages.map((m, i) => `### Message ${i + 1}\n${m}`).join("\n\n");
+  return `## Voice from THIS specific thread (use for cadence + relationship-specific tone)
+
+These are messages the user already sent in this conversation. Match the level of formality and warmth they've already established with this person — if they've been casual, keep being casual; if they've been formal, don't suddenly relax.
+
+${sample}`;
+}
+
+// ---------------------------------------------------------------------------
+// Main handler
+// ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const supabase = await getSupabaseServerClient();
@@ -74,17 +173,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Load user (with profile_md for voice + identity grounding)
-  const { data: userData } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", user.id)
-    .single();
-  if (!userData) return internalError("User profile not found");
-  const userTyped = userData as User;
+  // Pull all voice signals in parallel
+  const [userResult, learningsResult, artifactsResult] = await Promise.all([
+    supabase.from("users").select("*").eq("id", user.id).single(),
+    supabase
+      .from("user_learnings")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("status", "approved")
+      .order("created_at", { ascending: false })
+      .limit(20),
+    supabase
+      .from("artifacts")
+      .select("*")
+      .eq("user_id", user.id)
+      .in("type", ["outreach_draft", "follow_up_draft", "connection_note"])
+      .in("status", ["finalized", "sent"])
+      .order("updated_at", { ascending: false })
+      .limit(8),
+  ]);
 
-  // Format the thread for the LLM. Use sender role markers, drop
-  // redundant timestamps to save tokens.
+  if (!userResult.data) return internalError("User profile not found");
+  const userTyped = userResult.data as User;
+  const approvedLearnings = (learningsResult.data ?? []) as UserLearning[];
+  const pastArtifacts = (artifactsResult.data ?? []) as Artifact[];
+
+  // Format the thread for the LLM
   const threadText = parsed.data.messages
     .map((m) => {
       const role =
@@ -97,62 +211,76 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     })
     .join("\n\n---\n\n");
 
-  // Pull just the user's own messages — strongest voice sample
   const yourMessages = parsed.data.messages
     .filter((m) => m.sender_role === "user")
-    .map((m) => m.text)
-    .join("\n\n---\n\n");
+    .map((m) => m.text);
 
-  const systemPrompt = `You are drafting a LinkedIn message reply on behalf of a specific person. Your only job: write a reply they would actually send — in their voice, with their natural cadence, and serving the conversation thread provided.
+  // Build all voice signal sections
+  const learningsSection = buildApprovedLearningsSection(approvedLearnings);
+  const pastMessagesSection = buildPastMessagesSection(pastArtifacts);
+  const styleSection = buildWritingStyleSection(userTyped);
+  const identitySection = buildIdentitySection(userTyped.profile_md);
+  const inThreadSection = buildInThreadVoiceSection(yourMessages);
 
-## Voice signal — read this carefully
+  // Assemble the system prompt with the strongest voice signals first
+  const systemPrompt = `You are drafting a LinkedIn message reply on behalf of a specific person. Your only job: write a reply they would actually send — in their voice, with their natural cadence and tone, serving the conversation thread provided.
 
-The user's own prior messages in this thread are the GOLD STANDARD for voice. Match:
-- Their salutation style (e.g. "Hi [name]," vs "Hey [name]" vs just first-name)
-- Their typical message length and paragraph cadence
-- Their sign-off (e.g. "Cheers," "Best," "Liyang" alone)
-- Their tone — warmth vs formality, directness, use of contractions
-- Specific phrases or rhythms they repeat
+# VOICE SIGNAL HIERARCHY
 
-If they write short messages, you write short. If they sign off with "Cheers,\\n[Name]", you do the same. Do NOT add corporate filler ("I hope this finds you well") or AI-sounding phrases ("circle back", "leverage", "synergies", "I appreciate").
+You have multiple voice signals below. When they conflict, this is the priority order:
 
-## The user's identity (use to ground references, not to introduce themselves again)
+1. **Approved voice rules** — explicit user-confirmed rules. ALWAYS apply.
+2. **Past finalized messages** — real messages they've sent. Match these.
+3. **Learned writing style** — auto-extracted patterns from their edits.
+4. **In-thread voice** — what they've said to THIS person specifically.
+5. **Identity profile** — for grounding facts, not voice.
 
-${userTyped.profile_md?.trim() || "(No profile loaded — rely on the thread alone.)"}
+Match their actual writing patterns from sections 1-4. Section 5 grounds the content but does NOT dictate tone.
 
-## Output format
+---
 
-Return ONLY valid JSON, no markdown fence:
+${learningsSection ? learningsSection + "\n\n---\n\n" : ""}${pastMessagesSection ? pastMessagesSection + "\n\n---\n\n" : ""}${styleSection}
+
+---
+
+${identitySection}
+
+---
+
+${inThreadSection}
+
+---
+
+# UNIVERSAL RULES (apply unless overridden by an approved learning)
+
+- Match the language of the most recent incoming message (English/French/Chinese).
+- Keep message length proportional to what they wrote — short in, short reply. Long thoughtful in, more substantive reply.
+- Include salutation and sign-off ONLY if their past messages / in-thread voice use them.
+- Never invent specific facts (dates, numbers, names, prices) not in the thread or identity profile.
+- Never use AI-sounding phrases: "circle back", "leverage", "synergies", "I appreciate", "I hope this finds you well", "delve", "robust", "comprehensive", "crucial", "ultimately".
+- No em-dashes (use commas, periods, or ellipses).
+- If the latest message in the thread is from THEM and asks a question, address it directly. If the latest is from YOU, the user is probably nudging — write a non-pushy follow-up.
+
+${parsed.data.instruction ? `# USER'S SPECIFIC INSTRUCTION FOR THIS DRAFT\n\n${parsed.data.instruction.trim()}\n\nThis instruction overrides any defaults where they conflict.\n\n` : ""}
+
+# OUTPUT FORMAT
+
+Return ONLY valid JSON, no markdown fence, no prose:
 
 {
   "draft": "the full reply text, ready to paste into LinkedIn",
-  "reasoning": "1-2 sentences explaining the approach you took (this is shown to the user for transparency, NOT included in the message)"
+  "reasoning": "1-2 sentences on which voice signals you anchored to (e.g. 'Matched the short-cadence sign-off from your past follow-ups; addressed Paul's question about the Agent Strategist role.'). Shown to the user as transparency."
 }
 
-Rules:
-- The "draft" field is the message content ONLY. No "Here is your draft:" preamble.
-- Include the salutation and sign-off if the user's prior messages use them.
-- Match the language of the most recent message in the thread (English/French/Chinese).
-- Keep it natural-length: a 2-line incoming message gets a 2-4 line reply, not an essay.
-- Never invent specific facts (dates, numbers, names) that aren't in the thread or profile.
-- If the latest message is from THEM and asks a question, address it. If the latest is from YOU, the user is probably trying to nudge — draft a follow-up that doesn't feel pushy.
-${
-  parsed.data.instruction
-    ? `\n## User's specific instruction for THIS draft\n\n${parsed.data.instruction.trim()}\n\nThis instruction overrides defaults where they conflict.`
-    : ""
-}`;
+The "draft" field is the message content ONLY — no preamble, no quotes, no "Here is your draft:".`;
 
-  const userPrompt = `## The conversation thread
+  const userPrompt = `# THE THREAD TO REPLY TO
 
 ${threadText}
 
-## The user's own messages extracted (voice reference)
+# TASK
 
-${yourMessages || "(The user hasn't sent any messages in this thread yet — this is the first reply. Use profile_md voice signal.)"}
-
-## Now draft the reply
-
-The reply is from the user (the "YOU" speaker) to the other person. Write what they should send next.`;
+Write the next reply, from YOU (the user) to the other person, applying the voice hierarchy above. Return ONLY the JSON object.`;
 
   const start = Date.now();
   let result;
@@ -160,7 +288,7 @@ The reply is from the user (the "YOU" speaker) to the other person. Write what t
     result = await callMiniMax([{ role: "user", content: userPrompt }], {
       systemPrompt,
       maxTokens: 1500,
-      temperature: 0.65,
+      temperature: 0.6,
     });
   } catch (err) {
     console.error("Draft-reply LLM call failed:", err);
@@ -176,8 +304,7 @@ The reply is from the user (the "YOU" speaker) to the other person. Write what t
     latencyMs: Date.now() - start,
   });
 
-  // Parse the JSON response. Be lenient — strip markdown fences if the
-  // LLM ignored the no-fence rule.
+  // Parse the JSON response (lenient — strip markdown fences if any)
   const rawContent = result.content.trim();
   const cleaned = rawContent
     .replace(/^```(?:json)?\s*/i, "")
@@ -207,6 +334,13 @@ The reply is from the user (the "YOU" speaker) to the other person. Write what t
       reasoning: parsedResponse.reasoning?.trim() || "",
       participant_name: parsed.data.participant_name,
       message_count: parsed.data.messages.length,
+      voice_signals_used: {
+        approved_learnings: approvedLearnings.length,
+        past_messages: pastArtifacts.length,
+        has_writing_style: !!userTyped.user_memory?.writing_style,
+        has_profile_md: !!userTyped.profile_md?.trim(),
+        in_thread_user_messages: yourMessages.length,
+      },
     },
     error: null,
   });
