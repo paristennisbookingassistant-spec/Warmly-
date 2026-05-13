@@ -1047,20 +1047,47 @@ async function handleMessage(
           await navigate(`https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(companyName)}`);
           await sleep(3000);
 
-          const candJson = await evaluate<string>(SCRAPE_COMPANY_CANDIDATES_JS);
+          // DIAG: scrape step
+          let candJson: string;
+          try {
+            candJson = await evaluate<string>(SCRAPE_COMPANY_CANDIDATES_JS);
+            console.debug(
+              `[CDP DIAG] scrape returned ${candJson?.length ?? 0} chars. First 200:`,
+              (candJson || "").slice(0, 200)
+            );
+          } catch (scrapeErr) {
+            console.error("[CDP DIAG] SCRAPE_COMPANY_CANDIDATES_JS threw:", scrapeErr);
+            await detach();
+            return { ok: false, error: `Scraper crashed: ${String(scrapeErr)}` };
+          }
+
           try {
             resolveCandidates = JSON.parse(candJson || "[]");
-          } catch {
+          } catch (parseErr) {
+            console.error("[CDP DIAG] JSON.parse of scrape output threw:", parseErr, "raw:", (candJson || "").slice(0, 300));
             resolveCandidates = [];
+          }
+          console.debug(`[CDP DIAG] resolveCandidates.length=${resolveCandidates.length}`);
+          if (resolveCandidates.length > 0) {
+            console.debug("[CDP DIAG] first candidate:", resolveCandidates[0]);
           }
 
           if (resolveCandidates.length > 0) {
             const backendUrl = DEFAULT_BACKEND_URL;
-            const res = await fetch(`${backendUrl}/api/discovery/resolve-company`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ companyName, userContext, candidates: resolveCandidates, downstreamFilters }),
-            });
+            console.debug(`[CDP DIAG] POST ${backendUrl}/api/discovery/resolve-company with ${resolveCandidates.length} candidates`);
+            let res: Response;
+            try {
+              res = await fetch(`${backendUrl}/api/discovery/resolve-company`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ companyName, userContext, candidates: resolveCandidates, downstreamFilters }),
+              });
+              console.debug(`[CDP DIAG] resolve-company response: status=${res.status} ok=${res.ok}`);
+            } catch (fetchErr) {
+              console.error("[CDP DIAG] resolve-company fetch threw:", fetchErr);
+              await detach();
+              return { ok: false, error: `Backend unreachable: ${String(fetchErr)}` };
+            }
             if (res.ok) {
               const data = await res.json() as {
                 data?: {
@@ -1075,6 +1102,8 @@ async function handleMessage(
                   fromCache?: boolean;
                 }
               };
+              console.debug("[CDP DIAG] resolve-company body keys:", Object.keys(data ?? {}), "data keys:", Object.keys(data?.data ?? {}));
+              console.debug("[CDP DIAG] resolve-company data:", data.data);
               if (data.data?.companyUrl) {
                 // FAST PATH 1: resolver returned the numeric companyId directly
                 // from the search-row scrape (or from cache). Skip all
@@ -1124,6 +1153,7 @@ async function handleMessage(
               } else if (data.data?.candidates) {
                 // Low-confidence — surface picker through the orchestrator's
                 // error path. Caller (popup) can read needsPicker + candidates.
+                console.debug(`[CDP DIAG] Surfacing picker with ${data.data.candidates.length} candidates`);
                 await detach();
                 return {
                   ok: false,
@@ -1132,8 +1162,22 @@ async function handleMessage(
                   reasoning: data.data.reasoning,
                   error: `Need user to pick which "${companyName}" they meant`,
                 };
+              } else {
+                console.warn(
+                  "[CDP DIAG] resolve-company response had neither companyUrl nor candidates:",
+                  data
+                );
               }
+            } else {
+              // res.ok was false — log the body to surface the error reason.
+              const errText = await res.text().catch(() => "(could not read body)");
+              console.error(
+                `[CDP DIAG] resolve-company returned !ok status=${res.status}, body (first 500 chars):`,
+                errText.slice(0, 500)
+              );
             }
+          } else {
+            console.warn("[CDP DIAG] Scraper returned 0 candidates — cannot call resolver");
           }
         }
 
