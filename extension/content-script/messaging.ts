@@ -86,6 +86,21 @@ const MSG_SELECTORS = {
     ".msg-thread a[href*='/in/']",
     "a[href*='/in/']", // last-resort fallback, scoped to bubble/container
   ],
+  // The compose textarea where the user types a new message.
+  // LinkedIn uses Quill — a contenteditable div, NOT a real <textarea>.
+  composeEditor: [
+    ".msg-form__contenteditable[contenteditable='true']",
+    ".msg-form__message-content [contenteditable='true']",
+    "div.msg-form__contenteditable",
+    "[role='textbox'][contenteditable='true']",
+    "div[contenteditable='true'][aria-label*='message' i]",
+  ],
+  // The placeholder paragraph LinkedIn shows when compose is empty.
+  // We need to remove it so our text isn't appended after the placeholder.
+  composePlaceholder: [
+    ".msg-form__placeholder",
+    ".msg-form__contenteditable p.ql-editor-placeholder",
+  ],
 };
 
 // CSS class used to identify our injected buttons. We check for the
@@ -455,6 +470,7 @@ async function handleCaptureClick(
 
   const btn = ev.currentTarget as HTMLButtonElement;
   const originalText = btn.textContent;
+  const originalBg = btn.style.background;
   btn.disabled = true;
   btn.textContent = "Reading thread...";
 
@@ -476,33 +492,10 @@ async function handleCaptureClick(
     return;
   }
 
-  // Open the modal in loading state immediately so the user gets
-  // feedback while MiniMax generates the draft.
-  const modal = openDraftModal({
-    participantName: captured.participant_name,
-    messageCount: captured.messages.length,
-  });
+  btn.textContent = "Drafting...";
 
-  btn.disabled = false;
-  btn.textContent = originalText;
-
-  await requestDraft(captured, modal);
-}
-
-interface DraftModalHandle {
-  setLoading: (loading: boolean) => void;
-  setDraft: (draft: string, reasoning: string) => void;
-  setError: (message: string) => void;
-  close: () => void;
-  onRegenerate: (cb: (instruction?: string) => void) => void;
-}
-
-async function requestDraft(
-  captured: CapturedThread,
-  modal: DraftModalHandle,
-  instruction?: string
-): Promise<void> {
-  modal.setLoading(true);
+  let draft: string;
+  let reasoning: string;
   try {
     const resp = await chrome.runtime.sendMessage({
       type: "DRAFT_REPLY_FROM_THREAD",
@@ -510,33 +503,150 @@ async function requestDraft(
         participant_name: captured.participant_name,
         participant_linkedin_url: captured.participant_linkedin_url,
         messages: captured.messages,
-        instruction,
       },
     });
 
     if (!resp || !resp.ok) {
-      modal.setError(
+      throw new Error(
         resp?.error ||
-          "Couldn't generate a draft. Check that you're signed in to Warmly at ai-networking-coach.vercel.app."
+          "Couldn't generate a draft. Check that you're signed in to Warmly."
       );
-      return;
     }
 
-    const { draft, reasoning } = resp.result as {
-      draft: string;
-      reasoning: string;
-    };
-    modal.setDraft(draft, reasoning);
+    const result = resp.result as { draft: string; reasoning: string };
+    draft = result.draft;
+    reasoning = result.reasoning;
   } catch (err) {
     console.error(`${TAG} draft request failed`, err);
-    modal.setError(
-      "Network error talking to the Warmly backend. Try again in a moment."
+    btn.disabled = false;
+    btn.textContent = originalText;
+    showErrorToast(
+      err instanceof Error
+        ? err.message
+        : "Network error talking to the Warmly backend."
     );
+    return;
   }
 
-  modal.onRegenerate((instr) => {
-    void requestDraft(captured, modal, instr);
-  });
+  // Inject directly into LinkedIn's compose box, scoped to the same
+  // panel/bubble as this thread.
+  const panel = findOwningPanel(container);
+  const inserted = insertDraftIntoCompose(panel, draft);
+
+  if (inserted) {
+    console.log(`${TAG} draft inserted into compose box`);
+    if (reasoning) {
+      console.log(`${TAG} reasoning: ${reasoning}`);
+    }
+    btn.disabled = false;
+    btn.textContent = "Inserted — review & send ✓";
+    btn.style.background = "#2f7d4f"; // green confirmation
+    showInfoToast(
+      `Draft inserted in your voice. ${reasoning || "Review and hit Send."}`
+    );
+    setTimeout(() => {
+      btn.textContent = originalText;
+      btn.style.background = originalBg || "#b87a4a";
+    }, 4000);
+  } else {
+    // Couldn't find compose — fall back to clipboard copy so user
+    // still has a path to send it.
+    console.warn(`${TAG} compose textarea not found, copying to clipboard`);
+    try {
+      await navigator.clipboard.writeText(draft);
+      btn.disabled = false;
+      btn.textContent = "Copied to clipboard ✓";
+      btn.style.background = "#2f7d4f";
+      showInfoToast(
+        "Compose box not detected — draft copied to clipboard instead. Paste it in manually."
+      );
+      setTimeout(() => {
+        btn.textContent = originalText;
+        btn.style.background = originalBg || "#b87a4a";
+      }, 4000);
+    } catch {
+      btn.disabled = false;
+      btn.textContent = originalText;
+      showErrorToast(
+        "Couldn't insert the draft. Open the conversation in a different view and try again."
+      );
+    }
+  }
+}
+
+/**
+ * Insert the draft text into LinkedIn's compose contenteditable.
+ *
+ * LinkedIn uses Quill (a rich-text editor). Setting `innerHTML` alone
+ * doesn't update Quill's internal model, which means the Send button
+ * stays disabled. To make this work, we:
+ *   1. Find the contenteditable element scoped to this thread's panel
+ *   2. Remove any placeholder paragraph
+ *   3. Focus the editor + select existing content
+ *   4. Use `document.execCommand('insertText')` — deprecated but still
+ *      the most reliable way to insert text into a contenteditable
+ *      with all the right input events firing so Quill + React update
+ *
+ * Returns true on success, false if no compose element was found.
+ */
+function insertDraftIntoCompose(panel: ParentNode, draft: string): boolean {
+  const { el } = querySelectorWithChain(MSG_SELECTORS.composeEditor, panel);
+  if (!el) return false;
+
+  const editor = el as HTMLElement;
+
+  // Clear any placeholder paragraph LinkedIn renders when compose is
+  // empty. Quill sometimes leaves a <p><br></p> as the initial state.
+  editor.innerHTML = "";
+
+  // Focus first so input events have a target context
+  editor.focus();
+
+  // Select all existing content (in case the user typed something)
+  // and replace with the draft.
+  try {
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  } catch {
+    // skip
+  }
+
+  // Prefer execCommand — fires input events Quill/React listen for.
+  let success = false;
+  try {
+    success = document.execCommand("insertText", false, draft);
+  } catch {
+    success = false;
+  }
+
+  // Fallback: set innerHTML with paragraphs and dispatch a synthetic
+  // input event. Works less reliably but covers cases where
+  // execCommand returns false.
+  if (!success || editor.innerText.trim().length === 0) {
+    const paragraphs = draft
+      .split(/\n\n+/)
+      .map((p) => {
+        const lines = p
+          .split("\n")
+          .map((l) => l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"))
+          .join("<br>");
+        return `<p>${lines}</p>`;
+      })
+      .join("");
+    editor.innerHTML = paragraphs;
+    editor.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true }));
+    editor.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // Always fire one more input event to nudge React state
+  editor.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true }));
+
+  return editor.innerText.trim().length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -651,291 +761,42 @@ export function initMessagingCapture(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Draft modal — overlay shown in the LinkedIn page with the AI draft.
+// Toasts — small notifications shown at bottom-right
 // ---------------------------------------------------------------------------
 
-interface OpenModalOptions {
-  participantName: string | null;
-  messageCount: number;
-}
-
-function openDraftModal(opts: OpenModalOptions): DraftModalHandle {
-  // Remove any pre-existing modal so repeated clicks don't stack.
-  document.querySelectorAll(".warmly-draft-modal-backdrop").forEach((el) => {
-    el.remove();
-  });
-
-  const backdrop = document.createElement("div");
-  backdrop.className = "warmly-draft-modal-backdrop";
-  Object.assign(backdrop.style, {
-    position: "fixed",
-    top: "0",
-    left: "0",
-    right: "0",
-    bottom: "0",
-    background: "rgba(26,26,26,0.45)",
-    zIndex: "999999",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontFamily: "system-ui, -apple-system, sans-serif",
-  } satisfies Partial<CSSStyleDeclaration>);
-
-  const modal = document.createElement("div");
-  Object.assign(modal.style, {
-    background: "#f4ede0",
-    borderRadius: "16px",
-    padding: "28px 32px",
-    width: "min(560px, 92vw)",
-    maxHeight: "min(80vh, 720px)",
-    overflow: "auto",
-    boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
-    color: "#1a1a1a",
-    position: "relative",
-  } satisfies Partial<CSSStyleDeclaration>);
-
-  // Header
-  const header = document.createElement("div");
-  Object.assign(header.style, {
-    display: "flex",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    marginBottom: "8px",
-  } satisfies Partial<CSSStyleDeclaration>);
-
-  const titleEl = document.createElement("div");
-  titleEl.innerHTML = `<span style="font-family: 'Instrument Serif', Georgia, serif; font-style: italic; font-size: 24px; color: #8d5a32; letter-spacing: -0.01em;">Warmly</span> <span style="color: #4a4a4a; font-size: 14px; margin-left: 6px;">drafted a reply</span>`;
-  header.appendChild(titleEl);
-
-  const closeBtn = document.createElement("button");
-  closeBtn.innerHTML = "&times;";
-  closeBtn.type = "button";
-  Object.assign(closeBtn.style, {
-    background: "transparent",
-    border: "none",
-    fontSize: "24px",
-    color: "#4a4a4a",
-    cursor: "pointer",
-    padding: "0 4px",
-    lineHeight: "1",
-  } satisfies Partial<CSSStyleDeclaration>);
-  closeBtn.addEventListener("click", () => backdrop.remove());
-  header.appendChild(closeBtn);
-
-  modal.appendChild(header);
-
-  // Subtitle (participant + message count)
-  const subtitle = document.createElement("div");
-  subtitle.textContent = `For ${opts.participantName || "this thread"} · ${
-    opts.messageCount
-  } message${opts.messageCount === 1 ? "" : "s"} of context`;
-  Object.assign(subtitle.style, {
-    fontSize: "12px",
-    color: "#7a7a7a",
-    marginBottom: "20px",
-  } satisfies Partial<CSSStyleDeclaration>);
-  modal.appendChild(subtitle);
-
-  // Loading state container
-  const loadingEl = document.createElement("div");
-  loadingEl.textContent = "Drafting in your voice...";
-  Object.assign(loadingEl.style, {
-    fontFamily: "'Instrument Serif', Georgia, serif",
-    fontStyle: "italic",
-    fontSize: "18px",
-    color: "#8d5a32",
-    padding: "40px 0",
-    textAlign: "center",
-  } satisfies Partial<CSSStyleDeclaration>);
-  modal.appendChild(loadingEl);
-
-  // Draft textarea (hidden until loaded)
-  const draftLabel = document.createElement("div");
-  draftLabel.textContent = "Draft (edit before copying):";
-  Object.assign(draftLabel.style, {
-    fontSize: "12px",
-    fontWeight: "600",
-    color: "#4a4a4a",
-    marginBottom: "6px",
-    display: "none",
-    textTransform: "uppercase",
-    letterSpacing: "0.04em",
-  } satisfies Partial<CSSStyleDeclaration>);
-  modal.appendChild(draftLabel);
-
-  const draftBox = document.createElement("textarea");
-  Object.assign(draftBox.style, {
-    width: "100%",
-    minHeight: "160px",
-    background: "#faf6ed",
-    border: "1px solid rgba(26,26,26,0.12)",
-    borderRadius: "8px",
-    padding: "14px 16px",
-    fontFamily: "inherit",
-    fontSize: "14px",
-    lineHeight: "1.55",
-    color: "#1a1a1a",
-    resize: "vertical",
-    display: "none",
-    boxSizing: "border-box",
-  } satisfies Partial<CSSStyleDeclaration>);
-  modal.appendChild(draftBox);
-
-  // Reasoning note (hidden until loaded)
-  const reasoningEl = document.createElement("div");
-  Object.assign(reasoningEl.style, {
-    fontSize: "12px",
-    color: "#7a7a7a",
-    fontStyle: "italic",
-    marginTop: "10px",
-    display: "none",
-    paddingLeft: "8px",
-    borderLeft: "2px solid #b87a4a",
-  } satisfies Partial<CSSStyleDeclaration>);
-  modal.appendChild(reasoningEl);
-
-  // Error container (hidden until shown)
-  const errorEl = document.createElement("div");
-  Object.assign(errorEl.style, {
-    background: "rgba(181,67,57,0.08)",
-    border: "1px solid rgba(181,67,57,0.25)",
-    borderRadius: "8px",
-    padding: "12px 14px",
-    fontSize: "13px",
-    color: "#b54339",
-    display: "none",
-  } satisfies Partial<CSSStyleDeclaration>);
-  modal.appendChild(errorEl);
-
-  // Action row
-  const actions = document.createElement("div");
-  Object.assign(actions.style, {
-    marginTop: "20px",
-    display: "flex",
-    gap: "8px",
-    justifyContent: "flex-end",
-    flexWrap: "wrap",
-  } satisfies Partial<CSSStyleDeclaration>);
-
-  const regenBtn = document.createElement("button");
-  regenBtn.textContent = "Regenerate";
-  regenBtn.type = "button";
-  Object.assign(regenBtn.style, {
-    background: "transparent",
-    border: "1px solid rgba(26,26,26,0.15)",
-    color: "#4a4a4a",
-    padding: "8px 16px",
-    borderRadius: "8px",
-    cursor: "pointer",
-    fontSize: "13px",
-    fontWeight: "500",
-    display: "none",
-  } satisfies Partial<CSSStyleDeclaration>);
-
-  const copyBtn = document.createElement("button");
-  copyBtn.textContent = "Copy to clipboard";
-  copyBtn.type = "button";
-  Object.assign(copyBtn.style, {
-    background: "#b87a4a",
-    border: "none",
+function showInfoToast(message: string): void {
+  showToast(message, {
+    bg: "#1a1a1a",
     color: "#fff",
-    padding: "8px 18px",
-    borderRadius: "8px",
-    cursor: "pointer",
-    fontSize: "13px",
-    fontWeight: "600",
-    display: "none",
-  } satisfies Partial<CSSStyleDeclaration>);
-
-  copyBtn.addEventListener("click", () => {
-    void navigator.clipboard.writeText(draftBox.value).then(() => {
-      copyBtn.textContent = "Copied ✓";
-      setTimeout(() => (copyBtn.textContent = "Copy to clipboard"), 1800);
-    });
+    duration: 4500,
   });
-
-  actions.appendChild(regenBtn);
-  actions.appendChild(copyBtn);
-  modal.appendChild(actions);
-
-  backdrop.appendChild(modal);
-  backdrop.addEventListener("click", (e) => {
-    if (e.target === backdrop) backdrop.remove();
-  });
-  document.body.appendChild(backdrop);
-
-  let regenCallback: ((instruction?: string) => void) | null = null;
-  regenBtn.addEventListener("click", () => {
-    const instruction = window.prompt(
-      "Optional steer for the next draft (e.g. 'make it shorter', 'ask about their Series A timeline'). Leave blank to just regenerate.",
-      ""
-    );
-    if (regenCallback) regenCallback(instruction?.trim() || undefined);
-  });
-
-  return {
-    setLoading(loading) {
-      loadingEl.style.display = loading ? "block" : "none";
-      if (loading) {
-        draftLabel.style.display = "none";
-        draftBox.style.display = "none";
-        reasoningEl.style.display = "none";
-        regenBtn.style.display = "none";
-        copyBtn.style.display = "none";
-        errorEl.style.display = "none";
-      }
-    },
-    setDraft(draft, reasoning) {
-      loadingEl.style.display = "none";
-      errorEl.style.display = "none";
-      draftLabel.style.display = "block";
-      draftBox.style.display = "block";
-      draftBox.value = draft;
-      if (reasoning && reasoning.trim()) {
-        reasoningEl.textContent = `Why this draft: ${reasoning.trim()}`;
-        reasoningEl.style.display = "block";
-      } else {
-        reasoningEl.style.display = "none";
-      }
-      regenBtn.style.display = "inline-block";
-      copyBtn.style.display = "inline-block";
-    },
-    setError(msg) {
-      loadingEl.style.display = "none";
-      draftLabel.style.display = "none";
-      draftBox.style.display = "none";
-      reasoningEl.style.display = "none";
-      copyBtn.style.display = "none";
-      regenBtn.style.display = "inline-block";
-      errorEl.textContent = msg;
-      errorEl.style.display = "block";
-    },
-    close() {
-      backdrop.remove();
-    },
-    onRegenerate(cb) {
-      regenCallback = cb;
-    },
-  };
 }
 
-function showErrorToast(message: string): void {
+function showToast(
+  message: string,
+  opts: { bg: string; color: string; duration: number }
+): void {
   const toast = document.createElement("div");
   toast.textContent = message;
   Object.assign(toast.style, {
     position: "fixed",
     bottom: "24px",
     right: "24px",
-    background: "#1a1a1a",
-    color: "#fff",
+    background: opts.bg,
+    color: opts.color,
     padding: "12px 18px",
     borderRadius: "8px",
     fontSize: "13px",
     fontFamily: "system-ui, -apple-system, sans-serif",
     zIndex: "999999",
-    maxWidth: "320px",
-    boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
+    maxWidth: "360px",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+    lineHeight: "1.45",
   } satisfies Partial<CSSStyleDeclaration>);
   document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  setTimeout(() => toast.remove(), opts.duration);
+}
+
+function showErrorToast(message: string): void {
+  showToast(message, { bg: "#b54339", color: "#fff", duration: 5000 });
 }
