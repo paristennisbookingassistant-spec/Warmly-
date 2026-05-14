@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Warmly — Project Status</title>
+<title>Warmly — Live Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -11,16 +11,24 @@
   :root {
     --cream: #f4ede0;
     --cream-light: #faf6ed;
+    --cream-deep: #ebe0cf;
     --sienna: #b87a4a;
     --sienna-deep: #8d5a32;
+    --sienna-soft: rgba(184,122,74,0.15);
     --ink: #1a1a1a;
     --ink-soft: #4a4a4a;
     --ink-faint: #7a7a7a;
     --line: rgba(26,26,26,0.08);
+    --line-strong: rgba(26,26,26,0.16);
     --green: #2f7d4f;
+    --green-soft: rgba(47,125,79,0.12);
     --amber: #c2851a;
+    --amber-soft: rgba(194,133,26,0.14);
     --red: #b54339;
+    --red-soft: rgba(181,67,57,0.12);
     --blue: #2f5d8f;
+    --blue-soft: rgba(47,93,143,0.12);
+    --gray: rgba(122,122,122,0.18);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html { scroll-behavior: smooth; }
@@ -28,626 +36,964 @@
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     background: var(--cream);
     color: var(--ink);
-    line-height: 1.55;
-    font-size: 15px;
+    line-height: 1.5;
+    font-size: 14px;
     -webkit-font-smoothing: antialiased;
   }
-  .page { max-width: 1080px; margin: 0 auto; padding: 64px 48px; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 48px 40px 80px; }
 
-  header.hero {
-    margin-bottom: 64px;
-    padding-bottom: 32px;
+  /* HERO */
+  .hero {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 32px;
+    margin-bottom: 40px;
+    padding-bottom: 24px;
     border-bottom: 1px solid var(--line);
   }
-  .wordmark {
+  .hero-left .wordmark {
     font-family: 'Instrument Serif', serif;
     font-style: italic;
-    font-size: 56px;
+    font-size: 68px;
     line-height: 1;
     color: var(--sienna-deep);
     letter-spacing: -0.02em;
   }
-  .tagline {
-    margin-top: 8px;
-    font-size: 16px;
-    color: var(--ink-soft);
-    letter-spacing: -0.005em;
-  }
-  .meta {
-    margin-top: 24px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 24px;
-    font-size: 13px;
-    color: var(--ink-faint);
-  }
-  .meta-item strong { color: var(--ink); font-weight: 500; }
-
-  /* Status pills used everywhere */
-  .pill {
-    display: inline-block;
-    padding: 2px 10px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    vertical-align: middle;
-  }
-  .pill-shipped { background: rgba(47,125,79,0.12); color: var(--green); }
-  .pill-progress { background: rgba(194,133,26,0.14); color: var(--amber); }
-  .pill-next { background: rgba(184,122,74,0.15); color: var(--sienna-deep); }
-  .pill-later { background: rgba(122,122,122,0.12); color: var(--ink-faint); }
-  .pill-risk { background: rgba(181,67,57,0.12); color: var(--red); }
-  .pill-cleanup { background: rgba(47,93,143,0.12); color: var(--blue); }
-
-  /* Section structure */
-  section { margin-bottom: 56px; }
-  .section-title {
-    font-family: 'Instrument Serif', serif;
-    font-size: 32px;
-    font-style: italic;
-    color: var(--sienna-deep);
-    margin-bottom: 24px;
-    letter-spacing: -0.015em;
-  }
-  .section-intro {
+  .hero-left .tagline {
+    margin-top: 6px;
     font-size: 15px;
     color: var(--ink-soft);
-    margin-bottom: 24px;
-    max-width: 720px;
+  }
+  .hero-stats {
+    display: grid;
+    grid-template-columns: repeat(4, auto);
+    gap: 28px;
+    text-align: right;
+  }
+  .stat-num {
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-size: 36px;
+    color: var(--sienna-deep);
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+  .stat-label {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
-  /* Card list */
-  .cards { display: flex; flex-direction: column; gap: 14px; }
-  .card {
+  /* SECTION */
+  section { margin-bottom: 56px; }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .section-title {
+    font-family: 'Instrument Serif', serif;
+    font-size: 28px;
+    font-style: italic;
+    color: var(--sienna-deep);
+    letter-spacing: -0.015em;
+  }
+  .section-sub {
+    font-size: 12px;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* 4-STEP PIPELINE — the core product framework */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  .pstep {
+    position: relative;
+    background: var(--cream-light);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px 18px 18px;
+  }
+  .pstep::after {
+    content: "→";
+    position: absolute;
+    right: -22px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 24px;
+    color: var(--sienna);
+    z-index: 2;
+  }
+  .pstep:last-child::after { display: none; }
+  .pstep-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .pstep-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .pstep-pct {
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-size: 22px;
+    color: var(--sienna-deep);
+    line-height: 1;
+  }
+  .pstep-bar {
+    height: 6px;
+    background: rgba(184,122,74,0.12);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+  .pstep-fill {
+    height: 100%;
+    background: var(--sienna);
+    border-radius: 3px;
+    transition: width 0.6s ease;
+  }
+  .pstep-items {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .pstep-items li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+  .check {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .check.done { background: var(--green); }
+  .check.partial { background: var(--amber); color: #fff; }
+  .check.todo { background: var(--gray); color: var(--ink-faint); }
+
+  /* TIMELINE */
+  .timeline-wrap {
+    background: var(--cream-light);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 24px;
+  }
+  .timeline {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 30px 0 14px;
+  }
+  .timeline-line {
+    position: absolute;
+    top: 50px;
+    left: 4%;
+    right: 4%;
+    height: 2px;
+    background: linear-gradient(to right, var(--sienna) 0%, var(--sienna) var(--progress, 75%), var(--cream-deep) var(--progress, 75%));
+    border-radius: 1px;
+  }
+  .tnode {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    text-align: center;
+  }
+  .tdot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--sienna);
+    border: 3px solid var(--cream-light);
+    box-shadow: 0 0 0 1px var(--sienna);
+    margin-bottom: 10px;
+  }
+  .tnode.current .tdot {
+    width: 20px;
+    height: 20px;
+    background: var(--sienna-deep);
+    box-shadow: 0 0 0 1px var(--sienna-deep), 0 0 0 6px rgba(184,122,74,0.25);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 1px var(--sienna-deep), 0 0 0 6px rgba(184,122,74,0.25); }
+    50% { box-shadow: 0 0 0 1px var(--sienna-deep), 0 0 0 10px rgba(184,122,74,0.0); }
+  }
+  .tnode.future .tdot {
+    background: var(--cream);
+    border: 3px solid var(--cream-light);
+    box-shadow: 0 0 0 1px var(--line-strong);
+  }
+  .tlabel {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: 2px;
+  }
+  .tdate {
+    font-size: 10px;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .tnode.future .tlabel,
+  .tnode.future .tdate { color: var(--ink-faint); }
+
+  /* FEATURE STATUS GRID */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .feature {
+    background: var(--cream-light);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 150ms ease, transform 150ms ease;
+  }
+  .feature:hover {
+    border-color: rgba(184,122,74,0.4);
+    transform: translateY(-1px);
+  }
+  .feature-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .feature-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    background: var(--sienna-soft);
+    color: var(--sienna-deep);
+    flex-shrink: 0;
+  }
+  .feature-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--ink);
+    flex: 1;
+    line-height: 1.3;
+  }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .pill-green { background: var(--green-soft); color: var(--green); }
+  .pill-amber { background: var(--amber-soft); color: var(--amber); }
+  .pill-blue { background: var(--blue-soft); color: var(--blue); }
+  .pill-gray { background: var(--gray); color: var(--ink-faint); }
+  .pill-red { background: var(--red-soft); color: var(--red); }
+  .feature-meta {
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+  .feature-meta code {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    background: rgba(26,26,26,0.04);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 10.5px;
+  }
+
+  /* GANTT — upcoming roadmap */
+  .gantt {
+    background: var(--cream-light);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 22px;
+  }
+  .gantt-head {
+    display: grid;
+    grid-template-columns: 1.7fr repeat(8, 1fr);
+    gap: 4px;
+    padding-bottom: 10px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .gantt-head > div:first-child { text-align: left; }
+  .gantt-head > div:not(:first-child) { text-align: center; }
+  .gantt-row {
+    display: grid;
+    grid-template-columns: 1.7fr repeat(8, 1fr);
+    gap: 4px;
+    padding: 8px 0;
+    align-items: center;
+    border-bottom: 1px dashed var(--line);
+  }
+  .gantt-row:last-child { border-bottom: none; }
+  .gantt-label {
+    font-size: 13px;
+    color: var(--ink);
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .gantt-label .lpill {
+    font-size: 9.5px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .gantt-cell { height: 16px; border-radius: 4px; }
+  .gantt-fill { background: var(--sienna); }
+  .gantt-fill-soft { background: var(--sienna-soft); }
+  .gantt-fill-faint { background: rgba(184,122,74,0.06); }
+
+  /* OPEN STRATEGIC THREADS */
+  .threads {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+  }
+  .thread {
     background: var(--cream-light);
     border: 1px solid var(--line);
     border-radius: 12px;
-    padding: 18px 22px;
-    transition: border-color 150ms ease, transform 150ms ease;
-  }
-  .card:hover {
-    border-color: rgba(184,122,74,0.35);
-  }
-  .card-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 6px;
-  }
-  .card-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--ink);
-    letter-spacing: -0.005em;
-  }
-  .card-pills { display: flex; gap: 6px; flex-shrink: 0; }
-  .card-body {
-    font-size: 14px;
-    color: var(--ink-soft);
-  }
-  .card-body .meta-line {
-    margin-top: 10px;
-    font-size: 12px;
-    color: var(--ink-faint);
-    letter-spacing: 0.01em;
-  }
-  .card-body .meta-line code {
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-    background: rgba(26,26,26,0.05);
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 11.5px;
-  }
-
-  /* Commits timeline */
-  .commits {
+    padding: 16px 18px;
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
+  .thread.priority { border-color: var(--sienna); }
+  .thread-num {
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-size: 26px;
+    line-height: 1;
+    color: var(--sienna-deep);
+  }
+  .thread-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 4px;
+  }
+  .thread-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    flex: 1;
+  }
+  .thread-body {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    line-height: 1.55;
+  }
+  .thread-rec {
+    margin-top: 6px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+    font-size: 11.5px;
+    color: var(--sienna-deep);
+    font-style: italic;
+  }
+  .thread-rec strong { font-style: normal; font-weight: 600; }
+
+  /* VISION FLOWCHART */
+  .flow {
+    background: var(--cream-light);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 24px;
+  }
+  .flow-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+  .flow-row:last-child { margin-bottom: 0; }
+  .flow-box {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    line-height: 1.35;
+    position: relative;
+  }
+  .flow-box strong {
+    display: block;
+    color: var(--ink);
+    font-size: 12.5px;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+  .flow-box.shipped { border-color: var(--green); border-width: 1.5px; }
+  .flow-box.next { border-color: var(--amber); border-width: 1.5px; }
+  .flow-box.future { opacity: 0.55; }
+  .flow-arrow {
+    text-align: center;
+    color: var(--sienna);
+    font-size: 18px;
+    line-height: 1;
+    margin: -8px 0;
+  }
+
+  /* COMMITS */
+  details.commits-box {
+    background: var(--cream-light);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+  }
+  details.commits-box summary {
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-soft);
+    user-select: none;
+  }
+  details.commits-box[open] summary { margin-bottom: 12px; }
   .commit {
     display: flex;
-    gap: 14px;
-    font-size: 13px;
-    padding: 8px 12px;
-    border-radius: 8px;
-    transition: background 100ms ease;
+    gap: 12px;
+    padding: 5px 0;
+    font-size: 12px;
+    border-bottom: 1px dashed var(--line);
   }
-  .commit:hover { background: rgba(184,122,74,0.05); }
+  .commit:last-child { border-bottom: none; }
   .commit-hash {
     font-family: ui-monospace, 'SF Mono', Menlo, monospace;
     color: var(--sienna);
-    font-size: 12px;
     font-weight: 600;
+    width: 54px;
     flex-shrink: 0;
-    width: 64px;
   }
   .commit-msg { color: var(--ink-soft); }
-  .commit-msg strong { color: var(--ink); font-weight: 500; }
 
-  /* Decision callouts */
-  .callout {
-    background: var(--cream-light);
-    border-left: 3px solid var(--sienna);
-    padding: 16px 20px;
-    border-radius: 0 8px 8px 0;
-    margin-bottom: 14px;
-  }
-  .callout-title {
-    font-family: 'Instrument Serif', serif;
-    font-style: italic;
-    font-size: 18px;
-    color: var(--sienna-deep);
-    margin-bottom: 6px;
-  }
-  .callout-body {
-    font-size: 14px;
-    color: var(--ink-soft);
-  }
-
-  /* Footer */
+  /* FOOTER */
   footer {
-    margin-top: 80px;
-    padding-top: 24px;
+    margin-top: 60px;
+    padding-top: 20px;
     border-top: 1px solid var(--line);
-    font-size: 12px;
+    font-size: 11px;
     color: var(--ink-faint);
-    text-align: center;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
   }
   footer em {
     font-family: 'Instrument Serif', serif;
     font-style: italic;
   }
-
-  /* Anchor nav */
-  nav.toc {
-    position: sticky;
-    top: 24px;
-    margin-bottom: 32px;
-    padding: 16px 20px;
-    background: var(--cream-light);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-  }
-  nav.toc ul {
-    list-style: none;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 18px;
-  }
-  nav.toc a {
-    color: var(--ink-soft);
+  footer a {
+    color: var(--sienna-deep);
     text-decoration: none;
-    font-size: 13px;
-    font-weight: 500;
-    transition: color 120ms ease;
+    border-bottom: 1px solid var(--sienna-soft);
   }
-  nav.toc a:hover { color: var(--sienna-deep); }
-
-  /* Print styles for export */
-  @media print {
-    body { background: #fff; }
-    .card, .callout, nav.toc { break-inside: avoid; }
-  }
+  footer a:hover { border-bottom-color: var(--sienna); }
 </style>
 </head>
 <body>
 <div class="page">
 
 <header class="hero">
-  <div class="wordmark">Warmly</div>
-  <div class="tagline">AI Networking Coach — living project tracker</div>
-  <div class="meta">
-    <span class="meta-item">Updated <strong>May 14, 2026</strong></span>
-    <span class="meta-item">Branch <strong>zen-robinson-233760</strong></span>
-    <span class="meta-item">Production <strong>033f861</strong></span>
-    <span class="meta-item">Session <strong>12</strong></span>
+  <div class="hero-left">
+    <div class="wordmark">Warmly</div>
+    <div class="tagline">AI networking coach · Live tracker</div>
+  </div>
+  <div class="hero-stats">
+    <div><div class="stat-num">12</div><div class="stat-label">Sessions</div></div>
+    <div><div class="stat-num">26</div><div class="stat-label">Commits this week</div></div>
+    <div><div class="stat-num">~58%</div><div class="stat-label">MVP complete</div></div>
+    <div><div class="stat-num">May 14</div><div class="stat-label">Updated</div></div>
   </div>
 </header>
 
-<nav class="toc">
-  <ul>
-    <li><a href="#now">In progress now</a></li>
-    <li><a href="#shipped">Recently shipped</a></li>
-    <li><a href="#next">Up next</a></li>
-    <li><a href="#later">Backlog</a></li>
-    <li><a href="#cleanup">Housekeeping</a></li>
-    <li><a href="#risks">Known issues</a></li>
-    <li><a href="#decisions">Key decisions</a></li>
-    <li><a href="#commits">Recent commits</a></li>
-  </ul>
-</nav>
-
-<!-- ========================================================== -->
-<section id="now">
-  <h2 class="section-title">In progress now</h2>
-  <p class="section-intro">What I'm actively building right now. One item at a time so we don't fragment.</p>
-  <div class="cards">
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Choosing next focus area</div>
-        <div class="card-pills">
-          <span class="pill pill-progress">Deciding</span>
-        </div>
+<!-- ====================================================================== -->
+<section>
+  <div class="section-head">
+    <h2 class="section-title">The product</h2>
+    <span class="section-sub">4-step framework · % shipped</span>
+  </div>
+  <div class="pipeline">
+    <div class="pstep">
+      <div class="pstep-head">
+        <span class="pstep-name">Discover</span>
+        <span class="pstep-pct">85%</span>
       </div>
-      <div class="card-body">
-        LinkedIn AI-reply flow shipped and confirmed working. Next candidates on deck: Profile-as-artifact (Settings → Profile view), CV upload UI, or LinkedIn-side draft refinement (e.g. inline "make shorter / longer / more direct" steers next to the Warmly pill). User to direct.
-        <div class="meta-line">No active build · Awaiting direction</div>
+      <div class="pstep-bar"><div class="pstep-fill" style="width: 85%;"></div></div>
+      <ul class="pstep-items">
+        <li><span class="check done">✓</span> Chrome extension scraping</li>
+        <li><span class="check done">✓</span> LLM company disambiguation</li>
+        <li><span class="check done">✓</span> Voyager API for canonical IDs</li>
+        <li><span class="check done">✓</span> Batch ranking with rationale</li>
+        <li><span class="check partial">○</span> Tinder-style review UI</li>
+      </ul>
+    </div>
+    <div class="pstep">
+      <div class="pstep-head">
+        <span class="pstep-name">Strategize</span>
+        <span class="pstep-pct">75%</span>
       </div>
+      <div class="pstep-bar"><div class="pstep-fill" style="width: 75%;"></div></div>
+      <ul class="pstep-items">
+        <li><span class="check done">✓</span> In-LinkedIn AI drafts</li>
+        <li><span class="check done">✓</span> 5-signal voice modelling</li>
+        <li><span class="check done">✓</span> Outreach in chat (web)</li>
+        <li><span class="check partial">○</span> Chat→extension trigger artifact</li>
+        <li><span class="check todo">·</span> Approved-learnings UI</li>
+      </ul>
+    </div>
+    <div class="pstep">
+      <div class="pstep-head">
+        <span class="pstep-name">Prepare</span>
+        <span class="pstep-pct">55%</span>
+      </div>
+      <div class="pstep-bar"><div class="pstep-fill" style="width: 55%;"></div></div>
+      <ul class="pstep-items">
+        <li><span class="check done">✓</span> Meeting prep artifact</li>
+        <li><span class="check done">✓</span> Web search for company intel</li>
+        <li><span class="check done">✓</span> Meetings page in app</li>
+        <li><span class="check todo">·</span> Granola transcript import</li>
+        <li><span class="check todo">·</span> AI summary on meeting notes</li>
+      </ul>
+    </div>
+    <div class="pstep">
+      <div class="pstep-head">
+        <span class="pstep-name">Maintain</span>
+        <span class="pstep-pct">15%</span>
+      </div>
+      <div class="pstep-bar"><div class="pstep-fill" style="width: 15%;"></div></div>
+      <ul class="pstep-items">
+        <li><span class="check done">✓</span> Schema (stage, timestamps)</li>
+        <li><span class="check todo">·</span> Stage-based cadence engine</li>
+        <li><span class="check todo">·</span> Weekly nurture queue</li>
+        <li><span class="check todo">·</span> Smart override on signals</li>
+        <li><span class="check todo">·</span> Email digest</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<section>
+  <div class="section-head">
+    <h2 class="section-title">Where we are</h2>
+    <span class="section-sub">Session timeline</span>
+  </div>
+  <div class="timeline-wrap">
+    <div class="timeline">
+      <div class="timeline-line" style="--progress: 80%;"></div>
+      <div class="tnode"><div class="tdot"></div><div class="tlabel">Foundations</div><div class="tdate">Mar</div></div>
+      <div class="tnode"><div class="tdot"></div><div class="tlabel">Extension MVP</div><div class="tdate">Mar</div></div>
+      <div class="tnode"><div class="tdot"></div><div class="tlabel">AI engine</div><div class="tdate">Apr</div></div>
+      <div class="tnode"><div class="tdot"></div><div class="tlabel">Chat coach</div><div class="tdate">Apr</div></div>
+      <div class="tnode"><div class="tdot"></div><div class="tlabel">Meetings + brand</div><div class="tdate">May</div></div>
+      <div class="tnode current"><div class="tdot"></div><div class="tlabel">LinkedIn AI reply</div><div class="tdate">May ← now</div></div>
+      <div class="tnode future"><div class="tdot"></div><div class="tlabel">Onboarding v2</div><div class="tdate">Late May</div></div>
+      <div class="tnode future"><div class="tdot"></div><div class="tlabel">Tinder review</div><div class="tdate">Jun</div></div>
+      <div class="tnode future"><div class="tdot"></div><div class="tlabel">Nurture engine</div><div class="tdate">Jun</div></div>
+      <div class="tnode future"><div class="tdot"></div><div class="tlabel">IVC prep</div><div class="tdate">Jul</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<section>
+  <div class="section-head">
+    <h2 class="section-title">What's shipped</h2>
+    <span class="section-sub">Working in production</span>
+  </div>
+  <div class="feature-grid">
+    <div class="feature">
+      <div class="feature-head">
+        <span class="feature-icon">✦</span>
+        <span class="feature-name">In-LinkedIn AI reply (5-signal voice)</span>
+        <span class="pill pill-green">Shipped</span>
+      </div>
+      <div class="feature-meta">Warmly pill next to Send button · drafts in user's voice · <code>033f861</code></div>
+    </div>
+    <div class="feature">
+      <div class="feature-head">
+        <span class="feature-icon">⚯</span>
+        <span class="feature-name">Smart company resolution (voyager API)</span>
+        <span class="pill pill-green">Shipped</span>
+      </div>
+      <div class="feature-meta">Solved Bain saga + Parloa spell-check bug · <code>262811c</code></div>
+    </div>
+    <div class="feature">
+      <div class="feature-head">
+        <span class="feature-icon">▤</span>
+        <span class="feature-name">Batch contact ranking with rationale</span>
+        <span class="pill pill-green">Shipped</span>
+      </div>
+      <div class="feature-meta">Comparative LLM ranking against profile_md · ~3¢/call</div>
+    </div>
+    <div class="feature">
+      <div class="feature-head">
+        <span class="feature-icon">⌖</span>
+        <span class="feature-name">Location + function filters</span>
+        <span class="pill pill-green">Shipped</span>
+      </div>
+      <div class="feature-meta">16 cities · 12 functions · INSEAD by default</div>
+    </div>
+    <div class="feature">
+      <div class="feature-head">
+        <span class="feature-icon">◎</span>
+        <span class="feature-name">profile_md wired into every prompt</span>
+        <span class="pill pill-green">Shipped</span>
+      </div>
+      <div class="feature-meta">Auto-built on onboarding · enriches over time</div>
+    </div>
+    <div class="feature">
+      <div class="feature-head">
+        <span class="feature-icon">✧</span>
+        <span class="feature-name">Warmly editorial brand</span>
+        <span class="pill pill-green">Shipped</span>
+      </div>
+      <div class="feature-meta">Cream / sienna palette · Instrument Serif italic wordmark</div>
+    </div>
+    <div class="feature">
+      <div class="feature-head">
+        <span class="feature-icon">⬚</span>
+        <span class="feature-name">Meetings view</span>
+        <span class="pill pill-green">Shipped</span>
+      </div>
+      <div class="feature-meta">Prep + log-notes flow · meeting_prep artifact</div>
+    </div>
+    <div class="feature">
+      <div class="feature-head">
+        <span class="feature-icon">⏏</span>
+        <span class="feature-name">Onboarding wizard v1</span>
+        <span class="pill pill-amber">Partial</span>
+      </div>
+      <div class="feature-meta">Captures coach name, about, goal, style, gaps · no CV upload yet</div>
+    </div>
+    <div class="feature">
+      <div class="feature-head">
+        <span class="feature-icon">⊕</span>
+        <span class="feature-name">Chat reliability fixes</span>
+        <span class="pill pill-green">Shipped</span>
+      </div>
+      <div class="feature-meta">Error banners · empty-artifact guards · contact switching</div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<section>
+  <div class="section-head">
+    <h2 class="section-title">Next 8 weeks</h2>
+    <span class="section-sub">Effort + sequencing</span>
+  </div>
+  <div class="gantt">
+    <div class="gantt-head">
+      <div>Feature</div>
+      <div>W21</div><div>W22</div><div>W23</div><div>W24</div>
+      <div>W25</div><div>W26</div><div>W27</div><div>W28</div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">CV upload in onboarding <span class="lpill pill-amber">~1h</span></div>
+      <div class="gantt-cell gantt-fill"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">Structured target fields <span class="lpill pill-amber">~1h</span></div>
+      <div class="gantt-cell gantt-fill"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">Profile-as-artifact (Settings view) <span class="lpill pill-amber">~2h</span></div>
+      <div class="gantt-cell gantt-fill"></div><div class="gantt-cell gantt-fill"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">Voice samples upload <span class="lpill pill-amber">~2h</span></div>
+      <div class="gantt-cell"></div><div class="gantt-cell gantt-fill"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">Chat → extension trigger artifact <span class="lpill pill-amber">~6-8h</span></div>
+      <div class="gantt-cell"></div><div class="gantt-cell gantt-fill"></div><div class="gantt-cell gantt-fill"></div><div class="gantt-cell"></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">Tinder-style profile review <span class="lpill pill-amber">~4h</span></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell gantt-fill"></div><div class="gantt-cell"></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">Conversation auto-compact <span class="lpill pill-amber">~3h</span></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell gantt-fill"></div><div class="gantt-cell gantt-fill"></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">Mailto: outreach links <span class="lpill pill-amber">~1h</span></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell gantt-fill"></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">Stage-based nurture cadence engine <span class="lpill pill-amber">~6-8h</span></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell gantt-fill"></div>
+      <div class="gantt-cell gantt-fill"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">Weekly nurture digest (in-app) <span class="lpill pill-amber">~3h</span></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+      <div class="gantt-cell gantt-fill"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">Granola integration <span class="lpill pill-amber">~3h</span></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+      <div class="gantt-cell"></div><div class="gantt-cell gantt-fill"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">IVC pitch prep <span class="lpill pill-gray">v0</span></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell gantt-fill"></div><div class="gantt-cell gantt-fill"></div>
+    </div>
+    <div class="gantt-row">
+      <div class="gantt-label">Job aggregator (research only) <span class="lpill pill-gray">Q3+</span></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell"></div>
+      <div class="gantt-cell"></div><div class="gantt-cell"></div><div class="gantt-cell gantt-fill-faint"></div><div class="gantt-cell gantt-fill-faint"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================== -->
+<section>
+  <div class="section-head">
+    <h2 class="section-title">Open strategic threads</h2>
+    <span class="section-sub">Decisions needed · see <code>STRATEGY.md</code> for full</span>
+  </div>
+  <div class="threads">
+
+    <div class="thread priority">
+      <div class="thread-head">
+        <span class="thread-num">01</span>
+        <span class="thread-title">Onboarding completeness</span>
+        <span class="pill pill-amber">Decide priority</span>
+      </div>
+      <div class="thread-body">Wizard captures basics + builds profile_md. <strong>Missing:</strong> CV upload, voice samples, structured target fields, career-assessment ingestion.</div>
+      <div class="thread-rec"><strong>Recommendation:</strong> CV → targets → voice samples → assessment</div>
+    </div>
+
+    <div class="thread priority">
+      <div class="thread-head">
+        <span class="thread-num">02</span>
+        <span class="thread-title">Chat vs dashboard as primary UX</span>
+        <span class="pill pill-amber">Decide direction</span>
+      </div>
+      <div class="thread-body">Chat is great for strategy moments, bad for tactical review (25 profiles to triage). Pure chat may be wrong call.</div>
+      <div class="thread-rec"><strong>Recommendation:</strong> dashboards first + Cmd+K command bar + per-contact chats. Reduce general-chat role.</div>
+    </div>
+
+    <div class="thread">
+      <div class="thread-head">
+        <span class="thread-num">03</span>
+        <span class="thread-title">Long-conversation memory</span>
+        <span class="pill pill-blue">Plan ready</span>
+      </div>
+      <div class="thread-body">Five-layer system: rolling summarization, per-contact sessions, pinned facts, search, cross-session learnings. Auto-compact with visible chip.</div>
+      <div class="thread-rec"><strong>Recommendation:</strong> Build 1+4 first, defer 3+5.</div>
+    </div>
+
+    <div class="thread priority">
+      <div class="thread-head">
+        <span class="thread-num">04</span>
+        <span class="thread-title">Chat → extension trigger artifact</span>
+        <span class="pill pill-amber">High leverage</span>
+      </div>
+      <div class="thread-body">User says "find McKinsey alumni in Paris" → coach shows confirm card → on confirm, extension runs. Closes the loop end-to-end.</div>
+      <div class="thread-rec"><strong>Recommendation:</strong> Build the discovery_plan artifact pattern. Extends to outreach_plan, prep_plan.</div>
+    </div>
+
+    <div class="thread">
+      <div class="thread-head">
+        <span class="thread-num">05</span>
+        <span class="thread-title">Tinder-style profile review</span>
+        <span class="pill pill-blue">Ship</span>
+      </div>
+      <div class="thread-body">Swipe through scraped profiles → right saves, left skips, up = outreach now. Each swipe trains the ranker. Brand-defining moment.</div>
+      <div class="thread-rec"><strong>Recommendation:</strong> Ship in week of Jun 8. Keyboard shortcuts for power users.</div>
+    </div>
+
+    <div class="thread">
+      <div class="thread-head">
+        <span class="thread-num">07</span>
+        <span class="thread-title">Goal-driven weekly nudges</span>
+        <span class="pill pill-blue">Plan ready</span>
+      </div>
+      <div class="thread-body">"Reach out to 3 people/week" target with proactive Monday digest + mid-week nudge + Friday summary. Uses existing <code>contacts_per_week</code> field.</div>
+      <div class="thread-rec"><strong>Recommendation:</strong> In-app digest first (zero infra), email v2.</div>
+    </div>
+
+    <div class="thread">
+      <div class="thread-head">
+        <span class="thread-num">08</span>
+        <span class="thread-title">Email + calendar integration</span>
+        <span class="pill pill-amber">Phased</span>
+      </div>
+      <div class="thread-body">Phase a: <code>mailto:</code> links (1h, zero trust ask). Phase b: Gmail OAuth direct send (2 weeks, verification needed). Phase c: Outlook.</div>
+      <div class="thread-rec"><strong>Recommendation:</strong> Ship phase a now. Phase b post-100-users.</div>
+    </div>
+
+    <div class="thread">
+      <div class="thread-head">
+        <span class="thread-num">10</span>
+        <span class="thread-title">Stage-based nurture cadence</span>
+        <span class="pill pill-blue">Plan ready</span>
+      </div>
+      <div class="thread-body">Cold (d7+d21) → Warm (6w) → Engaged (2mo) → Ongoing (Q) → Dormant (re-engagement). Smart override on LinkedIn signals (promotion, role change).</div>
+      <div class="thread-rec"><strong>Recommendation:</strong> Approve the cadence model. Build basic system in W24-25.</div>
+    </div>
+
+    <div class="thread">
+      <div class="thread-head">
+        <span class="thread-num">11</span>
+        <span class="thread-title">Job opportunities aggregator</span>
+        <span class="pill pill-gray">Later</span>
+      </div>
+      <div class="thread-body">CareerGlobe + MBA-Exchange + LinkedIn Jobs → AI-score against profile_md → push 3 best weekly → tie to network for warm intros.</div>
+      <div class="thread-rec"><strong>Recommendation:</strong> Research only this quarter. Build after networking proves out.</div>
+    </div>
+
+    <div class="thread">
+      <div class="thread-head">
+        <span class="thread-num">09</span>
+        <span class="thread-title">Meeting memory</span>
+        <span class="pill pill-gray">Parked</span>
+      </div>
+      <div class="thread-body">Schema and view exist. No transcription, no AI summary. Plan: integrate with Granola when revisited (don't rebuild recording).</div>
+      <div class="thread-rec"><strong>Recommendation:</strong> Touch in W26 if time permits.</div>
     </div>
 
   </div>
 </section>
 
-<!-- ========================================================== -->
-<section id="shipped">
-  <h2 class="section-title">Recently shipped (Sessions 10–12)</h2>
-  <p class="section-intro">Working features now in production at <code>ai-networking-coach.vercel.app</code>.</p>
-  <div class="cards">
+<!-- ====================================================================== -->
+<section>
+  <div class="section-head">
+    <h2 class="section-title">The full loop (vision)</h2>
+    <span class="section-sub">Green = shipped · Amber = next · Faded = future</span>
+  </div>
+  <div class="flow">
 
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">In-LinkedIn AI reply with full voice modelling ⭐</div>
-        <div class="card-pills"><span class="pill pill-shipped">May 14</span></div>
-      </div>
-      <div class="card-body">
-        Sienna <strong>Warmly</strong> pill injected next to LinkedIn's Send button on every conversation (overlay bubble + full <code>/messaging/</code> page). Click → scrapes the thread → MiniMax generates a reply using <strong>five voice signals with explicit priority hierarchy</strong>: approved learnings (override), past finalized artifacts (gold-standard), learned writing style, profile_md, in-thread voice. Draft drops straight into LinkedIn's compose box (Quill contenteditable, fired via <code>execCommand</code> so Send enables). Self-healing — re-injects if React wipes the button.
-        <div class="meta-line">Commits <code>bbcab36</code> → <code>69bb83f</code> → <code>033f861</code> · ~1¢ per draft · Voice signals breakdown logged in console</div>
+    <div class="flow-row">
+      <div class="flow-box shipped"><strong>1. Onboard</strong>Coach name · about · goal · style</div>
+      <div class="flow-box next"><strong>1b. Upload</strong>CV · past messages · targets</div>
+      <div class="flow-box shipped"><strong>2. Build profile_md</strong>Identity + voice baseline</div>
+      <div class="flow-box future"><strong>2b. Set goal</strong>"3 reachouts / week"</div>
+      <div class="flow-box shipped"><strong>3. Install extension</strong>LinkedIn read-only</div>
     </div>
-    </div>
+    <div class="flow-arrow">↓</div>
 
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Smart company resolution with LLM disambiguation</div>
-        <div class="card-pills"><span class="pill pill-shipped">Shipped</span></div>
-      </div>
-      <div class="card-body">
-        Scrapes structured candidates from LinkedIn company search, sends to MiniMax with optional user hint ("AI agent startup"), LLM picks the right one. Low-confidence → popup picker UI. Backed by <code>company_slug_cache</code> Supabase table so repeats are instant.
-        <div class="meta-line">Commits <code>7c27680</code>, <code>eb1a7e8</code>, <code>3d59a22</code></div>
-      </div>
+    <div class="flow-row">
+      <div class="flow-box future"><strong>4. Coach proposes</strong>"Try McKinsey alumni in Paris?"</div>
+      <div class="flow-box shipped"><strong>5. Discover</strong>Extension scrapes 25 profiles</div>
+      <div class="flow-box shipped"><strong>6. Rank</strong>LLM batch-scores all candidates</div>
+      <div class="flow-box next"><strong>7. Triage</strong>Tinder swipe deck</div>
+      <div class="flow-box shipped"><strong>8. Save</strong>Contact cards created</div>
     </div>
+    <div class="flow-arrow">↓</div>
 
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Voyager API → real company URN (Bain saga fix)</div>
-        <div class="card-pills"><span class="pill pill-shipped">Shipped</span></div>
-      </div>
-      <div class="card-body">
-        After 6 failed iterations on scraping the global company URN from the company page, switched to LinkedIn's internal voyager API (<code>/voyager/api/organization/companies?q=universalName</code>) called via CDP from inside the LinkedIn tab. Root cause finally surfaced: <code>\d{5,12}</code> regex was rejecting 4-digit IDs (Bain is 2114). Relaxed everywhere.
-        <div class="meta-line">Commits <code>e0ee35a</code> → <code>f39ee98</code> · Lesson: instrument before guessing</div>
-      </div>
+    <div class="flow-row">
+      <div class="flow-box shipped"><strong>9. Draft outreach</strong>In-app or in LinkedIn</div>
+      <div class="flow-box shipped"><strong>10. Send</strong>LinkedIn DM or <code>mailto:</code></div>
+      <div class="flow-box shipped"><strong>11. Prep meeting</strong>Brief + intel from web</div>
+      <div class="flow-box future"><strong>12. Capture notes</strong>via Granola</div>
+      <div class="flow-box future"><strong>13. Nurture</strong>Stage-based cadence</div>
     </div>
+    <div class="flow-arrow">↓</div>
 
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Batch contact ranking with rationale</div>
-        <div class="card-pills"><span class="pill pill-shipped">Shipped</span></div>
-      </div>
-      <div class="card-body">
-        New <code>/api/ai/rank-batch</code> sends all discovered contacts to MiniMax REASONING in ONE call, compares them against each other AND against user's <code>profile_md</code>, returns top-N with per-pick reasoning ("Picked because: shared INSEAD class, same Bain → growth VC pivot, Paris-based").
-        <div class="meta-line">Commit <code>f036568</code> · ~3¢ per call · Also fixed pre-existing apiFetch envelope bug</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Location + function filters in discovery popup</div>
-        <div class="card-pills"><span class="pill pill-shipped">Shipped</span></div>
-      </div>
-      <div class="card-body">
-        16 cities mapped to LinkedIn geoUrns (Paris=105015875, etc.), 12 functions mapped to search keywords. Keywords are more precise than industry codes — they match person titles, not company industries.
-        <div class="meta-line">Commit <code>3ac1999</code> · File: <code>extension/shared/linkedin-filters.ts</code></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">profile_md fully wired into coach</div>
-        <div class="card-pills"><span class="pill pill-shipped">Shipped</span></div>
-      </div>
-      <div class="card-body">
-        Auto-built on onboarding completion via MiniMax. Injected into coaching prompt, outreach prompt, meeting prep prompt. Agent finally knows who the user is without re-asking. Markdown stored in <code>users.profile_md</code>.
-        <div class="meta-line">Commits <code>b497555</code>, <code>2506701</code></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Warmly editorial branding restored</div>
-        <div class="card-pills"><span class="pill pill-shipped">Shipped</span></div>
-      </div>
-      <div class="card-body">
-        Cream/sienna palette, Instrument Serif italic wordmark, T-tokens design system. Applied to extension popup, web app, all new UI elements.
-        <div class="meta-line">Commit <code>adfbc04</code></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Chat reliability fixes</div>
-        <div class="card-pills"><span class="pill pill-shipped">Shipped</span></div>
-      </div>
-      <div class="card-body">
-        Silent chat failures now show a contextual error banner with Retry. Empty artifact cards eliminated — LLM field-fallback hoisting (note/body/draft → message) + post-sanitize empty guard. "Open session" switching between contacts works correctly.
-        <div class="meta-line">Commits <code>a5c731d</code>, <code>aff9c6f</code>, <code>4f0b98f</code>, <code>ce232c0</code></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Meetings view + onboarding gate</div>
-        <div class="card-pills"><span class="pill pill-shipped">Shipped</span></div>
-      </div>
-      <div class="card-body">
-        Dedicated Meetings page with prep / log-notes flow. Onboarding gate blocks app access until user completes the wizard. Contact detail polish (relationship stage chips, follow-up CTAs).
-        <div class="meta-line">Shipped Session 10 · Already on main</div>
-      </div>
+    <div class="flow-row">
+      <div class="flow-box future"><strong>14. Re-engage</strong>Dormant alerts</div>
+      <div class="flow-box future"><strong>15. Warm intros</strong>"Alum at Stripe — ask?"</div>
+      <div class="flow-box future"><strong>16. Job matches</strong>vs. user goals</div>
+      <div class="flow-box future"><strong>17. Tier-gated</strong>Pro features unlock</div>
+      <div class="flow-box future"><strong>18. Compound</strong>Voice + ranker get sharper</div>
     </div>
 
   </div>
 </section>
 
-<!-- ========================================================== -->
-<section id="next">
-  <h2 class="section-title">Up next</h2>
-  <p class="section-intro">Ordered by user impact. We work top-down — finish one before opening the next.</p>
-  <div class="cards">
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Conversation history Phase 2 — backend + prompt integration</div>
-        <div class="card-pills"><span class="pill pill-next">Next</span></div>
-      </div>
-      <div class="card-body">
-        Once Phase 1 DOM is verified: migration for <code>contacts.linkedin_messages</code> JSONB column, <code>POST /api/contacts/[id]/messages</code> endpoint, service-worker forwarder, outreach prompt injection so the coach reads thread history when drafting follow-ups.
-        <div class="meta-line">Est. ~3h after Phase 1 lands</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Profile as editable artifact (Settings → Profile view)</div>
-        <div class="card-pills"><span class="pill pill-next">Next</span></div>
-      </div>
-      <div class="card-body">
-        New Settings sidebar entry. Renders <code>users.profile_md</code> as beautiful markdown. Edit button → textarea → Save. "Rebuild from onboarding answers" button. "Update via chat" button opens enrichment chat.
-        <div class="meta-line">Est. ~2h · Decision: keep profile user-scoped, NOT in contact-artifacts table</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">CV upload UI</div>
-        <div class="card-pills"><span class="pill pill-next">Next</span></div>
-      </div>
-      <div class="card-body">
-        <code>buildInitialProfile()</code> already accepts <code>cv_text</code>, but there's no upload form. Add as second tab inside Settings → Profile. Parse PDF/DOCX via simple text extraction.
-        <div class="meta-line">Est. ~1h after Profile view exists</div>
-      </div>
-    </div>
-
+<!-- ====================================================================== -->
+<section>
+  <div class="section-head">
+    <h2 class="section-title">Recent activity</h2>
+    <span class="section-sub">Latest commits</span>
   </div>
-</section>
-
-<!-- ========================================================== -->
-<section id="later">
-  <h2 class="section-title">Backlog</h2>
-  <p class="section-intro">Important but not urgent. Revisit between major features.</p>
-  <div class="cards">
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Maintain step — relationship reminders + nudges</div>
-        <div class="card-pills"><span class="pill pill-later">Later</span></div>
-      </div>
-      <div class="card-body">
-        The 4th of the 4-step framework. Lightweight reminder system based on <code>last_interaction_at</code> timestamps. Stage transitions (Cold → Warm → Engaged → Ongoing). Stage column exists on <code>contacts</code> table but no UI to manage it.
-        <div class="meta-line">PRD scope. Deserves a dedicated session.</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">"Save search" + scheduled discovery</div>
-        <div class="card-pills"><span class="pill pill-later">Later</span></div>
-      </div>
-      <div class="card-body">
-        Let user re-run "Bain + INSEAD + Paris" without retyping. Schedule runs for tomorrow given rate-limit cooldown.
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Professional tier feature differentiation</div>
-        <div class="card-pills"><span class="pill pill-later">Later</span></div>
-      </div>
-      <div class="card-body">
-        Open question from Session 1: "I'm struggling to see how we distinguish the professional tier." Needs strategy work, not engineering.
-        <div class="meta-line">Strategic, not implementation</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">PostHog analytics integration</div>
-        <div class="card-pills"><span class="pill pill-later">Later</span></div>
-      </div>
-      <div class="card-body">
-        Per CLAUDE.md: "add later, not blocking." Wire up once we have testers and need usage signal.
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Mobile responsive (v2)</div>
-        <div class="card-pills"><span class="pill pill-later">v2</span></div>
-      </div>
-      <div class="card-body">
-        Deferred per PRD. Web-first, laptop screens for MVP.
-      </div>
-    </div>
-
-  </div>
-</section>
-
-<!-- ========================================================== -->
-<section id="cleanup">
-  <h2 class="section-title">Housekeeping</h2>
-  <p class="section-intro">Quick wins. Knock these out between feature work.</p>
-  <div class="cards">
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Apply slug-cache migration to production Supabase</div>
-        <div class="card-pills"><span class="pill pill-cleanup">Housekeeping</span></div>
-      </div>
-      <div class="card-body">
-        Migration <code>20260512000000_add_company_id_to_slug_cache.sql</code> adds <code>resolved_company_id</code> column. Until applied, cache writes fail silently. One ALTER TABLE in the Supabase SQL editor.
-        <div class="meta-line">5 min · Your action</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Clean up [CDP DIAG] logs in service worker</div>
-        <div class="card-pills"><span class="pill pill-cleanup">Housekeeping</span></div>
-      </div>
-      <div class="card-body">
-        The voyager-debugging instrumentation worked, can be downgraded to <code>console.debug</code> behind a verbose flag or removed.
-        <div class="meta-line">20 min</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Onboarding right-panel uses real profile_md preview</div>
-        <div class="card-pills"><span class="pill pill-cleanup">Polish</span></div>
-      </div>
-      <div class="card-body">
-        Currently renders from local answers. After completion, fetch the actually-built <code>profile_md</code>. Truthfulness, not blocker.
-      </div>
-    </div>
-
-  </div>
-</section>
-
-<!-- ========================================================== -->
-<section id="risks">
-  <h2 class="section-title">Known issues / risks</h2>
-  <p class="section-intro">Things that work but could break, or quirks we know about.</p>
-  <div class="cards">
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">LinkedIn DOM is moving target</div>
-        <div class="card-pills"><span class="pill pill-risk">Risk</span></div>
-      </div>
-      <div class="card-body">
-        Selectors break when LinkedIn rebuilds components. We mitigate with multi-fallback selector chains (8 levels deep in <code>dom-reader.ts</code>), but a full LinkedIn React rewrite would force a rescue mission. Watch for: messaging DOM (Phase 1 in progress), search results, profile page.
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">LinkedIn rate-limit detection</div>
-        <div class="card-pills"><span class="pill pill-risk">Risk</span></div>
-      </div>
-      <div class="card-body">
-        We rate-limit ourselves (25 profiles/session, 2 sessions/day) but if LinkedIn shadow-throttles or shows CAPTCHA we currently don't detect or surface that gracefully. Hit-the-wall UX needs design.
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">Single-user dev mode</div>
-        <div class="card-pills"><span class="pill pill-risk">Risk</span></div>
-      </div>
-      <div class="card-body">
-        Auth via Supabase is wired but multi-user flows haven't been battle-tested. RLS policies exist but need an audit before any real user invites.
-      </div>
-    </div>
-
-  </div>
-</section>
-
-<!-- ========================================================== -->
-<section id="decisions">
-  <h2 class="section-title">Key decisions (do not override)</h2>
-  <div>
-
-    <div class="callout">
-      <div class="callout-title">Chat-first interface</div>
-      <div class="callout-body">Primary interaction is conversation with an AI agent, not a dashboard. Contacts and Goals are outcome views displaying results of conversations.</div>
-    </div>
-
-    <div class="callout">
-      <div class="callout-title">Session-per-contact architecture</div>
-      <div class="callout-body">Each contact gets a dedicated chat thread. General Chat for strategy/discovery; Contact Sessions for working on specific people. Artifacts produced in a session attach to that contact's permanent profile card.</div>
-    </div>
-
-    <div class="callout">
-      <div class="callout-title">Browser companion, not API</div>
-      <div class="callout-body">Chrome Extension Manifest V3 running in user's own session. No third-party data APIs. Proxycurl was sued; Apollo and Seamless were banned. Browser companion is the only safe architecture (hiQ Labs precedent).</div>
-    </div>
-
-    <div class="callout">
-      <div class="callout-title">MiniMax for LLM (replaces Claude)</div>
-      <div class="callout-body">FAST tier for scoring/simple, REASONING for complex. Structured JSON outputs everywhere. Rolling summarization for long conversations.</div>
-    </div>
-
-    <div class="callout">
-      <div class="callout-title">profile_md as the user's identity narrative</div>
-      <div class="callout-body">Markdown stored on <code>users.profile_md</code>. Built once from onboarding, enriched over time. Injected into every prompt so the coach knows the user. Will be surfaced as editable artifact in Settings view (next).</div>
-    </div>
-
-    <div class="callout">
-      <div class="callout-title">Diagnostic-first when iteration fails</div>
-      <div class="callout-body">When a fix iteration fails, INSTRUMENT before guessing. The Bain saga (6 failed attempts) was finally solved by adding [CDP DIAG] logs — the next test surfaced the exact 1-line bug. Pattern adopted for all future debug sessions.</div>
-    </div>
-
-    <div class="callout">
-      <div class="callout-title">Voice flywheel — pull every signal, not just the latest</div>
-      <div class="callout-body">When generating any draft in the user's voice, we pull ALL voice signals: approved learnings (override everything), past finalized artifacts (gold-standard), learned writing_style, profile_md, in-thread voice. Each signal type has different trust weight, made explicit in the prompt. The product gets sharper with every artifact the user finalizes — no code changes needed.</div>
-    </div>
-
-  </div>
-</section>
-
-<!-- ========================================================== -->
-<section id="commits">
-  <h2 class="section-title">Recent commits</h2>
-  <p class="section-intro">Last 20 commits on the active branch.</p>
-  <div class="commits">
-    <div class="commit"><span class="commit-hash">033f861</span><span class="commit-msg"><strong>feat(ai):</strong> draft-reply pulls ALL voice signals, not just thread messages</span></div>
-    <div class="commit"><span class="commit-hash">69bb83f</span><span class="commit-msg"><strong>feat(extension):</strong> inject draft directly into LinkedIn compose box</span></div>
-    <div class="commit"><span class="commit-hash">bbcab36</span><span class="commit-msg"><strong>feat(extension):</strong> draft LinkedIn reply with Warmly button</span></div>
-    <div class="commit"><span class="commit-hash">2a57400</span><span class="commit-msg"><strong>docs:</strong> log Session 11 — discovery refinements + the Bain ID saga</span></div>
-    <div class="commit"><span class="commit-hash">f39ee98</span><span class="commit-msg"><strong>fix(discovery):</strong> allow 2-12 digit company IDs (Bain is 2114, not 5+ digits)</span></div>
-    <div class="commit"><span class="commit-hash">70deb7f</span><span class="commit-msg"><strong>diag(extension):</strong> instrument CDP_DISCOVER critical section</span></div>
-    <div class="commit"><span class="commit-hash">d36b319</span><span class="commit-msg"><strong>fix(discovery):</strong> resolve slug → company ID via LinkedIn voyager API</span></div>
-    <div class="commit"><span class="commit-hash">e0ee35a</span><span class="commit-msg"><strong>fix(discovery):</strong> extract company URN at scrape time, not from company page</span></div>
-    <div class="commit"><span class="commit-hash">3c590ee</span><span class="commit-msg"><strong>fix(extension):</strong> navigate to /company/SLUG/about/ for ID extraction</span></div>
-    <div class="commit"><span class="commit-hash">0294141</span><span class="commit-msg"><strong>fix(extension):</strong> extract company ID from deeplink meta tags, not body URNs</span></div>
-    <div class="commit"><span class="commit-hash">e1d3021</span><span class="commit-msg"><strong>fix(extension):</strong> match all 3 LinkedIn URN formats + wait for h1 before scrape</span></div>
-    <div class="commit"><span class="commit-hash">6c9d19f</span><span class="commit-msg"><strong>fix(extension):</strong> extract MAIN company ID, not first sidebar reference</span></div>
-    <div class="commit"><span class="commit-hash">eb1a7e8</span><span class="commit-msg"><strong>feat(discovery):</strong> smarter resolve-company + zero-result fallback + cache-on-pick</span></div>
-    <div class="commit"><span class="commit-hash">adfbc04</span><span class="commit-msg"><strong>fix(extension):</strong> restore Warmly branding + LLM disambiguation actually works</span></div>
-    <div class="commit"><span class="commit-hash">3d59a22</span><span class="commit-msg"><strong>fix(extension):</strong> always go LLM-first for company resolution + visible hint label</span></div>
-    <div class="commit"><span class="commit-hash">3ac1999</span><span class="commit-msg"><strong>feat(extension):</strong> add location + function filters to discovery popup</span></div>
-    <div class="commit"><span class="commit-hash">f036568</span><span class="commit-msg"><strong>feat(coach):</strong> batch contact ranking with profile_md + per-pick rationale</span></div>
-    <div class="commit"><span class="commit-hash">7c27680</span><span class="commit-msg"><strong>feat(extension):</strong> smart company resolution with LLM disambiguation</span></div>
-    <div class="commit"><span class="commit-hash">a8bd0e8</span><span class="commit-msg"><strong>docs:</strong> log Session 10 — Meetings + editorial refresh + profile_md wiring</span></div>
-    <div class="commit"><span class="commit-hash">2506701</span><span class="commit-msg"><strong>fix(coach):</strong> drop cross-thread excerpt now that profile_md is wired</span></div>
-    <div class="commit"><span class="commit-hash">ce232c0</span><span class="commit-msg"><strong>fix(chat):</strong> switch contact sessions correctly via Open session button</span></div>
-  </div>
+  <details class="commits-box">
+    <summary>Show 20 most recent commits</summary>
+    <div class="commit"><span class="commit-hash">262811c</span><span class="commit-msg">fix(discovery): disable LinkedIn auto-spell-correct in company search</span></div>
+    <div class="commit"><span class="commit-hash">e9c1f93</span><span class="commit-msg">feat(extension): rename to "Warmly" and place next to Send button</span></div>
+    <div class="commit"><span class="commit-hash">033f861</span><span class="commit-msg">feat(ai): draft-reply pulls ALL voice signals, not just thread messages</span></div>
+    <div class="commit"><span class="commit-hash">69bb83f</span><span class="commit-msg">feat(extension): inject draft directly into LinkedIn compose box</span></div>
+    <div class="commit"><span class="commit-hash">bbcab36</span><span class="commit-msg">feat(extension): draft LinkedIn reply with Warmly button</span></div>
+    <div class="commit"><span class="commit-hash">2a57400</span><span class="commit-msg">docs: log Session 11 — discovery refinements + the Bain ID saga</span></div>
+    <div class="commit"><span class="commit-hash">f39ee98</span><span class="commit-msg">fix(discovery): allow 2-12 digit company IDs (Bain is 2114)</span></div>
+    <div class="commit"><span class="commit-hash">70deb7f</span><span class="commit-msg">diag(extension): instrument CDP_DISCOVER critical section</span></div>
+    <div class="commit"><span class="commit-hash">d36b319</span><span class="commit-msg">fix(discovery): resolve slug → company ID via LinkedIn voyager API</span></div>
+    <div class="commit"><span class="commit-hash">e0ee35a</span><span class="commit-msg">fix(discovery): extract company URN at scrape time</span></div>
+    <div class="commit"><span class="commit-hash">eb1a7e8</span><span class="commit-msg">feat(discovery): smarter resolve-company + cache-on-pick</span></div>
+    <div class="commit"><span class="commit-hash">adfbc04</span><span class="commit-msg">fix(extension): restore Warmly branding</span></div>
+    <div class="commit"><span class="commit-hash">3ac1999</span><span class="commit-msg">feat(extension): add location + function filters</span></div>
+    <div class="commit"><span class="commit-hash">f036568</span><span class="commit-msg">feat(coach): batch contact ranking with profile_md + per-pick rationale</span></div>
+    <div class="commit"><span class="commit-hash">7c27680</span><span class="commit-msg">feat(extension): smart company resolution with LLM disambiguation</span></div>
+    <div class="commit"><span class="commit-hash">a8bd0e8</span><span class="commit-msg">docs: log Session 10 — Meetings + editorial refresh + profile_md wiring</span></div>
+    <div class="commit"><span class="commit-hash">b497555</span><span class="commit-msg">feat(coach): wire profile_md so the agent actually has memory</span></div>
+    <div class="commit"><span class="commit-hash">4f0b98f</span><span class="commit-msg">fix(ai): empty-artifact guard + log raw LLM output</span></div>
+    <div class="commit"><span class="commit-hash">ce232c0</span><span class="commit-msg">fix(chat): switch contact sessions correctly</span></div>
+    <div class="commit"><span class="commit-hash">2506701</span><span class="commit-msg">fix(coach): drop cross-thread excerpt now that profile_md is wired</span></div>
+  </details>
 </section>
 
 <footer>
-  <em>This file is updated by hand after each material change. Open <code>docs/STATUS.html</code> directly in any browser.</em>
+  <span><em>Living tracker</em> · open <code>docs/STATUS.html</code> in any browser · companion: <a href="STRATEGY.md">STRATEGY.md</a> for full decision register</span>
+  <span>Updated by hand after each material change</span>
 </footer>
 
 </div>
