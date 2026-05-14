@@ -241,9 +241,9 @@
   <div class="wordmark">Warmly</div>
   <div class="tagline">AI Networking Coach — living project tracker</div>
   <div class="meta">
-    <span class="meta-item">Updated <strong>May 13, 2026</strong></span>
+    <span class="meta-item">Updated <strong>May 14, 2026</strong></span>
     <span class="meta-item">Branch <strong>zen-robinson-233760</strong></span>
-    <span class="meta-item">Production <strong>f39ee98</strong></span>
+    <span class="meta-item">Production <strong>033f861</strong></span>
     <span class="meta-item">Session <strong>12</strong></span>
   </div>
 </header>
@@ -269,14 +269,14 @@
 
     <div class="card">
       <div class="card-head">
-        <div class="card-title">LinkedIn conversation history capture — Phase 1 (diagnostic)</div>
+        <div class="card-title">Choosing next focus area</div>
         <div class="card-pills">
-          <span class="pill pill-progress">In progress</span>
+          <span class="pill pill-progress">Deciding</span>
         </div>
       </div>
       <div class="card-body">
-        Inject a "Save to Warmly" button into LinkedIn message threads (both overlay bubble and full <code>/messaging/</code> page). On click, scroll-load history and dump structured messages to console with <code>[MSG DIAG]</code> tags. Phase 1 is diagnostic-only — no backend wiring until we verify the DOM extraction works on real threads.
-        <div class="meta-line">Files: <code>extension/content-script/messaging.ts</code> (new), <code>extension/content-script/index.ts</code> · Blocker: waiting on user to test on a real thread and paste console output</div>
+        LinkedIn AI-reply flow shipped and confirmed working. Next candidates on deck: Profile-as-artifact (Settings → Profile view), CV upload UI, or LinkedIn-side draft refinement (e.g. inline "make shorter / longer / more direct" steers next to the Warmly pill). User to direct.
+        <div class="meta-line">No active build · Awaiting direction</div>
       </div>
     </div>
 
@@ -285,9 +285,20 @@
 
 <!-- ========================================================== -->
 <section id="shipped">
-  <h2 class="section-title">Recently shipped (Sessions 10–11)</h2>
+  <h2 class="section-title">Recently shipped (Sessions 10–12)</h2>
   <p class="section-intro">Working features now in production at <code>ai-networking-coach.vercel.app</code>.</p>
   <div class="cards">
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">In-LinkedIn AI reply with full voice modelling ⭐</div>
+        <div class="card-pills"><span class="pill pill-shipped">May 14</span></div>
+      </div>
+      <div class="card-body">
+        Sienna <strong>Warmly</strong> pill injected next to LinkedIn's Send button on every conversation (overlay bubble + full <code>/messaging/</code> page). Click → scrapes the thread → MiniMax generates a reply using <strong>five voice signals with explicit priority hierarchy</strong>: approved learnings (override), past finalized artifacts (gold-standard), learned writing style, profile_md, in-thread voice. Draft drops straight into LinkedIn's compose box (Quill contenteditable, fired via <code>execCommand</code> so Send enables). Self-healing — re-injects if React wipes the button.
+        <div class="meta-line">Commits <code>bbcab36</code> → <code>69bb83f</code> → <code>033f861</code> · ~1¢ per draft · Voice signals breakdown logged in console</div>
+    </div>
+    </div>
 
     <div class="card">
       <div class="card-head">
@@ -595,7 +606,12 @@
 
     <div class="callout">
       <div class="callout-title">Diagnostic-first when iteration fails</div>
-      <div class="callout-body">When a fix iteration fails, INSTRUMENT before guessing. The Bain saga (6 failed attempts) was finally solved by adding [CDP DIAG] logs — the next test surfaced the exact 1-line bug. Pattern adopted for all future debug sessions, including current messaging Phase 1.</div>
+      <div class="callout-body">When a fix iteration fails, INSTRUMENT before guessing. The Bain saga (6 failed attempts) was finally solved by adding [CDP DIAG] logs — the next test surfaced the exact 1-line bug. Pattern adopted for all future debug sessions.</div>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">Voice flywheel — pull every signal, not just the latest</div>
+      <div class="callout-body">When generating any draft in the user's voice, we pull ALL voice signals: approved learnings (override everything), past finalized artifacts (gold-standard), learned writing_style, profile_md, in-thread voice. Each signal type has different trust weight, made explicit in the prompt. The product gets sharper with every artifact the user finalizes — no code changes needed.</div>
     </div>
 
   </div>
@@ -606,6 +622,9 @@
   <h2 class="section-title">Recent commits</h2>
   <p class="section-intro">Last 20 commits on the active branch.</p>
   <div class="commits">
+    <div class="commit"><span class="commit-hash">033f861</span><span class="commit-msg"><strong>feat(ai):</strong> draft-reply pulls ALL voice signals, not just thread messages</span></div>
+    <div class="commit"><span class="commit-hash">69bb83f</span><span class="commit-msg"><strong>feat(extension):</strong> inject draft directly into LinkedIn compose box</span></div>
+    <div class="commit"><span class="commit-hash">bbcab36</span><span class="commit-msg"><strong>feat(extension):</strong> draft LinkedIn reply with Warmly button</span></div>
     <div class="commit"><span class="commit-hash">2a57400</span><span class="commit-msg"><strong>docs:</strong> log Session 11 — discovery refinements + the Bain ID saga</span></div>
     <div class="commit"><span class="commit-hash">f39ee98</span><span class="commit-msg"><strong>fix(discovery):</strong> allow 2-12 digit company IDs (Bain is 2114, not 5+ digits)</span></div>
     <div class="commit"><span class="commit-hash">70deb7f</span><span class="commit-msg"><strong>diag(extension):</strong> instrument CDP_DISCOVER critical section</span></div>
@@ -624,8 +643,6 @@
     <div class="commit"><span class="commit-hash">a8bd0e8</span><span class="commit-msg"><strong>docs:</strong> log Session 10 — Meetings + editorial refresh + profile_md wiring</span></div>
     <div class="commit"><span class="commit-hash">2506701</span><span class="commit-msg"><strong>fix(coach):</strong> drop cross-thread excerpt now that profile_md is wired</span></div>
     <div class="commit"><span class="commit-hash">ce232c0</span><span class="commit-msg"><strong>fix(chat):</strong> switch contact sessions correctly via Open session button</span></div>
-    <div class="commit"><span class="commit-hash">4f0b98f</span><span class="commit-msg"><strong>fix(ai):</strong> empty-artifact guard + log raw LLM output + strip dashes in coaching</span></div>
-    <div class="commit"><span class="commit-hash">b497555</span><span class="commit-msg"><strong>feat(coach):</strong> wire profile_md so the agent actually has memory</span></div>
   </div>
 </section>
 

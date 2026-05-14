@@ -101,6 +101,22 @@ const MSG_SELECTORS = {
     ".msg-form__placeholder",
     ".msg-form__contenteditable p.ql-editor-placeholder",
   ],
+  // LinkedIn's Send button — we inject our Warmly pill RIGHT NEXT to
+  // this one so it's the last thing the user sees before sending.
+  sendButton: [
+    "button.msg-form__send-button",
+    ".msg-form__send-btn",
+    "button[type='submit'].msg-form__send-button",
+    ".msg-form button[type='submit']",
+  ],
+  // The compose form footer that contains the Send button + action
+  // buttons (attach, emoji, etc.). Used as a fallback parent if we
+  // can't find the Send button directly.
+  composeFooter: [
+    ".msg-form__right-actions",
+    ".msg-form__footer",
+    ".msg-form__msg-content-container__action-buttons",
+  ],
 };
 
 // CSS class used to identify our injected buttons. We check for the
@@ -358,25 +374,64 @@ function extractParticipant(scope: ParentNode): {
 function createButton(): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.className = BUTTON_CLASS;
-  btn.textContent = "Draft reply with Warmly";
   btn.type = "button";
+  btn.title = "Draft a reply with Warmly using your voice + history";
+
+  // Sienna pill with Instrument-Serif "Warmly" wordmark to match the
+  // brand on the web app and popup. We use a child <span> rather than
+  // innerHTML so no untrusted strings are injected.
+  const wordmark = document.createElement("span");
+  wordmark.textContent = "Warmly";
+  Object.assign(wordmark.style, {
+    fontFamily: "'Instrument Serif', Georgia, serif",
+    fontStyle: "italic",
+    fontSize: "15px",
+    letterSpacing: "-0.01em",
+    lineHeight: "1",
+  } satisfies Partial<CSSStyleDeclaration>);
+  btn.appendChild(wordmark);
+
   Object.assign(btn.style, {
     background: "#b87a4a",
     color: "#fff",
     border: "none",
     borderRadius: "999px",
     padding: "6px 14px",
-    fontSize: "12px",
-    fontWeight: "500",
+    height: "32px",
+    display: "inline-flex",
+    alignItems: "center",
     cursor: "pointer",
-    marginLeft: "8px",
+    marginRight: "8px",
     fontFamily: "system-ui, -apple-system, sans-serif",
-    transition: "opacity 150ms ease",
-    zIndex: "10",
+    transition: "opacity 150ms ease, background 150ms ease",
+    flexShrink: "0",
   } satisfies Partial<CSSStyleDeclaration>);
-  btn.addEventListener("mouseenter", () => (btn.style.opacity = "0.85"));
+  btn.addEventListener("mouseenter", () => (btn.style.opacity = "0.88"));
   btn.addEventListener("mouseleave", () => (btn.style.opacity = "1"));
   return btn;
+}
+
+/**
+ * Replace the button's content with a status word. Re-uses the same
+ * wordmark span so we don't lose the styling. The Warmly wordmark
+ * is restored after the status timeout via setButtonIdle().
+ */
+function setButtonStatus(btn: HTMLButtonElement, text: string): void {
+  btn.textContent = text;
+}
+
+function setButtonIdle(btn: HTMLButtonElement): void {
+  btn.textContent = "";
+  const wordmark = document.createElement("span");
+  wordmark.textContent = "Warmly";
+  Object.assign(wordmark.style, {
+    fontFamily: "'Instrument Serif', Georgia, serif",
+    fontStyle: "italic",
+    fontSize: "15px",
+    letterSpacing: "-0.01em",
+    lineHeight: "1",
+  } satisfies Partial<CSSStyleDeclaration>);
+  btn.appendChild(wordmark);
 }
 
 /**
@@ -398,10 +453,20 @@ function findOwningPanel(container: Element): ParentNode {
 }
 
 /**
- * Inject a "Save to Warmly" button for the given thread container.
- * Idempotent — checks if our button is already present in the owning
- * panel, skips re-injection if so. If LinkedIn's React re-renders the
- * header and wipes our button, the next poll re-injects.
+ * Inject the Warmly pill into a thread's compose area, right next to
+ * LinkedIn's Send button. Idempotent — checks if our button already
+ * exists in the owning panel and skips if so. If LinkedIn's React
+ * re-renders the compose footer and wipes our button, the next poll
+ * re-injects.
+ *
+ * Three placement strategies, tried in order:
+ *   1. Direct sibling of LinkedIn's Send button (preferred — visually
+ *      paired with Send)
+ *   2. Inside the compose footer / right-actions container, prepended
+ *      so we sit BEFORE Send
+ *   3. Floating bottom-right of the thread container (last resort)
+ *
+ * The first two are what the user sees as "next to Send".
  */
 function injectButtonForContainer(container: Element): void {
   const panel = findOwningPanel(container);
@@ -416,49 +481,53 @@ function injectButtonForContainer(container: Element): void {
     void handleCaptureClick(ev, container);
   });
 
-  // Try to find a header element within the bubble/page containing
-  // this thread. Walk up until we find any element with a header-like
-  // selector match, then drop the button there.
-  let inserted = false;
-  let cur: Element | null = container.parentElement;
-  while (cur && cur !== document.body) {
-    for (const sel of MSG_SELECTORS.threadHeader) {
-      try {
-        const headerEl = cur.querySelector(sel);
-        if (headerEl) {
-          headerEl.appendChild(btn);
-          console.log(
-            `${TAG} button injected into header matching: ${sel}`
-          );
-          inserted = true;
-          break;
-        }
-      } catch {
-        // skip
-      }
-    }
-    if (inserted) break;
-    cur = cur.parentElement;
+  // Strategy 1: insert as a direct sibling of the Send button.
+  // This is the "next to Send" placement the user asked for.
+  const { el: sendBtn, selectorUsed: sendSel } = querySelectorWithChain(
+    MSG_SELECTORS.sendButton,
+    panel
+  );
+  if (sendBtn?.parentElement) {
+    sendBtn.parentElement.insertBefore(btn, sendBtn);
+    console.log(
+      `${TAG} button injected next to Send (selector: ${sendSel})`
+    );
+    return;
   }
 
-  // Last-resort: absolute-position the button at top of the container.
-  if (!inserted) {
-    console.warn(`${TAG} no header found, using absolute fallback`);
-    const wrapper = document.createElement("div");
-    Object.assign(wrapper.style, {
-      position: "absolute",
-      top: "4px",
-      right: "8px",
-      zIndex: "1000",
-    } satisfies Partial<CSSStyleDeclaration>);
-    wrapper.appendChild(btn);
-
-    const containerStyle = window.getComputedStyle(container);
-    if (containerStyle.position === "static") {
-      (container as HTMLElement).style.position = "relative";
-    }
-    container.appendChild(wrapper);
+  // Strategy 2: insert into the compose footer / right-actions area.
+  // Prepend so we appear before Send if it renders later.
+  const { el: footer, selectorUsed: footerSel } = querySelectorWithChain(
+    MSG_SELECTORS.composeFooter,
+    panel
+  );
+  if (footer) {
+    footer.insertBefore(btn, footer.firstChild);
+    console.log(
+      `${TAG} button injected into compose footer (selector: ${footerSel})`
+    );
+    return;
   }
+
+  // Strategy 3 (fallback): float next to the bottom-right of the
+  // thread container so the user can still reach it.
+  console.warn(
+    `${TAG} couldn't find Send button or compose footer — using floating fallback`
+  );
+  const wrapper = document.createElement("div");
+  Object.assign(wrapper.style, {
+    position: "absolute",
+    bottom: "12px",
+    right: "60px",
+    zIndex: "1000",
+  } satisfies Partial<CSSStyleDeclaration>);
+  wrapper.appendChild(btn);
+
+  const containerStyle = window.getComputedStyle(container);
+  if (containerStyle.position === "static") {
+    (container as HTMLElement).style.position = "relative";
+  }
+  container.appendChild(wrapper);
 }
 
 async function handleCaptureClick(
@@ -469,10 +538,9 @@ async function handleCaptureClick(
   ev.stopPropagation();
 
   const btn = ev.currentTarget as HTMLButtonElement;
-  const originalText = btn.textContent;
   const originalBg = btn.style.background;
   btn.disabled = true;
-  btn.textContent = "Reading thread...";
+  setButtonStatus(btn, "Reading...");
 
   let captured: CapturedThread;
   try {
@@ -485,14 +553,14 @@ async function handleCaptureClick(
   } catch (err) {
     console.error(`${TAG} capture failed`, err);
     btn.disabled = false;
-    btn.textContent = originalText;
+    setButtonIdle(btn);
     showErrorToast(
       "Couldn't read the thread. Try scrolling through it once, then click again."
     );
     return;
   }
 
-  btn.textContent = "Drafting...";
+  setButtonStatus(btn, "Drafting...");
 
   let draft: string;
   let reasoning: string;
@@ -535,7 +603,7 @@ async function handleCaptureClick(
   } catch (err) {
     console.error(`${TAG} draft request failed`, err);
     btn.disabled = false;
-    btn.textContent = originalText;
+    setButtonIdle(btn);
     showErrorToast(
       err instanceof Error
         ? err.message
@@ -555,13 +623,13 @@ async function handleCaptureClick(
       console.log(`${TAG} reasoning: ${reasoning}`);
     }
     btn.disabled = false;
-    btn.textContent = "Inserted — review & send ✓";
+    setButtonStatus(btn, "Inserted ✓");
     btn.style.background = "#2f7d4f"; // green confirmation
     showInfoToast(
       `Draft inserted in your voice. ${reasoning || "Review and hit Send."}`
     );
     setTimeout(() => {
-      btn.textContent = originalText;
+      setButtonIdle(btn);
       btn.style.background = originalBg || "#b87a4a";
     }, 4000);
   } else {
@@ -571,18 +639,18 @@ async function handleCaptureClick(
     try {
       await navigator.clipboard.writeText(draft);
       btn.disabled = false;
-      btn.textContent = "Copied to clipboard ✓";
+      setButtonStatus(btn, "Copied ✓");
       btn.style.background = "#2f7d4f";
       showInfoToast(
         "Compose box not detected — draft copied to clipboard instead. Paste it in manually."
       );
       setTimeout(() => {
-        btn.textContent = originalText;
+        setButtonIdle(btn);
         btn.style.background = originalBg || "#b87a4a";
       }, 4000);
     } catch {
       btn.disabled = false;
-      btn.textContent = originalText;
+      setButtonIdle(btn);
       showErrorToast(
         "Couldn't insert the draft. Open the conversation in a different view and try again."
       );
