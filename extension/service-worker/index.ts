@@ -297,6 +297,34 @@ function toAboutUrl(url: string): string {
 }
 
 /**
+ * Build the LinkedIn company-search URL for `keywords`, with the spell-check
+ * auto-correct disabled.
+ *
+ * Why this matters: LinkedIn's spell-checker silently rewrites uncommon
+ * company names that look like dictionary words. Concrete examples we hit:
+ *
+ *   - "Parloa" (Berlin AI customer-service unicorn) → rewritten to "Parola"
+ *     (an Italian translation agency in Argentina)
+ *   - "Wonderful" (an AI startup) → sometimes rewritten or buried under
+ *     generic results
+ *   - Any 4-7 letter brand whose Levenshtein distance to a common word is 1
+ *
+ * When LinkedIn auto-corrects, our scraper sees the WRONG candidate list
+ * and the LLM has nothing right to pick from. The URL params below match
+ * exactly what LinkedIn itself uses when you click its own "Search instead
+ * for X" link, and they reliably bypass the auto-correct.
+ */
+function buildCompanySearchUrl(keywords: string): string {
+  const encoded = encodeURIComponent(keywords);
+  return (
+    `https://www.linkedin.com/search/results/companies/` +
+    `?keywords=${encoded}` +
+    `&origin=SPELL_CHECK_REPLACE` +
+    `&spellCorrectionEnabled=false`
+  );
+}
+
+/**
  * Wrapper around EXTRACT_COMPANY_ID_JS that:
  *   1. Bails on the `/unavailable` page (non-existent company slug)
  *   2. Waits for the company's `<h1>` to be present before scraping —
@@ -824,9 +852,14 @@ async function handleMessage(
         }
 
         // Phase 2: Slug guesses failed — search LinkedIn + use LLM to pick the right company
+        // `spellCorrectionEnabled=false` prevents LinkedIn from silently
+        // rewriting our query (e.g. "Parloa" → "Parola") and returning a
+        // candidate list for the wrong company. Without this flag, smaller
+        // / newer companies whose names look like other words get hidden
+        // behind a "did you mean" auto-redirect.
         console.debug("[CDP] Slugs failed, searching LinkedIn for:", companyName);
         await navigate(
-          `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(companyName)}`
+          buildCompanySearchUrl(companyName)
         );
         await sleep(3000);
 
@@ -1070,9 +1103,11 @@ async function handleMessage(
         let resolveCandidates: CompanyCandidate[] = [];
         let resolvedSlug: string | null = presetSlug ?? null;
 
-        // Fallback: LinkedIn search + LLM disambiguation with structured candidates
+        // Fallback: LinkedIn search + LLM disambiguation with structured candidates.
+        // Use the spell-check-disabled URL so LinkedIn doesn't silently
+        // rewrite the query (see comment on buildCompanySearchUrl below).
         if (!companyId) {
-          await navigate(`https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(companyName)}`);
+          await navigate(buildCompanySearchUrl(companyName));
           await sleep(3000);
 
           // DIAG: scrape step
