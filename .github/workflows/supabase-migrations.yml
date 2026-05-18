@@ -1,0 +1,101 @@
+name: Apply Supabase Migrations
+
+# Auto-applies pending migrations in supabase/migrations/ to the
+# production Supabase database whenever they change on main.
+#
+# Before this existed, every schema change required:
+#   1. Write migration file
+#   2. Push to main
+#   3. Open Supabase dashboard
+#   4. Paste SQL into editor
+#   5. Run
+#   6. Forget to do step 4-5 → silent breakage
+#
+# With this workflow, steps 3-5 happen automatically and there's an
+# audit trail in the Actions log. Step 6 stops happening.
+#
+# Required GitHub secrets (one-time setup, documented in
+# .github/workflows/README-supabase-migrations.md):
+#   - SUPABASE_ACCESS_TOKEN — personal access token from Supabase dashboard
+#   - SUPABASE_PROJECT_REF   — the project ID (in the dashboard URL)
+#   - SUPABASE_DB_PASSWORD   — the database password (Settings → Database)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'supabase/migrations/**'
+      - '.github/workflows/supabase-migrations.yml'
+  # Allow manual triggering from the Actions tab. Useful for first-time
+  # setup when the workflow file ships but no migration has been added yet,
+  # or for re-running after a transient failure.
+  workflow_dispatch:
+
+# Cancel any in-flight migration run if a new one is queued. Prevents
+# concurrent migration applies (which could race for the same table).
+concurrency:
+  group: supabase-migrations
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Verify required secrets are configured
+        run: |
+          missing=""
+          [ -z "$SUPABASE_ACCESS_TOKEN" ] && missing="$missing SUPABASE_ACCESS_TOKEN"
+          [ -z "$SUPABASE_DB_PASSWORD" ]  && missing="$missing SUPABASE_DB_PASSWORD"
+          [ -z "$PROJECT_REF" ]           && missing="$missing SUPABASE_PROJECT_REF"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required GitHub secrets:$missing"
+            echo "Setup instructions: .github/workflows/README-supabase-migrations.md"
+            exit 1
+          fi
+          echo "All required secrets are configured."
+
+      - name: Link to Supabase project
+        run: supabase link --project-ref "$PROJECT_REF"
+
+      - name: List migrations (visibility before apply)
+        run: |
+          echo "::group::Migration status (remote vs local)"
+          supabase migration list || true
+          echo "::endgroup::"
+
+      - name: Apply pending migrations
+        run: |
+          echo "::group::Applying migrations"
+          supabase db push --include-all
+          echo "::endgroup::"
+
+      - name: Verify migrations after apply
+        run: |
+          echo "::group::Migration status after apply"
+          supabase migration list || true
+          echo "::endgroup::"
+
+      - name: Comment on commit if anything failed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { repo, owner } = context.repo;
+            const sha = context.sha;
+            await github.rest.repos.createCommitComment({
+              owner, repo, commit_sha: sha,
+              body: `❌ Supabase migration apply failed on commit ${sha.slice(0,7)}.\n\nSee the [Actions log](${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}) for the SQL error. Common causes: column already exists (someone applied manually), migration file syntax error, network blip.`
+            });
