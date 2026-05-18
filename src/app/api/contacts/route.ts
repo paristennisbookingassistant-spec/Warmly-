@@ -48,6 +48,12 @@ const ListContactsQuerySchema = z.object({
    * fetch display data (name, role, company) for the ranked picks.
    */
   ids: z.string().optional(),
+  /**
+   * Filter by the user's triage decision. When this filter is set
+   * explicitly (e.g., the /review page uses user_action=pending), it
+   * overrides the default "exclude pending/skipped" behavior below.
+   */
+  user_action: z.enum(["pending", "saved", "skipped", "starred"]).optional(),
 });
 
 const CreateContactSchema = z.object({
@@ -64,6 +70,13 @@ const CreateContactSchema = z.object({
   career_history: z.array(z.record(z.string(), z.unknown())).nullish(),
   education: z.array(z.record(z.string(), z.unknown())).nullish(),
   discovery_session_id: z.string().uuid().nullish(),
+  /**
+   * Triage state. Discovery-sourced contacts default to 'pending' so the
+   * user reviews them in /review. Manual entries (manual_chat / manual_url
+   * / extension_bookmark) default to NULL so they skip the deck and land
+   * straight in /contacts.
+   */
+  user_action: z.enum(["pending", "saved", "skipped", "starred"]).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -88,7 +101,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const { page, per_page, status, company, tier, discovered_after, sort_by, sort_order, search, ids } =
+  const { page, per_page, status, company, tier, discovered_after, sort_by, sort_order, search, ids, user_action } =
     parsed.data;
 
   const from = (page - 1) * per_page;
@@ -98,6 +111,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .from("contacts")
     .select("*", { count: "exact" })
     .eq("user_id", user.id);
+
+  // Triage filter:
+  //   - Explicit ?user_action=pending → exactly that (used by /review page)
+  //   - Explicit ?user_action=saved   → exactly that
+  //   - No param                       → exclude pending + skipped from the
+  //     default listing. This keeps un-triaged or rejected contacts out of
+  //     the main /contacts view. Legacy NULL rows pass through (treated as
+  //     already-reviewed).
+  if (user_action) {
+    query = query.eq("user_action", user_action);
+  } else {
+    query = query
+      .or("user_action.is.null,user_action.not.in.(pending,skipped)");
+  }
 
   if (status) query = query.eq("status", status);
   if (company) query = query.ilike("company", `%${company}%`);
@@ -176,7 +203,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     career_history,
     education,
     discovery_session_id,
+    user_action: explicitUserAction,
   } = parsed.data;
+
+  // Default triage state: discovered contacts go through the swipe deck;
+  // manual ones (bookmark / URL paste / chat) skip it and land straight in
+  // /contacts. Caller can override via explicit `user_action` in the body
+  // (e.g. tests or admin flows).
+  const userAction =
+    explicitUserAction ??
+    (source === "discovery" ? "pending" : null);
 
   // Check for duplicate (user_id, linkedin_url) if URL provided
   if (linkedin_url) {
@@ -211,6 +247,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       career_history: career_history ?? [],
       education: education ?? [],
       discovery_session_id: discovery_session_id ?? null,
+      user_action: userAction,
     })
     .select()
     .single();

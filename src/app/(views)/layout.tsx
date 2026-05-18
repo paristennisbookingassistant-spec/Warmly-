@@ -19,6 +19,8 @@ type NavItem = {
   label: string;
   kbd: string;
   icon: (active: boolean) => React.ReactElement;
+  /** Optional numeric badge — only shown if count > 0 */
+  badgeCount?: number;
 };
 
 // Minimal stroke icons — match the design system (1.5px stroke, 14px box).
@@ -90,6 +92,14 @@ export default function ViewsLayout({
   const [userName, setUserName] = useState<string | null>(null);
   // null = not yet checked; false = not done; true = done.
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
+  /**
+   * Count of contacts awaiting Tinder-style triage. Drives:
+   *   - Whether a "Review" entry appears in the sidebar at all
+   *   - The badge number on that entry
+   * Polled every 30s so the badge stays current as the extension
+   * saves new discoveries in the background.
+   */
+  const [pendingReviewCount, setPendingReviewCount] = useState(0);
 
   useEffect(() => {
     // Source of truth is the DB column users.onboarded. Read via the
@@ -120,6 +130,31 @@ export default function ViewsLayout({
       cancelled = true;
     };
   }, []);
+
+  // Poll the pending-review count — controls whether "Review" is visible
+  // in the sidebar and what number shows in its badge.
+  useEffect(() => {
+    if (onboarded !== true) return; // skip during onboarding / pre-auth
+
+    let cancelled = false;
+    const fetchCount = () =>
+      fetch("/api/contacts/pending-count", { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((body: { data?: { pending_count?: number } } | null) => {
+          if (cancelled || !body?.data) return;
+          setPendingReviewCount(body.data.pending_count ?? 0);
+        })
+        .catch(() => {
+          // network blip — silent retry next tick
+        });
+
+    void fetchCount();
+    const interval = window.setInterval(fetchCount, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [onboarded]);
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -194,9 +229,30 @@ export default function ViewsLayout({
           />
         </div>
 
-        {/* Nav items */}
+        {/* Nav items — compose a per-render list so we can splice the
+            conditional "Review" entry in only when there are pending
+            profiles to triage (count > 0). Position: right after Chat,
+            so it surfaces high in the visual hierarchy. */}
         <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto sidebar-scroll">
-          {NAV_ITEMS.map((item) => {
+          {(() => {
+            const items = [...NAV_ITEMS];
+            if (pendingReviewCount > 0) {
+              const reviewItem: NavItem = {
+                href: "/review",
+                label: "Review",
+                kbd: "G R",
+                badgeCount: pendingReviewCount,
+                icon: () => (
+                  <svg {...strokeProps} className="w-3.5 h-3.5">
+                    <path d="M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5z" />
+                  </svg>
+                ),
+              };
+              // Insert right after the Chat entry (index 0)
+              items.splice(1, 0, reviewItem);
+            }
+            return items;
+          })().map((item) => {
             const isActive =
               pathname === item.href || pathname.startsWith(item.href + "/");
             return (
@@ -221,7 +277,21 @@ export default function ViewsLayout({
                 >
                   {item.icon(isActive)}
                 </span>
-                <span className="flex-1">{item.label}</span>
+                <span className="flex-1 flex items-center gap-2">
+                  {item.label}
+                  {item.badgeCount !== undefined && item.badgeCount > 0 && (
+                    <span
+                      className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold min-w-[18px] text-center leading-none"
+                      style={{
+                        background: "var(--accent)",
+                        color: "#fff",
+                      }}
+                      aria-label={`${item.badgeCount} pending review`}
+                    >
+                      {item.badgeCount}
+                    </span>
+                  )}
+                </span>
                 <span
                   className="font-mono text-[10px] tracking-wider"
                   style={{ color: "var(--sidebar-ink-3)" }}

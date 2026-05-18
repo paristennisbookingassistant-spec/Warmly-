@@ -248,6 +248,16 @@ export type ContactStatus =
   | "met"
   | "ongoing";
 
+/**
+ * User's triage decision from the Tinder-style swipe deck.
+ * - "pending":  awaiting review (default for new discoveries from the extension)
+ * - "saved":    right-swiped, visible in /contacts
+ * - "skipped":  left-swiped, hidden from /contacts but data preserved
+ * - "starred":  up-swiped, saved + outreach draft initiated
+ * - null:       legacy rows from before this column existed; treated as already-reviewed
+ */
+export type ContactUserAction = "pending" | "saved" | "skipped" | "starred";
+
 export type ContactFeedback = "great_match" | "not_relevant";
 
 /**
@@ -327,6 +337,15 @@ export interface Contact {
   notes: string | null;
   /** Profile photo URL — populated by extension or enrichment */
   avatar_url: string | null;
+  /**
+   * Triage decision from the Tinder-style swipe deck. See ContactUserAction
+   * docstring for state semantics. New discoveries default to 'pending';
+   * existing rows from before this column existed are NULL (treated as
+   * already-reviewed for display purposes).
+   */
+  user_action: ContactUserAction | null;
+  /** Timestamp of the swipe action. NULL until the user makes a decision. */
+  reviewed_at: ISODateString | null;
 }
 
 // ---------------------------------------------------------------------------
