@@ -65,3 +65,4 @@ extension/dist/
 .claude/skills/design-references/
 .claude/skills/frontend-slides/
 .claude/skills/LinkedIn*.md
+.playwright-profile/

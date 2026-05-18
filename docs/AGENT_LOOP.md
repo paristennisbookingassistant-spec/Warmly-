@@ -193,10 +193,33 @@ This isn't theoretical — the primitives exist:
 |---|---|---|
 | Orchestrator | This conversation with me | (already doing it) |
 | Developer (sub-agent) | `Agent` tool with `general-purpose` or `backend` / `frontend` / `extension` subagent_type | `Agent({ subagent_type: "backend", prompt: "<spec>" })` |
-| Tester | gstack `/qa-only` skill | `Skill({ skill: "qa-only", args: "<criteria>" })` |
-| Browser test | gstack `/browse` skill | invoked by qa-only internally |
+| Tester (web app) | gstack `/browse` skill or direct invocation | works with our auth via programmatic login using `.env.test` |
+| Tester (extension + LinkedIn) | Custom Playwright script `tests/ext-tester.mjs` | `node tests/ext-tester.mjs --url <url> --wait <ms>` |
 
-So all we need is the *discipline* to use them in the loop pattern. The tooling is already there.
+### Why two tester paths?
+
+The gstack `/browse` tool is great for web app features. But it has a known bug
+in its headless+extension code path: it uses `chromium.launch() + newContext()`
+which silently fails to load extensions. Verified May 18, 2026 by reading
+`~/.claude/skills/gstack/browse/src/browser-manager.ts:172-179`.
+
+For extension testing (which requires the extension to actually inject content
+scripts into LinkedIn), we use a custom Playwright script at `tests/ext-tester.mjs`
+that uses `launchPersistentContext()` (the API that DOES load extensions) with
+an off-screen window for "fake headless" operation.
+
+### One-time LinkedIn login
+
+The tester uses a persistent Playwright profile at `.playwright-profile/`
+(gitignored). LinkedIn auth needs to be seeded once via headed mode:
+
+```bash
+node tests/ext-tester.mjs --url https://www.linkedin.com/login --headed --keep-open
+# Log in manually in the spawned window, then Ctrl+C to close
+```
+
+After that, the profile keeps the LinkedIn session, and all subsequent runs
+(including headless) are authenticated.
 
 ---
 
