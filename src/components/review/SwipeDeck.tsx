@@ -21,7 +21,7 @@ import { useRouter } from "next/navigation";
 import ProfileCard from "./ProfileCard";
 import type { Contact } from "@/types/database";
 
-type Action = "save" | "skip" | "star" | "undo";
+type Action = "save" | "skip" | "undo";
 
 interface SwipeDeckProps {
   contacts: Contact[];
@@ -95,7 +95,7 @@ export default function SwipeDeck({ contacts: initialContacts }: SwipeDeckProps)
       const current = queueRef.current[cursorRef.current];
       if (!current) return;
 
-      const direction = action === "skip" ? "left" : action === "save" ? "right" : "up";
+      const direction: "left" | "right" = action === "skip" ? "left" : "right";
       setExitDirection(direction);
 
       // Fire the PATCH immediately (don't wait for animation)
@@ -113,13 +113,7 @@ export default function SwipeDeck({ contacts: initialContacts }: SwipeDeckProps)
         setExitDirection(null);
         setCursor((c) => c + 1);
 
-        // If starred, navigate to the contact's chat session — that's
-        // where outreach drafting actually happens. The user can type
-        // "draft outreach" or the coach can suggest it. For v1 we just
-        // open the session; auto-firing the draft is a small follow-up.
-        if (action === "star") {
-          router.push(`/chat?contact=${current.id}`);
-        }
+
       }, EXIT_ANIMATION_MS);
     },
     [fireAction, router]
@@ -182,7 +176,6 @@ export default function SwipeDeck({ contacts: initialContacts }: SwipeDeckProps)
         total={queue.length}
         onSkip={() => handleAction("skip")}
         onSave={() => handleAction("save")}
-        onStar={() => handleAction("star")}
       />
 
       {/* Undo pill */}

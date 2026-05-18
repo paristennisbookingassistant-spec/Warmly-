@@ -54,7 +54,7 @@ const MOCK_CONTACTS = [
     relevance_score: 9,
     tier: 1 as const,
     recommendation_reason:
-      "Bain → Parloa pivot mirrors your trajectory. INSEAD MBA 22D, same Fontainebleau campus. Currently leading the conversational-AI product line — direct overlap with your AI agent interest.",
+      "She made the same Bain-to-Parloa pivot you're targeting, came out of your INSEAD 22D Fontainebleau class, and now leads the conversational-AI product line that overlaps directly with your AI agent interest.",
     suggested_hook: "Shared Bain alumni + INSEAD MBA + AI product pivot",
     education: [{ school: "INSEAD", degree: "MBA", year: "2022" }],
   },
@@ -69,7 +69,7 @@ const MOCK_CONTACTS = [
     relevance_score: 8,
     tier: 1 as const,
     recommendation_reason:
-      "INSEAD 24J based in Paris. Came from McKinsey before Parloa. Likely sees a hundred outreach requests from MBAs — keep yours short and specific.",
+      "He's an INSEAD 24J alumnus based in Paris who came to Parloa from McKinsey, and he likely sees a hundred outreach requests from MBAs so keep yours short and specific.",
     suggested_hook: "Paris-based INSEAD alumnus, consulting background",
     education: [
       { school: "INSEAD", degree: "MBA", year: "2024" },
@@ -87,7 +87,7 @@ const MOCK_CONTACTS = [
     relevance_score: 6,
     tier: 2 as const,
     recommendation_reason:
-      "INSEAD 21D. Different function (CS not strategy/product) but well-positioned to give you the inside view on Parloa's commercial motion. Adjacent strength, not direct fit.",
+      "She's an INSEAD 21D alumna whose Customer Success role is adjacent to your strategy and product target, but she's well-positioned to give you the inside view on Parloa's commercial motion.",
     suggested_hook: "Inside view on Parloa's commercial motion",
     education: [{ school: "INSEAD", degree: "MBA", year: "2021" }],
   },
@@ -102,7 +102,7 @@ const MOCK_CONTACTS = [
     relevance_score: 5,
     tier: 3 as const,
     recommendation_reason:
-      "INSEAD MIM 23 (not MBA). Eng-side at Parloa — only relevant if you want a technical view on the product. Lower tier for your strategy/VC angle, but cordial.",
+      "He's an INSEAD MIM 23 alumnus on the engineering side at Parloa, which makes him a lower-tier fit for your strategy and VC angle but a useful contact if you want a technical view on the product.",
     suggested_hook: "INSEAD MIM, eng-side product view",
     education: [{ school: "INSEAD", degree: "MIM", year: "2023" }],
   },
@@ -117,7 +117,7 @@ const MOCK_CONTACTS = [
     relevance_score: 7,
     tier: 2 as const,
     recommendation_reason:
-      "INSEAD 23J. Background in B2B SaaS marketing at HubSpot before Parloa. Could open doors at other B2B AI companies in your VC target universe.",
+      "She's an INSEAD 23J alumna who came to Parloa from HubSpot with a B2B SaaS marketing background, and she could open doors at other B2B AI companies in your VC target universe.",
     suggested_hook: "B2B SaaS network, HubSpot alumna",
     education: [
       { school: "INSEAD", degree: "MBA", year: "2023" },

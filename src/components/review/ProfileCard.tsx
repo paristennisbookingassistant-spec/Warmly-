@@ -11,7 +11,7 @@
  *   - Education (shared schools highlighted)
  *   - Mutual connections (if available from profile_snapshot)
  *   - LLM rationale ("Picked because: ...")
- *   - Three action buttons (Skip / Save / Save + Draft)
+ *   - Two action buttons (Skip / Save)
  *
  * The buttons are wired through the parent SwipeDeck — this component
  * is presentational. Animation is driven by a CSS class the parent
@@ -30,7 +30,6 @@ interface ProfileCardProps {
   total: number;
   onSkip: () => void;
   onSave: () => void;
-  onStar: () => void;
 }
 
 // Schools we treat as "shared" with the typical user. Hardcoded for v1;
@@ -45,7 +44,6 @@ export default function ProfileCard({
   total,
   onSkip,
   onSave,
-  onStar,
 }: ProfileCardProps) {
   // Pick tier visual
   const tierLabel =
@@ -211,14 +209,6 @@ export default function ProfileCard({
           >
             {contact.recommendation_reason}
           </p>
-          {contact.suggested_hook && (
-            <p
-              className="text-[12px] mt-2 font-medium italic"
-              style={{ color: "var(--accent)" }}
-            >
-              Hook: {contact.suggested_hook}
-            </p>
-          )}
         </div>
       )}
 
@@ -244,23 +234,11 @@ export default function ProfileCard({
           disabled={exitDirection !== null}
           className="flex-1 px-4 py-2.5 rounded-lg text-[13px] font-medium transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
           style={{
-            background: "var(--accent)",
-            color: "#fff",
+            background: "color-mix(in oklch, var(--success, #2f7d4f) 75%, white)",
+            color: "var(--ink)",
           }}
         >
           ♥  Save
-        </button>
-        <button
-          onClick={onStar}
-          disabled={exitDirection !== null}
-          className="px-4 py-2.5 rounded-lg text-[13px] font-medium transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-          style={{
-            background: "var(--success, #2f7d4f)",
-            color: "#fff",
-          }}
-          title="Save and start drafting outreach"
-        >
-          ✦  Save + Draft
         </button>
       </div>
     </div>

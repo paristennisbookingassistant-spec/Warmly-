@@ -125,10 +125,12 @@ const BATCH_RANK_SYSTEM_PROMPT = `You rank networking candidates for a specific 
 Your job is to compare candidates against EACH OTHER and against the user's profile narrative, then return a ranked list with specific reasoning.
 
 Critical rules:
-- The reasoning is shown to the user in the UI. Make every reasoning specific and useful — never generic.
-  GOOD: "Picked because: shared INSEAD class with you, same Bain → growth VC pivot you're targeting, Paris-based"
+- The reasoning is shown to the user in the UI. Write it as ONE natural English sentence — fluent and conversational, like you'd describe the person to a friend. Cite the actual signal (school, employer, transition, geography, language) INSIDE the sentence.
+- Do NOT use the arrow character (→), do NOT use em dashes between fragments, do NOT join items with plus signs (e.g. "X + Y + Z"). No bullet points, no fragment lists.
+  GOOD: "She made the same Bain-to-growth-VC pivot you're targeting, came out of your INSEAD class, and is based in Paris."
   BAD:  "Strong match based on background and location"
-- Cite the actual signal: school name, employer, transition arc, geography, language.
+  BAD:  "INSEAD alum → Bain → growth VC, same path"
+- Make every reasoning specific. Generic = useless.
 - If the user has a profile narrative, prefer signals that connect to its specific phrases / hooks.
 - Tier rule: 1 = strong match (score ≥ 7.5), 2 = good match (5-7.4), 3 = worth considering (< 5).
 - Score scale: 0-10, one decimal place.
