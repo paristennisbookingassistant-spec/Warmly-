@@ -1571,3 +1571,84 @@ Open follow-up:
 5. **Investigate the popup-driving problem** — find a way to make
    the agent loop verify real-discovery end-to-end. Could be
    worth ~2h of investigation.
+
+### Session 13 (final round) — popup-driving bugs solved
+
+Continued investigating the "popup-driving problem" from earlier in
+Session 13. Found TWO real bugs that were preventing the agent loop
+from verifying real-discovery end-to-end. Both also affect real users.
+
+**Bug 1: Both popup and SW required a pre-existing LinkedIn tab.**
+(`bc4d3b4`)
+
+The popup's `handleStartDiscovery` checked `chrome.tabs.query({ url:
+"*://www.linkedin.com/*" })` and bailed with "Open LinkedIn first" if
+no LinkedIn tab existed. The service worker had the same gate inside
+CDP_DISCOVER. This was bad for two reasons:
+- Real users: clicking the Warmly icon from anywhere-but-LinkedIn
+  showed a quiet message and refused to do anything
+- Agent loop: spawning a fresh Chromium with no LinkedIn tab open
+  meant discovery never fired — the click handler bailed silently
+  with the message that auto-dismissed in 3s
+
+Fix: new `findOrCreateLinkedInTab()` helper in the SW. If no LinkedIn
+tab exists, creates one in the background (`active: false` so user's
+focus stays put) and waits for it to finish loading (with a 10s
+safety timeout in case `tabs.onUpdated` misses the complete event).
+CDP_DISCOVER calls this helper. Popup's check is gone — SW handles
+it. Discovery "just works" regardless of which page invoked it.
+
+**Bug 2: CDP_DISCOVER saved contacts with the wrong source, bypassing
+/review.** (`0046103`)
+
+The save path inside CDP_DISCOVER called `bookmarkProfile()` to write
+each scraped contact. `bookmarkProfile()` by default sets
+`source: "extension_bookmark"`. Per the POST /api/contacts handler
+logic (`user_action = source === "discovery" ? "pending" : null`),
+bookmark-sourced contacts get `user_action = null`, which lands them
+straight in /contacts and bypasses /review entirely.
+
+Result: real Parloa-discovered contact "Csaba Tamas" was correctly
+scraped and saved to the DB, but invisible in the swipe deck. The
+earlier agent loop run was actually working end-to-end on the
+scraping side — the bug was downstream in the categorization.
+
+Fix: bookmarkProfile() now takes an optional `kind` parameter.
+- `kind: "manual"` (default): source=extension_bookmark, user_action=null
+- `kind: "discovery"`:        source=discovery,           user_action=pending
+
+CDP_DISCOVER's save call now passes `{ kind: "discovery" }`. Belt-
+and-braces: the function also sets user_action explicitly client-side,
+mirroring the server-side default. Two pathways producing the same
+outcome makes future drift impossible.
+
+**Photo polish:** `seed-mock-contacts` now uses deterministic
+pravatar.cc URLs keyed by index, so the test seed has visible
+placeholder photos. Real LinkedIn discoveries already pull real
+avatars via the extension's profile extraction.
+
+**Backfill of orphaned real contact:** flipped Csaba Tamas's
+user_action from NULL to "pending" via the PATCH /review endpoint's
+new "undo" action so he shows up in the swipe deck alongside the
+mocks (testable now without needing a fresh discovery).
+
+**Status at handoff:**
+- 7 commits this final round, latest `0046103`
+- Web app deployed via Vercel
+- Extension synced to parent dist path (Chrome loads from there)
+- 6 pending contacts in /review for the test account
+  (5 mocks + 1 real Csaba), all with avatars
+- User taking over manual validation in their real Chrome
+
+**Key learning:** the agent loop discovered two real production bugs
+the user would have hit in normal use. The first (LinkedIn-tab gate)
+was a UX papercut every user hits when they click the extension from
+a non-LinkedIn page. The second (CDP_DISCOVER source mismatch) was
+a feature-breaking bug — the entire Tinder review queue would have
+been empty for real users until someone noticed. Without the agent
+loop, both would have shipped silently.
+
+Net: 13 commits in Session 13 total. Five features shipped (multi-
+material onboarding, profile/voice file split, async chip, auto-
+migrations workflow, Tinder review). Two real bugs caught and
+fixed by the agent loop pattern.
