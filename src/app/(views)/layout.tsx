@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 import Onboarding from "@/components/onboarding/Onboarding";
+import ProfileBuildingChip from "@/components/onboarding/ProfileBuildingChip";
 
 // LEGACY localStorage key from the per-browser-domain onboarding gate.
 // We've migrated to a per-user DB column (users.onboarded). Kept here so
@@ -323,6 +324,11 @@ export default function ViewsLayout({
       >
         {children}
       </main>
+
+      {/* Bottom-right "Building your profile..." chip, only visible right
+          after onboarding submission while the LLM finishes building
+          profile_md + voice_md. Self-clears once those land. */}
+      <ProfileBuildingChip />
     </div>
   );
 }

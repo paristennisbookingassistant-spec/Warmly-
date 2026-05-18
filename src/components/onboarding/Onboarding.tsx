@@ -184,11 +184,20 @@ export default function Onboarding({ onDone, onSkip }: OnboardingProps) {
       } catch {
         // ignore
       }
-      // Server: build profile_md from the answers so the coach actually has
-      // memory on the very next chat turn. Fire-and-forget; we don't block
-      // the transition into the app on the LLM call (which can take a few
-      // seconds). The bootstrap path in the messages route also covers us
-      // if this request happens to fail.
+      // Server: build profile_md + voice_md from the answers so the coach
+      // actually has memory on the very next chat turn. Fire-and-forget; we
+      // don't block the transition into the app on the LLM call (which can
+      // take 3-8 seconds). The bootstrap path in the messages route also
+      // covers us if this request happens to fail.
+      //
+      // Flag that profile-building is in progress so the main app shell can
+      // show a "Building your profile..." chip while the LLM finishes.
+      // sessionStorage clears on tab close, so a stale flag can't persist.
+      try {
+        sessionStorage.setItem("warmly.profile-building", "1");
+      } catch {
+        // ignore
+      }
       void fetch("/api/users/me/onboarding-complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
