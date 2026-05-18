@@ -1560,20 +1560,30 @@ async function handleMessage(
             const expCount = finalData.experiences?.length ?? 0;
             const eduCount = finalData.educations?.length ?? 0;
 
-            // Save via existing bookmarkProfile API
-            const contact = await bookmarkProfile({
-              linkedin_url: rawData.linkedinUrl,
-              name: finalData.name,
-              headline: finalData.headline || "",
-              current_title: finalData.experiences[0] ?? { title: "Unknown", company: "Unknown", duration: "Unknown" },
-              previous_roles: finalData.experiences.slice(1),
-              education: finalData.educations,
-              location: finalData.location || "",
-              ...(rawData.avatar ? { avatar: rawData.avatar } : {}),
-              mutual_connections: 0,
-              captured_at: new Date().toISOString(),
-              source_session_id: null,
-            });
+            // Save via bookmarkProfile with kind="discovery" so the
+            // contact gets source="discovery" + user_action="pending",
+            // which lands it in /review for the user to triage. Using
+            // kind="manual" (the default) would set source=
+            // "extension_bookmark" + user_action=null, which makes the
+            // contact bypass /review and land straight in /contacts —
+            // wrong for bulk discovery where the user hasn't seen each
+            // profile yet.
+            const contact = await bookmarkProfile(
+              {
+                linkedin_url: rawData.linkedinUrl,
+                name: finalData.name,
+                headline: finalData.headline || "",
+                current_title: finalData.experiences[0] ?? { title: "Unknown", company: "Unknown", duration: "Unknown" },
+                previous_roles: finalData.experiences.slice(1),
+                education: finalData.educations,
+                location: finalData.location || "",
+                ...(rawData.avatar ? { avatar: rawData.avatar } : {}),
+                mutual_connections: 0,
+                captured_at: new Date().toISOString(),
+                source_session_id: null,
+              },
+              { kind: "discovery" }
+            );
 
             if (contact) {
               saved.push({ name: finalData.name, url: rawData.linkedinUrl, id: contact.id });

@@ -154,11 +154,25 @@ export async function updateDiscoverySession(
 }
 
 /**
- * Bookmarks a profile to the user's contacts (manual save from popup).
+ * Saves a profile to the user's contacts. Two ergonomic shorthand modes:
+ *
+ *   bookmarkProfile(profile)                       // manual one-off save
+ *   bookmarkProfile(profile, { kind: "discovery" }) // bulk-discovery save
+ *
+ * The kind controls two backend-visible fields:
+ *   - source: distinguishes manual saves from discovery for analytics
+ *   - user_action: discovery saves land in /review (pending); manual saves
+ *     go straight into /contacts (NULL = treated as already-triaged)
+ *
+ * Why a single function: the only difference between a "manual bookmark"
+ * and a "discovery save" is these two fields. Keeping one save path
+ * means we can't accidentally drift two implementations.
  */
 export async function bookmarkProfile(
-  profile: ExtractedProfile
+  profile: ExtractedProfile,
+  options: { kind?: "manual" | "discovery" } = {}
 ): Promise<Contact | null> {
+  const kind = options.kind ?? "manual";
   return apiFetch<Contact>("/api/contacts", {
     method: "POST",
     body: JSON.stringify({
@@ -175,7 +189,11 @@ export async function bookmarkProfile(
       })),
       education: profile.education,
       profile_snapshot: profile,
-      source: "extension_bookmark",
+      source: kind === "discovery" ? "discovery" : "extension_bookmark",
+      // user_action is set server-side based on source (see /api/contacts
+      // POST handler). Discovery sources land as 'pending', manual saves
+      // pass through as null. Setting it explicitly here as belt-and-braces.
+      user_action: kind === "discovery" ? "pending" : undefined,
     }),
   });
 }
