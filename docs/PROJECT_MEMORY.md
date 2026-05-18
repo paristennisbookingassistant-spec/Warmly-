@@ -3,7 +3,7 @@
 
 **Purpose:** This file preserves the accumulated context, decisions, debates, and learnings from all working sessions on this project. Read this file at the start of every new session to restore context. Update it at the end of every session with new learnings.
 
-**Last updated:** May 13, 2026 (Session 11)
+**Last updated:** May 18, 2026 (Session 13)
 
 ---
 
@@ -1238,3 +1238,203 @@ format alternations (the format voyager actually returns).
    coach knows about them. APIs exist, just need a Settings view.
 5. **CV upload endpoint** — `buildInitialProfile` accepts `cv_text`
    but no upload UI yet. ~1h.
+
+### Session 12 — May 14, 2026
+
+**Topics covered:**
+
+Strategy-and-infrastructure session, no shipped features but several
+foundational decisions documented:
+
+1. **Visual progress tracker rebuild** — replaced text-heavy STATUS.html
+   with a properly-visual dashboard: 4-step pipeline cards with progress
+   bars, session timeline with pulsing "now" marker, feature status grid,
+   8-week Gantt, open strategic threads as cards, full-loop vision
+   flowchart. Files: `docs/STATUS.html` (rewritten).
+
+2. **Strategy register** — captured 11 open strategic threads with
+   options + recommendations + decisions-needed format. Files:
+   `docs/STRATEGY.md` (new, full elaboration), `docs/DECISIONS.md` (new,
+   one-screen-per-decision for Liyang to fill in inline).
+
+3. **Three-agent loop adopted** — orchestrator (me) writes spec +
+   validates with user, developer (sub-agent or me) implements,
+   tester (independent, no codebase access) verifies via headless
+   browser. Codified in `docs/AGENT_LOOP.md` with spec template, dev
+   brief template, tester brief template. Max 3 fail iterations before
+   escalating to user.
+
+4. **Liyang's 11 strategic answers** captured inline in DECISIONS.md.
+   Greenlit: 01 onboarding completeness, 04 chat→ext trigger, 05
+   tinder review, 06 in-app digest, 11 adopt loop. Parked: 02 chat
+   vs dashboard, 09 meeting memory, 10 job aggregator. Research:
+   08 cadence model.
+
+### Session 13 — May 18, 2026
+
+**Topics covered:**
+
+First session running the three-agent loop end-to-end. Shipped the
+"multi-material upload" onboarding feature AND uncovered/fixed multiple
+silent infrastructure failures along the way.
+
+**Phase A — Test infrastructure setup:**
+
+1. **Headless extension testing solved** (`8286c2e`, `ccc9040`).
+   gstack `/browse` headless+extension is broken by design — uses
+   `chromium.launch() + newContext()` which Playwright docs explicitly
+   say can't load extensions. The headed `connect` path uses the
+   right API (`launchPersistentContext()`) but only loads the gstack
+   scout extension. Built `tests/ext-tester.mjs` — standalone
+   Playwright script using `launchPersistentContext()` + off-screen
+   window (`--window-position=-9999,-9999 --window-size=1,1`) for
+   "fake headless" that supports extensions. Verified: all 4 [WARMLY]
+   boot logs captured, service worker registered, content script
+   firing on LinkedIn. One-time LinkedIn login seeded into
+   `.playwright-profile/` (gitignored).
+
+2. **LinkedIn safety guardrails codified** (`ae30343`).
+   `docs/LINKEDIN_GUARDRAILS.md` documents hard rules (NEVER send DM,
+   never post, never edit profile/settings, never click Send even on
+   pre-filled drafts) and allowed read-only operations. CLAUDE.md
+   surfaces summary. Tester agent NEVER authorized to perform
+   hard-rule actions. /linkedin skill verified working (cookie auth
+   alive, navigated to feed, screenshot of authenticated state).
+
+3. **Test account separation.** Created dedicated test user
+   `b00611490@essec.edu` to isolate test mutations from Liyang's real
+   account. Credentials in `.env.test` (gitignored). Test account
+   logged in via Playwright persistent profile.
+
+**Phase B — Migration automation:**
+
+4. **Auto-apply Supabase migrations via GitHub Actions**
+   (`dc0951e`, `1b6fc73`). Workflow at
+   `.github/workflows/supabase-migrations.yml` runs `supabase db push`
+   on every push to main with path filter on `supabase/migrations/**`.
+   Requires three repo secrets (`SUPABASE_ACCESS_TOKEN`,
+   `SUPABASE_PROJECT_REF`, `SUPABASE_DB_PASSWORD`). Setup
+   documented in `.github/workflows/README-supabase-migrations.md`.
+
+5. **Major infrastructure discovery.** First workflow run revealed
+   that FIVE migrations had never been applied to production
+   Supabase despite the migration files existing:
+   - `20260506000000_add_user_profile_md.sql` (profile_md column)
+   - `20260506000001_add_user_learnings.sql` (user_learnings table)
+   - `20260509000000_add_company_slug_cache.sql` (cache table)
+   - `20260512000000_add_company_id_to_slug_cache.sql` (column)
+   - `20260514000000_add_voice_md_and_onboarding.sql` (today's)
+   
+   This explains earlier user complaints: "coach doesn't remember me"
+   (profile_md column didn't exist → silent write failures),
+   learning system silently dropping data, every company resolution
+   recomputing because cache table didn't exist. PROJECT_MEMORY only
+   flagged ONE of these as pending. Bootstrapped migration tracker
+   via SQL (mark already-applied migrations in
+   `supabase_migrations.schema_migrations` so CLI skips them), then
+   all 5 applied cleanly. **Lesson: schema drift between repo and
+   prod is dangerous and silent. Auto-migration workflow prevents
+   this going forward.**
+
+**Phase C — Feature: multi-material onboarding step:**
+
+6. **Profile / voice file split** (`caeb1d5`). Architecture change
+   per Liyang's directive: `profile_md` = identity (slow-changing
+   narrative from CV/About/Goal/Career assessment), `voice_md` =
+   tone/style (continuously updated from past message uploads /
+   cover letter samples / future edits). Splitting prevents voice
+   updates from drifting identity content.
+
+7. **Three new columns** on users table: `onboarded` boolean
+   (replaces broken localStorage-per-domain check), `voice_md` text,
+   `onboarding_materials` JSONB.
+
+8. **MaterialsStep component** (`src/components/onboarding/MaterialsStep.tsx`).
+   5 toggle cards (CV / Past messages / Targets / Career assessment /
+   Cover letter), each with badge showing which file it feeds
+   (IDENTITY / VOICE / TARGETS). Text input only (file upload
+   deferred). TagInput sub-component for target preferences (4
+   tag-input fields).
+
+9. **Endpoint changes:**
+   - `POST /api/users/me/onboarding-complete` — accepts materials,
+     routes CV+About+Goal+assessment to `buildInitialProfile`,
+     routes past_messages+cover_letter to `buildInitialVoice`, saves
+     both files atomically, sets `onboarded=true`.
+   - `GET /api/users/me` (new) — exposes user state so frontend
+     reads from DB not localStorage.
+   - `POST /api/dev/reset-onboarding` (new) — dev-only, env-gated
+     by `TEST_USER_EMAILS`, resets test account state.
+
+10. **`buildInitialVoice()`** — new prompt in `src/lib/ai/profile.ts`.
+    System prompt explicitly tells LLM to capture HOW the user
+    writes (tone register, salutations, sign-offs, cadence,
+    vocabulary, signature phrases) NOT what they write about.
+
+11. **Frontend onboarded check** migrated from localStorage to API
+    (`src/app/(views)/layout.tsx`). Fixes per-browser-domain bug
+    where multiple accounts inherited each other's onboarded state.
+
+12. **Draft-reply prompt updated** to read `voice_md` as a
+    higher-priority voice signal than `user_memory.writing_style`.
+
+**Phase D — Test loop validation:**
+
+13. **First end-to-end agent-loop run.** Spawned `general-purpose`
+    sub-agent with the success criteria spec (no codebase access).
+    Sub-agent autonomously:
+    - Logged in as test user via the live URL
+    - Called `/api/dev/reset-onboarding` to reset state
+    - Walked the new onboarding wizard step-by-step
+    - Filled MaterialsStep with sample CV + past messages
+    - Completed the wizard
+    - Verified post-state via `/api/users/me`
+    
+    **All 17 criteria PASS.** profile_md (2964 chars) correctly
+    extracted Bain/INSEAD/Paris/M&A/AI-health from CV. voice_md
+    (2212 chars) correctly identified "Hi Sarah" / "Hey Marc"
+    salutation patterns from past messages. No console errors.
+
+**Key learnings:**
+
+- **The three-agent loop works.** Total cycle time from spec
+  to "this feature is verified shipped": ~50 minutes including
+  implementation. Would have been multiple hours of back-and-forth
+  manual testing otherwise. The independence of the tester matters —
+  it has no implementation context, so it can't rationalize bugs
+  as features.
+
+- **Async onboarding submit creates a UX gap.** The wizard's POST
+  to `/onboarding-complete` is fire-and-forget — `onDone()` fires
+  on a 1.2s timeout regardless of whether the LLM finished building
+  profile_md and voice_md (~5s total). For ~3-4s after the wizard
+  closes, the user is "onboarded" client-side but server still has
+  null profile_md / voice_md. Not blocking but worth a "Building
+  your profile..." chip in the memory panel for the first ~10s.
+  Surfaced by tester, captured for follow-up.
+
+- **Schema drift is silent and expensive.** Migration files existed
+  in the repo for FIVE schema changes that were never applied to
+  production. Auto-apply workflow now prevents this. Lesson: never
+  trust "the migration is in the repo" as evidence it ran.
+
+**Status (end of May 18):**
+- 6+ commits shipped to main, latest `1b6fc73`
+- All 5 pending migrations applied via automated workflow
+- Multi-material onboarding step LIVE in production
+- Tester verified end-to-end PASS on live URL
+- profile_md / voice_md split working as designed
+- LinkedIn auth seeded in ext-tester persistent profile for
+  future extension testing
+- TEST_USER_EMAILS env var live on Vercel
+
+**Immediate next steps (Liyang's call):**
+1. **Decide on async-onboarding UX** — A (wizard waits ~5s), B
+   (memory panel chip), or C (block first chat message). My pick: B.
+2. **Tinder-style profile review** (Decision 05, greenlit) — fun
+   brand-defining moment, ~4h
+3. **Chat → extension trigger artifact** (Decision 04, greenlit) —
+   high-leverage, ~6-8h
+4. **In-app weekly nudge digest** (Decision 06, greenlit) — ~3h
+5. **Research network-cadence best practices** (Decision 08) before
+   building the nurture engine
