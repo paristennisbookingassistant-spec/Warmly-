@@ -612,14 +612,12 @@ export default function Popup() {
   const handleStartDiscovery = useCallback(async () => {
     if (!companyName.trim()) return;
 
-    // Confirm a LinkedIn tab is open — CDP needs one to attach to.
-    const tabs = await chrome.tabs.query({ url: "*://www.linkedin.com/*" });
-    const linkedInTab = tabs[0];
-    if (!linkedInTab?.id) {
-      setSavedMsg("Open LinkedIn first");
-      setTimeout(() => setSavedMsg(null), 3000);
-      return;
-    }
+    // No precondition check for a LinkedIn tab — the service worker's
+    // findOrCreateLinkedInTab() will spin one up in the background if
+    // none exists. This means discovery works whether the user clicks
+    // the Warmly icon on LinkedIn, on the Warmly web app, or anywhere
+    // else. (Earlier behaviour bailed with "Open LinkedIn first" which
+    // was both worse UX and a blocker for automated testing.)
 
     const sessionId = crypto.randomUUID();
     setPs((prev) => ({

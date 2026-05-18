@@ -517,6 +517,50 @@ async function findLinkedInTab(): Promise<number | null> {
   return allLinkedIn[0]?.id ?? null;
 }
 
+/**
+ * Like findLinkedInTab but creates a fresh LinkedIn tab in the background
+ * if none exists. Used by CDP_DISCOVER so the user (or the test agent)
+ * doesn't have to manually open LinkedIn first — the extension just gets
+ * itself onto a LinkedIn page and starts working.
+ *
+ * Returns null only if tab creation itself failed (very unlikely).
+ */
+async function findOrCreateLinkedInTab(): Promise<number | null> {
+  const existing = await findLinkedInTab();
+  if (existing) return existing;
+
+  console.debug("[SW] No LinkedIn tab open; creating one for discovery.");
+  const tab = await chrome.tabs.create({
+    url: "https://www.linkedin.com/feed/",
+    active: false, // don't yank focus from whatever the user is doing
+  });
+  if (!tab.id) return null;
+
+  // Wait for the tab to finish loading before returning. CDP attach
+  // works on a loading tab, but the page might not be ready for our
+  // navigate() commands yet.
+  await new Promise<void>((resolve) => {
+    const listener = (
+      tabId: number,
+      changeInfo: { status?: string }
+    ) => {
+      if (tabId === tab.id && changeInfo.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+
+    // Safety net: don't wait forever if tabs.onUpdated never fires
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 10_000);
+  });
+
+  return tab.id;
+}
+
 // ---------------------------------------------------------------------------
 // Message handler
 // ---------------------------------------------------------------------------
@@ -1038,10 +1082,13 @@ async function handleMessage(
       if (!companyName) return { ok: false, error: "Company name required" };
 
       try {
-        // Step 1: Resolve company ID (reuse Module 2 logic inline)
-        const tabId = await findLinkedInTab();
+        // Step 1: Resolve company ID (reuse Module 2 logic inline).
+        // findOrCreateLinkedInTab will spin up a background LinkedIn tab
+        // if the user doesn't have one open, so discovery "just works"
+        // regardless of where they invoked it from.
+        const tabId = await findOrCreateLinkedInTab();
         if (!tabId) {
-          return { ok: false, error: "Open LinkedIn first" };
+          return { ok: false, error: "Could not open LinkedIn tab" };
         }
         await attachToTab(tabId);
 

@@ -48,7 +48,9 @@ const MOCK_CONTACTS = [
     current_title: "Senior Product Manager",
     company: "Parloa",
     location: "Berlin, Germany",
-    avatar_url: null,
+    // Use pravatar.cc with a deterministic seed per mock contact — gives
+    // each card a distinct placeholder photo so the deck looks complete
+    // without using any real LinkedIn user's image.
     relevance_score: 9,
     tier: 1 as const,
     recommendation_reason:
@@ -61,7 +63,9 @@ const MOCK_CONTACTS = [
     current_title: "Head of Strategy",
     company: "Parloa",
     location: "Paris, France",
-    avatar_url: null,
+    // Use pravatar.cc with a deterministic seed per mock contact — gives
+    // each card a distinct placeholder photo so the deck looks complete
+    // without using any real LinkedIn user's image.
     relevance_score: 8,
     tier: 1 as const,
     recommendation_reason:
@@ -77,7 +81,9 @@ const MOCK_CONTACTS = [
     current_title: "Customer Success Director",
     company: "Parloa",
     location: "Munich, Germany",
-    avatar_url: null,
+    // Use pravatar.cc with a deterministic seed per mock contact — gives
+    // each card a distinct placeholder photo so the deck looks complete
+    // without using any real LinkedIn user's image.
     relevance_score: 6,
     tier: 2 as const,
     recommendation_reason:
@@ -90,7 +96,9 @@ const MOCK_CONTACTS = [
     current_title: "Engineering Manager",
     company: "Parloa",
     location: "Berlin, Germany",
-    avatar_url: null,
+    // Use pravatar.cc with a deterministic seed per mock contact — gives
+    // each card a distinct placeholder photo so the deck looks complete
+    // without using any real LinkedIn user's image.
     relevance_score: 5,
     tier: 3 as const,
     recommendation_reason:
@@ -103,7 +111,9 @@ const MOCK_CONTACTS = [
     current_title: "Marketing Lead",
     company: "Parloa",
     location: "Berlin, Germany",
-    avatar_url: null,
+    // Use pravatar.cc with a deterministic seed per mock contact — gives
+    // each card a distinct placeholder photo so the deck looks complete
+    // without using any real LinkedIn user's image.
     relevance_score: 7,
     tier: 2 as const,
     recommendation_reason:
@@ -150,7 +160,11 @@ export async function POST(): Promise<NextResponse> {
     current_title: m.current_title,
     company: m.company,
     location: m.location,
-    avatar_url: m.avatar_url,
+    // Deterministic placeholder photo per mock contact. Pravatar serves
+    // CC-licensed portraits keyed by `u=<seed>` so each card shows a
+    // different face. Seed by index so the same mock always gets the
+    // same photo (helps with visual diff tests).
+    avatar_url: `https://i.pravatar.cc/150?u=warmly-qa-${i}`,
     source: "discovery" as const,
     status: "discovered" as const,
     discovered_at: now,
