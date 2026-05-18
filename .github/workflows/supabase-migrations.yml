@@ -38,6 +38,12 @@ concurrency:
   group: supabase-migrations
   cancel-in-progress: false
 
+# Grant permissions explicitly so the failure-comment step can post.
+# Without this, `actions/github-script` gets "Resource not accessible
+# by integration" when calling createCommitComment.
+permissions:
+  contents: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
