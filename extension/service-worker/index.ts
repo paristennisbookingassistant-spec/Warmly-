@@ -941,10 +941,13 @@ async function handleMessage(
           data?: {
             companyUrl?: string | null;
             companySlug?: string | null;
+            companyId?: string | null;
+            companyIdSource?: string | null;
             companyName?: string | null;
             confidence?: number;
             reasoning?: string;
             candidates?: typeof candidates;
+            fromCache?: boolean;
           }
         };
         const resolvedUrl = resolveData.data?.companyUrl;
@@ -963,14 +966,61 @@ async function handleMessage(
           };
         }
 
-        // Navigate to the LLM-selected company page
         console.debug("[CDP] LLM selected company URL:", resolvedUrl, "confidence:", resolveData.data?.confidence);
-        // Navigate to /about/ (not the bare slug URL) — LinkedIn redirects
-        // /company/SLUG/ → /company/SLUG/posts/?feedView=all for authed
-        // users, and the posts feed has no canonical meta tags and noisy
-        // URN refs. /about/ is stable and canonical.
+
+        // FAST PATH 1: resolver returned the numeric companyId directly from
+        // the search-row scrape (or from cache). Skip company-page navigation
+        // entirely — the row-scoped URN is the right entity by construction.
+        // Mirrors the structural fix in CDP_DISCOVER (see plan).
+        if (resolveData.data?.companyId) {
+          const fastId = resolveData.data.companyId;
+          const src = resolveData.data.fromCache
+            ? "cache"
+            : `search-row scrape (source=${resolveData.data.companyIdSource ?? "unknown"})`;
+          console.debug(`[CDP] Got company ID ${fastId} from ${src}, skipping company-page navigation`);
+          await detach();
+          return {
+            ok: true,
+            companyId: fastId,
+            companyName: resolveData.data.companyName ?? companyName,
+            method: "llm_search_row_scrape",
+            reasoning: resolveData.data.reasoning,
+            confidence: resolveData.data.confidence,
+          };
+        }
+
+        // FAST PATH 2: row scrape didn't surface the URN (LinkedIn keeps it
+        // in React props for that row). Hit voyager API directly — auths via
+        // page's JSESSIONID, returns canonical entityUrn. Avoids /about/-page
+        // sidebar pollution that previously misrouted global parents.
+        if (resolveData.data?.companySlug) {
+          const voyagerId = await lookupCompanyIdViaVoyager(resolveData.data.companySlug);
+          if (voyagerId) {
+            console.debug(
+              `[CDP] Got company ID ${voyagerId} from voyager API (slug=${resolveData.data.companySlug}), skipping company-page navigation`
+            );
+            await detach();
+            return {
+              ok: true,
+              companyId: voyagerId,
+              companyName: resolveData.data.companyName ?? companyName,
+              method: "llm_search_voyager",
+              reasoning: resolveData.data.reasoning,
+              confidence: resolveData.data.confidence,
+            };
+          }
+        }
+
+        // LAST RESORT: row scrape AND voyager both failed. Fall back to the
+        // /about/ navigation + most-frequent-URN scrape. Accepts the regional-
+        // URN risk for global parents but won't crash.
+        // /about/ avoids LinkedIn's /company/SLUG/ → /posts/?feedView=all
+        // redirect (which strips meta tags and pollutes URN refs).
         const aboutUrl = toAboutUrl(resolvedUrl);
-        console.debug("[CDP] Navigating to /about/ for clean ID extraction:", aboutUrl);
+        console.warn(
+          `[CDP] Both row scrape AND voyager failed — last-resort /about/ scrape:`,
+          aboutUrl
+        );
         await navigate(aboutUrl);
         await sleep(2000);
 
@@ -985,7 +1035,7 @@ async function handleMessage(
             ok: true,
             companyId,
             companyName: displayName ?? resolveData.data?.companyName ?? companyName,
-            method: "llm_search",
+            method: "llm_search_about_fallback",
             reasoning: resolveData.data?.reasoning,
             confidence: resolveData.data?.confidence,
           };
