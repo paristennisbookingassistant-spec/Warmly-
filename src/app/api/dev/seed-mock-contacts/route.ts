@@ -127,12 +127,17 @@ export async function POST(): Promise<NextResponse> {
     return forbidden();
   }
 
-  // Clear existing pending contacts so the test starts deterministic
+  // Clear ALL prior mock contacts so the test starts deterministic.
+  // We identify them by the linkedin_url pattern we use below — that
+  // includes "qa-mock-<user-uuid-prefix>-<index>" which is unique to
+  // this seeding flow. We do NOT touch real contacts (those have real
+  // linkedin.com/in/<slug> URLs).
+  const mockUrlPrefix = `https://www.linkedin.com/in/qa-mock-${user.id.slice(0, 8)}-`;
   const { data: deletedRows } = await supabase
     .from("contacts")
     .delete()
     .eq("user_id", user.id)
-    .eq("user_action", "pending")
+    .like("linkedin_url", `${mockUrlPrefix}%`)
     .select("id");
 
   // Insert the mock set. Use fake LinkedIn URLs so the UNIQUE constraint

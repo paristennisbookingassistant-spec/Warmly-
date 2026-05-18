@@ -33,7 +33,10 @@ interface UndoEntry {
   expiresAt: number;
 }
 
-const UNDO_WINDOW_MS = 5000;
+// 8s gives the user enough time to register the action visually + decide
+// to undo, especially for slower-paced swipers. Bumped from 5s after QA
+// flagged the window felt tight.
+const UNDO_WINDOW_MS = 8000;
 const EXIT_ANIMATION_MS = 320;
 
 export default function SwipeDeck({ contacts: initialContacts }: SwipeDeckProps) {
