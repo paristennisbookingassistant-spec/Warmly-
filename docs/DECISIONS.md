@@ -20,7 +20,7 @@ Companion: `STRATEGY.md` has the full thinking behind each option if you want de
 
 **My recommendation:** **A**. CV unlocks structured targets (we can suggest industries/companies from it), which unlocks better discovery, which produces past messages that feed voice. Compounding chain.
 
-**Your call:** _______
+**Your call:** __We need to ask if users want to upload his / her CV, past voice samples, and target industry / company, and any other materials that can help the agent better know about him / her (e.g., career assessment, or any othe material). Does this make sense? ____
 **Notes:** _______
 
 ---
@@ -36,7 +36,7 @@ Companion: `STRATEGY.md` has the full thinking behind each option if you want de
 
 **My recommendation:** **B with C sprinkled in.** Pure chat is great for "how should I approach this contact?" but bad for "I have 25 profiles to triage." Dashboards are better for scan-and-review work. Per-contact chats (already built) stay. General chat shrinks to strategy-only.
 
-**Your call:** _______
+**Your call:** ____I haven't decided yet, I do see the value of a main chat interface, but I also like the way you put it, especially B? Let's park this. I need to think more about it___
 **Notes:** _______
 
 ---
@@ -53,7 +53,7 @@ Companion: `STRATEGY.md` has the full thinking behind each option if you want de
 
 **My recommendation:** **D**. Building all three is ~6h total. Auto-compact is the immediate need, search becomes valuable as conversations accumulate, pinned facts handle the edge case (e.g., "remember I'm targeting €120K").
 
-**Your call:** _______
+**Your call:** ____I think there is need for compact anyway, so i'd probably leaning towards B? How would C work? If no autocompact, at one point the conversation will just become so long and not effective I guess___
 **Notes:** _______
 
 ---
@@ -71,7 +71,7 @@ Companion: `STRATEGY.md` has the full thinking behind each option if you want de
 
 **My recommendation:** **A**. This is the moment that proves the AI-coach thesis — the agent makes a plan, the user approves, the agent executes. High leverage.
 
-**Your call:** _______
+**Your call:** ____Yeah go for A, but how would the underlying system work, e.g., should there be prompt of having user open their linkedin page? or log in their linkedin account? if it's not open, what to do? We need to carefully think about this___
 **Notes:** _______
 
 ---
@@ -88,7 +88,7 @@ Companion: `STRATEGY.md` has the full thinking behind each option if you want de
 
 **My recommendation:** **A or B**. Brand-defining moment, captures preference data passively, ~4h work. The pattern (one card at a time, fast decision) is genuinely better for triaging many candidates than a long list.
 
-**Your call:** _______
+**Your call:** ___Yeah i'd go for A! ____
 **Notes:** _______
 
 ---
@@ -105,7 +105,7 @@ Companion: `STRATEGY.md` has the full thinking behind each option if you want de
 
 **My recommendation:** **A first, C eventually.** In-app is free, builds the habit. Email digest is good when users stop opening the app daily. Skip is wrong — proactive nudges are core to "AI coach" positioning.
 
-**Your call:** _______
+**Your call:** __I'd go for In-APP digest._____
 **Notes:** _______
 
 ---
@@ -122,7 +122,7 @@ Companion: `STRATEGY.md` has the full thinking behind each option if you want de
 
 **My recommendation:** **A now, B post-100-users.** Mailto is a freebie that closes a real workflow gap. OAuth is meaningful effort + trust budget — wait until we have proven users who want it.
 
-**Your call:** _______
+**Your call:** ___What's mailto? I don't think we need to have the agent to send messages directly? But one question might be, is there a way to connect to gmail MCP for example, so we can send email or invitation google meet directly form our interface. But how costly is that? ____
 **Notes:** _______
 
 ---
@@ -147,7 +147,7 @@ Companion: `STRATEGY.md` has the full thinking behind each option if you want de
 
 **My recommendation:** **A** with the caveat that the user can override per-contact. The defaults exist so the user doesn't have to think; the override is the escape hatch.
 
-**Your call:** _______
+**Your call:** ______Can we do some additional research on this? What's the best way of maintaining / building a network. I heard recently from a speaker, network is a 'concious effort' to make, so our goal is to steer this conciousness out of the user, and help them do it! _
 **Notes:** _______
 
 ---
@@ -164,7 +164,7 @@ Companion: `STRATEGY.md` has the full thinking behind each option if you want de
 
 **My recommendation:** **A or B.** Building our own is wasteful when Granola exists and 80% of MBA folks already use it. If we touch this, integrate.
 
-**Your call:** _______
+**Your call:** __Yeah park this for the moment_____
 **Notes:** _______
 
 ---
@@ -181,7 +181,7 @@ Companion: `STRATEGY.md` has the full thinking behind each option if you want de
 
 **My recommendation:** **B**. The networking product isn't proven yet. Splitting attention now risks both. But the user is at INSEAD literally surrounded by this problem — there's a real wedge. Capture the vision, build later.
 
-**Your call:** _______
+**Your call:** ___Park this for the moment____
 **Notes:** _______
 
 ---
@@ -198,7 +198,7 @@ Companion: `STRATEGY.md` has the full thinking behind each option if you want de
 
 **My recommendation:** **A**. The loop costs ~15min more per feature in orchestration overhead but catches issues that would otherwise eat 1-2h of back-and-forth ("button appeared but click does nothing"). Pays for itself within 2 features.
 
-**Your call:** _______
+**Your call:** ___A____
 **Notes:** _______
 
 ---

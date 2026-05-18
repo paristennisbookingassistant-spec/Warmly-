@@ -178,3 +178,80 @@ export function looksLikeIdentityDisclosure(message: string): boolean {
   const lower = message.toLowerCase();
   return IDENTITY_KEYWORDS.some((kw) => lower.includes(kw));
 }
+
+// ---------------------------------------------------------------------------
+// Voice file (voice_md) — parallel to profile_md, but captures TONE/STYLE
+// not identity. Built from samples of the user's actual writing.
+// ---------------------------------------------------------------------------
+
+export interface VoiceSourceData {
+  /** Past LinkedIn/email messages the user has sent (raw text, multiple messages OK) */
+  past_messages?: string;
+  /** Cover letter / bio samples (typically more formal than DMs) */
+  cover_letter?: string;
+  /** Optional: the broader profile_md, so the LLM knows the writer's context */
+  profile_md_context?: string;
+}
+
+const VOICE_SYSTEM_PROMPT = `You are building a person's WRITING VOICE profile from samples of their actual writing. The output is markdown that will be read by another AI when drafting messages on this person's behalf.
+
+This profile is about HOW they write, NOT what they write about. Capture:
+
+1. **Tone register** — formal, casual, warm, dry, etc. (one phrase)
+2. **Salutation patterns** — what greetings they use, with whom
+3. **Sign-off patterns** — what closings they use
+4. **Sentence cadence** — short punchy sentences, long flowing ones, mix?
+5. **Paragraph length** — one-liners, dense blocks, varies by audience?
+6. **Vocabulary patterns** — words/phrases they repeat. Words they notably avoid.
+7. **Contractions** — do they use them? always, never, situationally?
+8. **Emoji / punctuation tics** — exclamation use, ellipsis, dashes, emoji frequency
+9. **Specific signature phrases** — actual quoted strings from their samples that recur
+10. **Tone shifts by audience** — if samples show different audiences, note how their voice adapts
+
+Rules:
+- Markdown only. Use H2 headers for the sections above (skip any section the samples don't support).
+- Be specific. "Uses 'Hi [name]' for first contact, 'Hey' for ongoing exchanges" beats "warm tone."
+- Quote actual phrases when they recur (use markdown code formatting: \`like this\`).
+- Never invent. If samples don't tell you something, omit that section.
+- Keep under 500 words. Dense.
+- The output is a working voice reference — it should read like notes a ghostwriter would take.
+- Do NOT include content topics (what they wrote ABOUT) — only HOW they wrote.
+- Do NOT include personal sensitive data even if it appeared in the samples.`;
+
+/**
+ * Build the initial voice_md from raw writing samples. Called when the
+ * user shares past messages or cover letter samples during onboarding.
+ *
+ * If no samples are provided, returns null (caller can leave voice_md
+ * empty until later, at which point prompts fall through to user_memory.writing_style).
+ */
+export async function buildInitialVoice(
+  data: VoiceSourceData
+): Promise<string | null> {
+  const hasSamples =
+    (data.past_messages && data.past_messages.trim().length > 0) ||
+    (data.cover_letter && data.cover_letter.trim().length > 0);
+  if (!hasSamples) return null;
+
+  const userPrompt = `Build the voice markdown from these writing samples.
+
+${data.past_messages ? `## Past messages (LinkedIn DMs / emails this person sent)\n${data.past_messages.slice(0, 6000)}\n` : ""}
+
+${data.cover_letter ? `## Cover letter / bio samples (typically more formal than DMs)\n${data.cover_letter.slice(0, 3000)}\n` : ""}
+
+${data.profile_md_context ? `## Background on the writer (context only — do NOT pull tone from this, only from the samples above)\n${data.profile_md_context.slice(0, 1500)}\n` : ""}
+
+Return the voice markdown only. No prose around it. No code fences.`;
+
+  const response = await callMiniMax(
+    [{ role: "user", content: userPrompt }],
+    {
+      systemPrompt: VOICE_SYSTEM_PROMPT,
+      maxTokens: MAX_TOKENS[ModelTier.REASONING],
+      temperature: 0.3,
+    }
+  );
+
+  const result = response.content.trim();
+  return result.length > 0 ? result : null;
+}

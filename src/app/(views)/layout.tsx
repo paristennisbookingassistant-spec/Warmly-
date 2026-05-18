@@ -8,7 +8,10 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 import Onboarding from "@/components/onboarding/Onboarding";
 
-const ONBOARDING_KEY = "warmly.onboarded";
+// LEGACY localStorage key from the per-browser-domain onboarding gate.
+// We've migrated to a per-user DB column (users.onboarded). Kept here so
+// we can detect + clean up stale values from older sessions.
+const LEGACY_ONBOARDING_KEY = "warmly.onboarded";
 
 type NavItem = {
   href: string;
@@ -88,11 +91,33 @@ export default function ViewsLayout({
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
 
   useEffect(() => {
+    // Source of truth is the DB column users.onboarded. Read via the
+    // /api/users/me endpoint. Falls back to "show onboarding" on any
+    // network/auth error so a logged-in user is never silently stuck
+    // on a black screen.
+    let cancelled = false;
+    void fetch("/api/users/me", { credentials: "include" })
+      .then((r) => r.json())
+      .then((body: { data?: { onboarded?: boolean } | null }) => {
+        if (cancelled) return;
+        setOnboarded(body?.data?.onboarded === true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOnboarded(false); // fail open to onboarding rather than blank screen
+      });
+
+    // Clean up the legacy localStorage flag if present. Doesn't affect
+    // the current session, just prevents confusion if anyone reads it.
     try {
-      setOnboarded(localStorage.getItem(ONBOARDING_KEY) === "1");
+      localStorage.removeItem(LEGACY_ONBOARDING_KEY);
     } catch {
-      setOnboarded(true); // fail open if localStorage isn't available
+      // ignore
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -136,11 +161,9 @@ export default function ViewsLayout({
   // Gate: first-time users see Onboarding before the app shell.
   if (onboarded === false) {
     const finish = () => {
-      try {
-        localStorage.setItem(ONBOARDING_KEY, "1");
-      } catch {
-        // ignore
-      }
+      // The Onboarding component's submit handler now sets onboarded=true
+      // on the server via /api/users/me/onboarding-complete. We optimistically
+      // flip local state so the gate clears without an extra round-trip.
       setOnboarded(true);
     };
     return <Onboarding onDone={finish} onSkip={finish} />;
@@ -249,12 +272,24 @@ export default function ViewsLayout({
               aria-label="Replay onboarding"
               style={{ color: "var(--sidebar-ink-3)" }}
               onClick={() => {
+                // Reset onboarding state on the server, then flip local
+                // state so the wizard re-renders. The endpoint is the
+                // same one used for the "Skip for now" path, but called
+                // with onboarded=false here. (See /api/dev/reset-onboarding
+                // for the test-account version; this one's for the user
+                // hitting the explicit "Replay" button.)
+                void fetch("/api/users/me/onboarding-complete", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify({ onboarded: false }),
+                }).finally(() => setOnboarded(false));
+                // Also clear legacy localStorage if present
                 try {
-                  localStorage.removeItem(ONBOARDING_KEY);
+                  localStorage.removeItem(LEGACY_ONBOARDING_KEY);
                 } catch {
                   // ignore
                 }
-                setOnboarded(false);
               }}
             >
               <svg {...strokeProps} className="w-3.5 h-3.5">

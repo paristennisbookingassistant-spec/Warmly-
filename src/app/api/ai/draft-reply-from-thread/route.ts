@@ -97,6 +97,15 @@ These are real messages the user has finalized in Warmly. They show exactly how 
 ${samples.join("\n\n")}`;
 }
 
+function buildVoiceMdSection(voiceMd: string | null | undefined): string {
+  if (!voiceMd || voiceMd.trim().length === 0) return "";
+  return `## Voice profile (the user's actual writing patterns)
+
+This was built from real samples of how the user writes. It overrides the default voice posture and the auto-learned writing_style below when they conflict.
+
+${voiceMd.trim()}`;
+}
+
 function buildWritingStyleSection(user: User): string {
   const memory = user.user_memory;
   if (!memory?.writing_style) {
@@ -218,6 +227,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // Build all voice signal sections
   const learningsSection = buildApprovedLearningsSection(approvedLearnings);
   const pastMessagesSection = buildPastMessagesSection(pastArtifacts);
+  const voiceMdSection = buildVoiceMdSection(userTyped.voice_md);
   const styleSection = buildWritingStyleSection(userTyped);
   const identitySection = buildIdentitySection(userTyped.profile_md);
   const inThreadSection = buildInThreadVoiceSection(yourMessages);
@@ -239,7 +249,7 @@ Match their actual writing patterns from sections 1-4. Section 5 grounds the con
 
 ---
 
-${learningsSection ? learningsSection + "\n\n---\n\n" : ""}${pastMessagesSection ? pastMessagesSection + "\n\n---\n\n" : ""}${styleSection}
+${learningsSection ? learningsSection + "\n\n---\n\n" : ""}${voiceMdSection ? voiceMdSection + "\n\n---\n\n" : ""}${pastMessagesSection ? pastMessagesSection + "\n\n---\n\n" : ""}${styleSection}
 
 ---
 
@@ -337,6 +347,7 @@ Write the next reply, from YOU (the user) to the other person, applying the voic
       voice_signals_used: {
         approved_learnings: approvedLearnings.length,
         past_messages: pastArtifacts.length,
+        has_voice_md: !!userTyped.voice_md?.trim(),
         has_writing_style: !!userTyped.user_memory?.writing_style,
         has_profile_md: !!userTyped.profile_md?.trim(),
         in_thread_user_messages: yourMessages.length,

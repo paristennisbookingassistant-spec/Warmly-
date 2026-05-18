@@ -126,6 +126,31 @@ export interface UserLearning {
   updated_at: ISODateString;
 }
 
+/**
+ * Raw text the user shared during the multi-material upload step in
+ * onboarding. Each field is optional — user chose which to share.
+ * Used to (re)build profile_md and voice_md, and editable later in a
+ * Settings page (future feature).
+ */
+export interface OnboardingMaterials {
+  /** Plain-text CV content (extracted from PDF/DOCX or pasted directly) */
+  cv?: string;
+  /** Past LinkedIn/email message samples — feeds voice_md */
+  past_messages?: string;
+  /** Cover letter or bio samples — feeds voice_md */
+  cover_letter?: string;
+  /** Career assessment results + label (CareerLeader/MBTI/Hogan/DISC/Other) */
+  career_assessment?: {
+    text: string;
+    kind: "CareerLeader" | "MBTI" | "Hogan" | "DISC" | "Other";
+  };
+  /** ISO timestamps per key for "last updated" indicators in Settings */
+  uploaded_at?: Partial<Record<
+    "cv" | "past_messages" | "cover_letter" | "career_assessment",
+    ISODateString
+  >>;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -139,12 +164,23 @@ export interface User {
   /** Agent's long-term memory — nullable until first interaction */
   user_memory: UserMemory | null;
   /**
-   * Free-form markdown identity narrative — auto-built from onboarding
-   * answers, optional CV/cover-letter upload, and ongoing conversation.
-   * Editable by user via Settings. Injected into outreach prompts to
-   * make every draft specifically in the user's voice.
+   * Free-form markdown IDENTITY narrative — auto-built from onboarding
+   * answers, optional CV upload, and structured career history.
+   * Slow-changing. Editable by user via Settings. Injected into outreach
+   * prompts to ground content references (schools, employers, transition).
    */
   profile_md: string | null;
+  /**
+   * Free-form markdown VOICE narrative — distinct from profile_md.
+   * Built from past message uploads + cover letter samples + finalized
+   * artifacts + learned edits. Continuously updated. Higher-priority
+   * voice signal than user_memory.writing_style.
+   */
+  voice_md: string | null;
+  /** Has the user finished (or skipped) onboarding? Replaces localStorage check. */
+  onboarded: boolean;
+  /** Raw materials the user shared during multi-material upload step. */
+  onboarding_materials: OnboardingMaterials;
   subscription_status: SubscriptionStatus;
   subscription_tier: SubscriptionTier;
 }

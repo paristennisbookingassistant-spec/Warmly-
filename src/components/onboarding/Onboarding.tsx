@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import MaterialsStep, { type MaterialsData } from "./MaterialsStep";
 
 // ---------------------------------------------------------------------------
 // Step schema
@@ -18,7 +19,7 @@ interface Step {
   uploadOk?: boolean;
   options?: Option[];
   multi?: boolean;
-  custom?: "extension";
+  custom?: "extension" | "materials";
 }
 
 const STEPS: Step[] = [
@@ -38,6 +39,13 @@ const STEPS: Step[] = [
     placeholder: "Or drop your CV / LinkedIn / cover letter…",
     multiline: true,
     uploadOk: true,
+  },
+  {
+    agentMsg:
+      "Anything else you'd like to share that helps me know you better? Pick whatever you have — all optional. The more you share, the sharper my drafts will be in your voice.",
+    field: "materials",
+    label: "What can you share?",
+    custom: "materials",
   },
   {
     agentMsg:
@@ -92,6 +100,7 @@ type Answers = {
   style?: Option;
   gaps?: string[];
   extension?: { label: string };
+  materials?: MaterialsData;
 };
 
 type TranscriptEntry = { from: "agent" | "user"; text: string };
@@ -124,7 +133,9 @@ export default function Onboarding({ onDone, onSkip }: OnboardingProps) {
   const step = STEPS[stepIdx];
   const pct = Math.round((stepIdx / STEPS.length) * 100);
 
-  function submit(value: string | string[] | Option | { label: string }) {
+  function submit(
+    value: string | string[] | Option | { label: string } | MaterialsData
+  ) {
     let label: string;
     if (Array.isArray(value)) {
       label =
@@ -133,8 +144,18 @@ export default function Onboarding({ onDone, onSkip }: OnboardingProps) {
             (v) => step.options?.find((o) => o.k === v)?.label ?? v
           )
           .join(", ") || "—";
-    } else if (typeof value === "object") {
+    } else if (typeof value === "object" && value && "label" in value) {
       label = (value as { label: string }).label;
+    } else if (typeof value === "object" && value !== null) {
+      // MaterialsData — summarize for the chat transcript
+      const m = value as MaterialsData;
+      const shared: string[] = [];
+      if (m.cv) shared.push("CV");
+      if (m.past_messages) shared.push("past messages");
+      if (m.cover_letter) shared.push("cover letter");
+      if (m.career_assessment) shared.push(`${m.career_assessment.kind} results`);
+      if (m.target_preferences) shared.push("targets");
+      label = shared.length > 0 ? `Shared: ${shared.join(", ")}` : "Skipped";
     } else {
       label = String(value);
     }
@@ -390,6 +411,14 @@ export default function Onboarding({ onDone, onSkip }: OnboardingProps) {
                       </button>
                     </div>
                   </>
+                )}
+
+                {/* Materials custom step (multi-toggle cards) */}
+                {step.custom === "materials" && (
+                  <MaterialsStep
+                    onSubmit={(data) => submit(data)}
+                    onSkip={() => submit({} as MaterialsData)}
+                  />
                 )}
 
                 {/* Extension custom step */}
