@@ -92,6 +92,21 @@ async function main() {
   // Ensure profile dir exists
   fs.mkdirSync(USER_DATA_DIR, { recursive: true });
 
+  // Clean stale singleton/lock files from the previous run. If a Chromium
+  // process actually has the profile open, removing these is a no-op (the
+  // OS keeps the file handle alive). If not, removing them unblocks the
+  // next launch. Without this, force-killing a previous browser leaves
+  // exit-code-21 stragglers that prevent the next persistent context from
+  // attaching.
+  const lockArtifacts = ['lockfile', 'SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+  for (const name of lockArtifacts) {
+    try {
+      fs.unlinkSync(path.join(USER_DATA_DIR, name));
+    } catch {
+      // not present or locked — fine
+    }
+  }
+
   console.error(`[tester] Loading extension from: ${EXT_DIR}`);
   console.error(`[tester] Persistent profile: ${USER_DATA_DIR}`);
   console.error(`[tester] Window: ${opts.headed ? 'visible' : 'off-screen (extension-compatible "headless")'}`);
