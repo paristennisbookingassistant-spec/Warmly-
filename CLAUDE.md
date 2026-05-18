@@ -195,3 +195,18 @@ If this command fails, do NOT commit. Fix first.
 - Do NOT add features not in the PRD without explicit approval.
 - Do NOT use CSS frameworks other than Tailwind.
 - Do NOT skip TypeScript types for "speed." Types prevent bugs.
+
+## LinkedIn Safety Guardrails (CRITICAL)
+Read `docs/LINKEDIN_GUARDRAILS.md` before invoking any tool that touches LinkedIn (`/linkedin` skill, `tests/ext-tester.mjs`, gstack `/browse` on linkedin.com, or the Warmly extension itself).
+
+**NEVER without explicit user approval:**
+- Send a LinkedIn message (DM or InMail)
+- Send / accept / reject a connection request
+- Create a post, share, comment, like, or react
+- Edit profile (name, headline, about, photo, experiences, education, skills)
+- Change account settings (privacy, notifications, subscription)
+- Click "Send" on any compose form, even pre-filled
+
+**Allowed:** view profiles / messages / companies / jobs / connections, search, screenshot, navigate. Pre-fill drafts (text into compose box) is OK — submit is NOT.
+
+The tester agent is NEVER authorized to perform hard-rule actions. The orchestrator proposes; the user approves; only then execute.
