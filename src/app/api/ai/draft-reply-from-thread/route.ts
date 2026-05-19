@@ -282,7 +282,32 @@ Return ONLY valid JSON, no markdown fence, no prose:
   "reasoning": "1-2 sentences on which voice signals you anchored to (e.g. 'Matched the short-cadence sign-off from your past follow-ups; addressed Paul's question about the Agent Strategist role.'). Shown to the user as transparency."
 }
 
-The "draft" field is the message content ONLY — no preamble, no quotes, no "Here is your draft:".`;
+The "draft" field is the message content ONLY — no preamble, no quotes, no "Here is your draft:".
+
+## PARAGRAPH FORMATTING (critical — drafts insert directly into LinkedIn compose)
+
+Inside the "draft" string, use \\n\\n (two newlines encoded as JSON escape sequences) between paragraphs. At minimum, put:
+- The salutation on its own paragraph
+- Each substantive thought on its own paragraph
+- The sign-off / signature on its own paragraph (the sign-off line and name line may share a single \\n between them)
+
+Single \\n inside a paragraph is rare — use it only for a genuine soft line break (e.g., between "Best," and "Liyang"). Default to \\n\\n between visual blocks.
+
+Example output for a French follow-up reply:
+
+{
+  "draft": "Bonjour Ugo,\\n\\nMerci pour le suivi et les détails sur le cabinet. L'approche R&D et le focus sur la durabilité m'intéressent globalement.\\n\\nUn créneau de 30 min cette semaine serait parfait si tu as de la dispo. Dis-moi ce qui t'arrange.\\n\\nMerci !\\nLiyang",
+  "reasoning": "Matched Ugo's French + casual register from his message; kept it short like past follow-ups; closed with the slot-request pattern from your prior outreach."
+}
+
+Example output for an English short reply:
+
+{
+  "draft": "Hi Paul,\\n\\nThanks — Wednesday at 3pm works on my end. I'll send a calendar invite.\\n\\nBest,\\nLiyang",
+  "reasoning": "Same brevity Paul used; confirmed time directly without restating; matched your past follow-ups' 'Best, [name]' sign-off."
+}
+
+The draft must read like a properly-formatted message — a human typed with Enter between paragraphs, not a wall of text.`;
 
   const userPrompt = `# THE THREAD TO REPLY TO
 

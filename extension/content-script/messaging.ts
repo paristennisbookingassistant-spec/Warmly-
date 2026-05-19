@@ -37,9 +37,7 @@ const MSG_SELECTORS = {
   // bubbles and the full messaging page.
   threadContainer: [
     ".msg-s-message-list-container",
-    ".msg-s-message-list__list-container",
     "ul.msg-s-message-list-content",
-    "[data-msg-thread-id]",
     ".msg-thread",
   ],
   // The container's nearest header/toolbar — where we inject the
@@ -62,7 +60,6 @@ const MSG_SELECTORS = {
   // messages from same sender don't repeat the name)
   senderName: [
     ".msg-s-message-group__name",
-    ".msg-s-message-group__profile-link span[aria-hidden='true']",
     ".msg-s-message-group__profile-link",
   ],
   // Message body text
@@ -90,7 +87,6 @@ const MSG_SELECTORS = {
   // LinkedIn uses Quill — a contenteditable div, NOT a real <textarea>.
   composeEditor: [
     ".msg-form__contenteditable[contenteditable='true']",
-    ".msg-form__message-content [contenteditable='true']",
     "div.msg-form__contenteditable",
     "[role='textbox'][contenteditable='true']",
     "div[contenteditable='true'][aria-label*='message' i]",
@@ -105,7 +101,6 @@ const MSG_SELECTORS = {
   // this one so it's the last thing the user sees before sending.
   sendButton: [
     "button.msg-form__send-button",
-    ".msg-form__send-btn",
     "button[type='submit'].msg-form__send-button",
     ".msg-form button[type='submit']",
   ],
@@ -115,7 +110,6 @@ const MSG_SELECTORS = {
   composeFooter: [
     ".msg-form__right-actions",
     ".msg-form__footer",
-    ".msg-form__msg-content-container__action-buttons",
   ],
 };
 
@@ -667,9 +661,13 @@ async function handleCaptureClick(
  *   1. Find the contenteditable element scoped to this thread's panel
  *   2. Remove any placeholder paragraph
  *   3. Focus the editor + select existing content
- *   4. Use `document.execCommand('insertText')` — deprecated but still
- *      the most reliable way to insert text into a contenteditable
- *      with all the right input events firing so Quill + React update
+ *   4. For multi-paragraph drafts: inject `<p>`-wrapped HTML directly,
+ *      then dispatch synthetic input/change events. This is the PRIMARY
+ *      path because Quill renders execCommand's `\n` as `<br>` (soft
+ *      breaks) instead of real paragraph separators, collapsing the
+ *      draft into a single visual block.
+ *   5. For single-line drafts: use `document.execCommand('insertText')`
+ *      which fires the right events without HTML manipulation.
  *
  * Returns true on success, false if no compose element was found.
  */
@@ -700,24 +698,25 @@ function insertDraftIntoCompose(panel: ParentNode, draft: string): boolean {
     // skip
   }
 
-  // Prefer execCommand — fires input events Quill/React listen for.
-  let success = false;
-  try {
-    success = document.execCommand("insertText", false, draft);
-  } catch {
-    success = false;
-  }
+  // In LinkedIn's Quill editor, execCommand("insertText") translates \n\n
+  // into <br><br> (soft breaks) instead of separate paragraphs. That
+  // collapses our drafts into one visual block. So for any multi-line
+  // draft, build the <p>-wrapped HTML directly and inject it; Quill picks
+  // it up via the input event we dispatch.
+  const hasParagraphs = /\n/.test(draft);
 
-  // Fallback: set innerHTML with paragraphs and dispatch a synthetic
-  // input event. Works less reliably but covers cases where
-  // execCommand returns false.
-  if (!success || editor.innerText.trim().length === 0) {
+  if (hasParagraphs) {
     const paragraphs = draft
       .split(/\n\n+/)
       .map((p) => {
         const lines = p
           .split("\n")
-          .map((l) => l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"))
+          .map((l) =>
+            l
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;")
+          )
           .join("<br>");
         return `<p>${lines}</p>`;
       })
@@ -725,9 +724,24 @@ function insertDraftIntoCompose(panel: ParentNode, draft: string): boolean {
     editor.innerHTML = paragraphs;
     editor.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true }));
     editor.dispatchEvent(new Event("change", { bubbles: true }));
+  } else {
+    // Single-line draft -- execCommand is fine and fires the right events
+    let success = false;
+    try {
+      success = document.execCommand("insertText", false, draft);
+    } catch {
+      success = false;
+    }
+    if (!success || editor.innerText.trim().length === 0) {
+      editor.innerHTML = draft
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      editor.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true }));
+    }
   }
 
-  // Always fire one more input event to nudge React state
+  // Final nudge so React state catches up (keep this regardless of path)
   editor.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true }));
 
   return editor.innerText.trim().length > 0;
