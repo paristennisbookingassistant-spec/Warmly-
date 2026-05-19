@@ -148,8 +148,11 @@ export default function ViewsLayout({
     if (onboarded !== true) return; // skip during onboarding / pre-auth
 
     let cancelled = false;
-    const fetchCount = () =>
-      fetch("/api/contacts/pending-count", { credentials: "include" })
+    const fetchCount = () => {
+      // Skip the network call while the tab is backgrounded to avoid
+      // unnecessary requests when the user isn't looking at the app.
+      if (document.visibilityState !== "visible") return;
+      return fetch("/api/contacts/pending-count", { credentials: "include" })
         .then((r) => (r.ok ? r.json() : null))
         .then((body: { data?: { pending_count?: number } } | null) => {
           if (cancelled || !body?.data) return;
@@ -158,9 +161,10 @@ export default function ViewsLayout({
         .catch(() => {
           // network blip — silent retry next tick
         });
+    };
 
     void fetchCount();
-    const interval = window.setInterval(fetchCount, 30_000);
+    const interval = window.setInterval(fetchCount, 60_000);
     return () => {
       cancelled = true;
       window.clearInterval(interval);

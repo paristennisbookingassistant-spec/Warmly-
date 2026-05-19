@@ -20,30 +20,54 @@ export function useChat() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [lastFailedMessage, setLastFailedMessage] = useState<string | null>(null);
 
-  // Load conversations on mount
+  // Mount effect: fetch conversation list AND first conversation's messages in
+  // parallel so the chat view loads in a single round-trip pass instead of two.
   useEffect(() => {
-    async function loadConversations() {
+    async function loadInitial() {
       try {
-        const res = await fetch("/api/conversations?sort_by=updated_at&sort_order=desc");
-        const json = await res.json();
-        if (json.data) {
-          setConversations(json.data.items);
-          // Auto-select the most recent conversation
-          if (json.data.items.length > 0 && !activeConversation) {
-            setActiveConversation(json.data.items[0]);
-          }
+        const convRes = await fetch("/api/conversations?sort_by=updated_at&sort_order=desc");
+        const convJson = await convRes.json();
+        const items: Conversation[] = convJson.data?.items ?? [];
+        setConversations(items);
+
+        const target = items[0] ?? null;
+        if (!target) {
+          // No conversations — nothing else to load.
+          return;
+        }
+
+        // We have a target ID immediately — fire messages fetch without waiting
+        // for a re-render to propagate setActiveConversation.
+        setIsLoadingMessages(true);
+        setMessages([]);
+
+        const msgRes = await fetch(`/api/conversations/${target.id}/messages`);
+        const msgJson = await msgRes.json();
+
+        // Apply both results in the same tick.
+        setActiveConversation(target);
+        if (msgJson.data) {
+          setMessages(msgJson.data.items);
         }
       } finally {
         setIsLoadingConversations(false);
+        setIsLoadingMessages(false);
       }
     }
-    loadConversations();
+    loadInitial();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load messages when active conversation changes
+  // Subsequent conversation switches (user clicks a different conversation in
+  // the sidebar). Not triggered on first mount because activeConversation starts
+  // null — the mount effect above handles the initial load.
+  const [isMounted, setIsMounted] = useState(false);
   useEffect(() => {
-    if (!activeConversation) return;
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isMounted || !activeConversation) return;
 
     async function loadMessages() {
       setIsLoadingMessages(true);
@@ -60,7 +84,7 @@ export function useChat() {
     }
 
     loadMessages();
-  }, [activeConversation]);
+  }, [activeConversation, isMounted]);
 
   const selectConversation = useCallback((id: string) => {
     const conv = conversations.find((c) => c.id === id) ?? null;

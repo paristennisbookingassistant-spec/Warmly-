@@ -57,6 +57,8 @@ export default function Avatar({
       <img
         src={imageSrc}
         alt={name}
+        loading="lazy"
+        decoding="async"
         onError={() => setImgError(true)}
         className={cn(
           "rounded-full object-cover flex-shrink-0",

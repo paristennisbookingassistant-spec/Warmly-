@@ -54,6 +54,14 @@ const ListContactsQuerySchema = z.object({
    * overrides the default "exclude pending/skipped" behavior below.
    */
   user_action: z.enum(["pending", "saved", "skipped", "starred"]).optional(),
+  /**
+   * When true, omit the heavy profile_snapshot column (used only on the
+   * detail view). See LIST_COLUMNS comment below.
+   */
+  lite: z
+    .string()
+    .optional()
+    .transform((v) => v === "true"),
 });
 
 const CreateContactSchema = z.object({
@@ -101,15 +109,52 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const { page, per_page, status, company, tier, discovered_after, sort_by, sort_order, search, ids, user_action } =
+  const { page, per_page, status, company, tier, discovered_after, sort_by, sort_order, search, ids, user_action, lite } =
     parsed.data;
 
   const from = (page - 1) * per_page;
   const to = from + per_page - 1;
 
+  // `lite=true` skips the heavy profile_snapshot column (a large JSON blob
+  // imported from LinkedIn) used only on /contacts/[id] detail view. The list
+  // view doesn't render it, so requesting it on every list refresh inflates
+  // payload size 5-10x for no benefit. career_history and education are kept
+  // because ContactList.tsx reads them for context tag derivation. The detail
+  // view continues to hit this route without `lite`, getting the full row.
+  // Response shape: Partial<Contact>[] when lite=true (profile_snapshot absent).
+  const LIST_COLUMNS = [
+    "id",
+    "user_id",
+    "name",
+    "current_title",
+    "company",
+    "location",
+    "avatar_url",
+    "tier",
+    "relevance_score",
+    "scoring_breakdown",
+    "user_action",
+    "recommendation_reason",
+    "suggested_hook",
+    "status",
+    "source",
+    "linkedin_url",
+    "career_history",
+    "education",
+    "last_interaction_at",
+    "created_at",
+    "updated_at",
+    "reviewed_at",
+    "discovered_at",
+    "discovery_session_id",
+    "notes",
+  ].join(", ");
+
+  const columns = lite ? LIST_COLUMNS : "*";
+
   let query = supabase
     .from("contacts")
-    .select("*", { count: "exact" })
+    .select(columns, { count: "exact" })
     .eq("user_id", user.id);
 
   // Triage filter:
@@ -161,7 +206,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const response: ListContactsResponse = {
     data: buildPaginatedResponse(
-      (data ?? []) as Contact[],
+      // When lite=true, profile_snapshot is absent; cast via unknown to satisfy
+      // the Contact[] signature — callers that need the full shape must omit lite.
+      (data ?? []) as unknown as Contact[],
       count ?? 0,
       page,
       per_page

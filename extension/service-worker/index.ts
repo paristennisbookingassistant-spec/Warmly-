@@ -1647,10 +1647,34 @@ async function handleMessage(
           }
 
           // Human-like delay before next profile (15-45 seconds)
+          // Broadcast a per-second countdown so the popup shows "next in Xs"
+          // instead of appearing frozen.
           if (i < profiles.length - 1) {
-            const delay = 15000 + Math.random() * 30000;
-            console.debug(`[CDP] Waiting ${(delay / 1000).toFixed(0)}s before next profile...`);
-            await sleep(delay);
+            const totalWaitMs = 15000 + Math.random() * 30000;
+            console.debug(`[CDP] Waiting ${(totalWaitMs / 1000).toFixed(0)}s before next profile...`);
+            const startWaitAt = Date.now();
+            const TICK_MS = 1000;
+            let nextNotifyAt = startWaitAt;
+
+            while (true) {
+              const elapsed = Date.now() - startWaitAt;
+              const remaining = totalWaitMs - elapsed;
+              if (remaining <= 0) break;
+
+              if (Date.now() >= nextNotifyAt) {
+                chrome.runtime.sendMessage({
+                  type: "SESSION_PROGRESS",
+                  data: {
+                    state: "WAITING_BETWEEN_PROFILES",
+                    profilesVisited: i + 1,
+                    nextProfileInSec: Math.ceil(remaining / 1000),
+                  },
+                }).catch(() => { /* popup may be closed; ignore */ });
+                nextNotifyAt += TICK_MS;
+              }
+
+              await sleep(Math.min(TICK_MS, remaining));
+            }
           }
         }
 

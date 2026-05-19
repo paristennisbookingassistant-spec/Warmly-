@@ -101,6 +101,8 @@ interface PopupState {
   lastSessionProfiles: number | null;
   /** Ranked picks with one-line rationale, populated on completion */
   lastSessionRankings: SessionRanking[] | null;
+  /** Countdown seconds until next profile fetch; non-null only during inter-profile wait */
+  nextProfileInSec: number | null;
 }
 
 /** A single ranked candidate from /api/ai/rank-batch surfaced in the popup. */
@@ -463,6 +465,7 @@ export default function Popup() {
     rateLimitWaitMs: null,
     lastSessionProfiles: null,
     lastSessionRankings: null,
+    nextProfileInSec: null,
   });
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
@@ -548,6 +551,7 @@ export default function Popup() {
 
         setPs((prev) => {
           if (!prev.session) return prev;
+          const isWaiting = data?.state === "WAITING_BETWEEN_PROFILES";
           return {
             ...prev,
             session: {
@@ -574,6 +578,9 @@ export default function Popup() {
               data?.state === "COMPLETED"
                 ? rankingsFromMsg ?? prev.lastSessionRankings
                 : prev.lastSessionRankings,
+            nextProfileInSec: isWaiting
+              ? (data?.nextProfileInSec as number) ?? null
+              : null,
           };
         });
 
@@ -854,7 +861,7 @@ export default function Popup() {
   }
 
   // ---- Render ----
-  const { view, session, userName, sessionsToday, maxSessionsPerDay, rateLimitWaitMs, lastSessionProfiles, isOnLinkedInProfile } = ps;
+  const { view, session, userName, sessionsToday, maxSessionsPerDay, rateLimitWaitMs, lastSessionProfiles, isOnLinkedInProfile, nextProfileInSec } = ps;
 
   if (view === "loading") {
     return (
@@ -933,6 +940,11 @@ export default function Popup() {
           <p style={S.progressText}>
             {profilesViewed} / 25 profiles
           </p>
+          {nextProfileInSec !== null && (
+            <p style={{ fontSize: "11px", color: T.ink3, marginTop: "2px" }}>
+              Pausing {nextProfileInSec}s before next profile (LinkedIn rate limit)
+            </p>
+          )}
           <div style={S.progressTrack}>
             <div style={S.progressFill(progressPct)} />
           </div>
