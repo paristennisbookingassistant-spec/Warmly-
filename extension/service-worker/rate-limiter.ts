@@ -11,10 +11,18 @@ import {
   MAX_PROFILES_PER_SESSION,
   MAX_SESSIONS_PER_DAY,
   MIN_COOLDOWN_MS,
+  LIST_THROTTLE_MS,
+  BATCH_THROTTLE_MS,
   STORAGE_KEYS,
 } from "../shared/constants";
 
-export { MAX_PROFILES_PER_SESSION, MAX_SESSIONS_PER_DAY, MIN_COOLDOWN_MS };
+export {
+  MAX_PROFILES_PER_SESSION,
+  MAX_SESSIONS_PER_DAY,
+  MIN_COOLDOWN_MS,
+  LIST_THROTTLE_MS,
+  BATCH_THROTTLE_MS,
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -129,4 +137,29 @@ export async function recordSessionEnd(): Promise<void> {
   const state = await loadState();
   state.lastSessionEnd = Date.now();
   await saveState(state);
+}
+
+// ---------------------------------------------------------------------------
+// Sync throttle tiers (LinkedIn Network Sync)
+// These are informational exports — actual throttle timing is enforced in
+// the content script (connections-sync.ts) via sleep() + jitter.
+// Hard-coded values; not user-configurable.
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the minimum enforced delay between connections-list page requests.
+ * ±25% jitter is applied by the content script at call time.
+ * @returns LIST_THROTTLE_MS — hard-coded, non-overridable.
+ */
+export function getListThrottleMs(): number {
+  return LIST_THROTTLE_MS;
+}
+
+/**
+ * Returns the minimum enforced delay between batch profile-enrichment requests.
+ * ±25% jitter is applied by the content script at call time.
+ * @returns BATCH_THROTTLE_MS — hard-coded, non-overridable.
+ */
+export function getBatchThrottleMs(): number {
+  return BATCH_THROTTLE_MS;
 }

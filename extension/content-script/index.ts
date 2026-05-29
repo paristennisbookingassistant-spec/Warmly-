@@ -19,7 +19,8 @@ import {
 import { extractProfileFromDOM } from "./dom-reader";
 import { isProfilePage } from "./dom-reader";
 import { initMessagingCapture } from "./messaging";
-import type { StartDiscoveryPayload, ExtensionMessage } from "../shared/types";
+import { startSync, abortSync } from "./connections-sync";
+import type { StartDiscoveryPayload, ExtensionMessage, StartNetworkSyncPayload } from "../shared/types";
 
 // ---------------------------------------------------------------------------
 // Banner log — fires unconditionally on every LinkedIn page load.
@@ -167,6 +168,33 @@ chrome.runtime.onMessage.addListener(
             sendResponse({ ok: false, reason: "extraction_failed" });
           });
         return true; // keep message channel open for async sendResponse
+      }
+
+      // ---- LinkedIn Network Sync ------------------------------------------
+      case "TRIGGER_NETWORK_SYNC": {
+        const syncPayload = message.payload as StartNetworkSyncPayload & { sync_job_id?: string };
+        const userId = syncPayload?.user_id;
+        const jobId = syncPayload?.sync_job_id;
+
+        if (!userId) {
+          sendResponse({ ok: false, reason: "missing_user_id" });
+          break;
+        }
+
+        // Fire-and-forget — sync loop runs in background and emits progress via SW
+        startSync(userId, jobId)
+          .catch((err) => {
+            console.error("[Content Script] startSync error:", err);
+          });
+
+        sendResponse({ ok: true });
+        break;
+      }
+
+      case "STOP_NETWORK_SYNC": {
+        abortSync();
+        sendResponse({ ok: true });
+        break;
       }
 
       default:

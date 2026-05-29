@@ -89,7 +89,15 @@ export type ExtensionMessageType =
   | "RECORD_SESSION_START"
   | "RECORD_SESSION_END"
   | "CREATE_SESSION"
-  | "SAVE_PROFILE";
+  | "SAVE_PROFILE"
+  // Network sync messages (CS ↔ SW)
+  | "SYNC_CREATE_JOB"
+  | "SYNC_UPDATE_JOB"
+  | "SYNC_BULK_IMPORT"
+  | "SYNC_GET_JOB"
+  // Triggered by SW relay → LinkedIn content script
+  | "TRIGGER_NETWORK_SYNC"
+  | "STOP_NETWORK_SYNC";
 
 export interface ExtensionMessage {
   type: ExtensionMessageType;
@@ -138,4 +146,161 @@ export interface RateLimitState {
   last_session_started_at: number | null;
   /** Total profiles viewed today across all sessions */
   profiles_today: number;
+}
+
+// ---------------------------------------------------------------------------
+// LinkedIn Network Sync — Voyager API types
+// ---------------------------------------------------------------------------
+
+/**
+ * A single connection record from the connections-list endpoint (Phase 1).
+ * Fields are nullable because Voyager response shapes vary and we degrade
+ * gracefully rather than failing the whole page on a missing field.
+ */
+export interface VoyagerConnection {
+  /** The full URN, e.g. "urn:li:fsd_profile:ACoAA..." */
+  urn: string;
+  /** Numeric entity ID extracted from the URN */
+  entityId: string;
+  name: string | null;
+  headline: string | null;
+  /** Current employer name, if present in the list response */
+  currentCompany: string | null;
+  /** LinkedIn profile URL derived from the public identifier */
+  linkedinUrl: string | null;
+  /** Profile photo URL (LinkedIn CDN) */
+  photoUrl: string | null;
+  connectedAt: string | null;
+}
+
+/**
+ * A deep profile record from the batch enrichment endpoint (Phase 2).
+ */
+export interface VoyagerProfile {
+  urn: string;
+  entityId: string;
+  name: string | null;
+  headline: string | null;
+  location: string | null;
+  linkedinUrl: string | null;
+  photoUrl: string | null;
+  bio: string | null;
+  experience: Array<{
+    title: string;
+    company: string;
+    duration: string | null;
+    startDate: string | null;
+    endDate: string | null;
+  }>;
+  education: Array<{
+    school: string;
+    degree: string | null;
+    fieldOfStudy: string | null;
+    startYear: string | null;
+    endYear: string | null;
+  }>;
+}
+
+/**
+ * Payload sent to /api/contacts/bulk-import.
+ * Phase 1 sends basic contacts; Phase 2 sends enriched contacts.
+ */
+export interface BulkImportRequest {
+  sync_job_id: string;
+  phase: 1 | 2;
+  contacts: BulkImportContact[];
+}
+
+export interface BulkImportContact {
+  linkedin_url: string | null;
+  linkedin_urn: string;
+  name: string | null;
+  headline: string | null;
+  current_company: string | null;
+  photo_url: string | null;
+  location: string | null;
+  linkedin_bio: string | null;
+  experience: VoyagerProfile["experience"] | null;
+  education: VoyagerProfile["education"] | null;
+  connected_at: string | null;
+}
+
+/**
+ * Sync job record — mirrors the backend sync_jobs table.
+ * Also persisted to chrome.storage.local for resumability.
+ */
+export type SyncJobStatus =
+  | "pending"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed";
+
+export interface SyncJob {
+  id: string;
+  user_id: string;
+  status: SyncJobStatus;
+  /** ISO timestamp of creation */
+  created_at: string;
+  /** Total connections discovered in Phase 1 */
+  total_connections: number | null;
+  /** Connections imported so far (Phase 1 progress) */
+  connections_imported: number;
+  /** Profiles enriched so far (Phase 2 progress) */
+  profiles_enriched: number;
+  /** Last successfully completed Phase 1 page index (0-based, for resume) */
+  last_completed_page: number;
+  /** Last successfully processed URN index in Phase 2 (for resume) */
+  last_processed_urn_index: number;
+  /** All collected URNs — needed for Phase 2 and resume */
+  collected_urns: string[];
+  /** Whether the 2500-cap was hit */
+  cap_hit: boolean;
+  /** Consecutive 429/999 count (for exponential backoff) */
+  backoff_count: number;
+  /** Timestamp when sync can auto-resume after a backoff pause (ms) */
+  resume_after_ts: number | null;
+  updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Web app ↔ extension sync message types
+// ---------------------------------------------------------------------------
+
+export type SyncMessageType =
+  | "START_NETWORK_SYNC"
+  | "SYNC_PROGRESS"
+  | "SYNC_COMPLETE"
+  | "SYNC_FAILED"
+  | "SYNC_STATUS_REQUEST"
+  | "SYNC_STATUS_RESPONSE";
+
+export interface StartNetworkSyncPayload {
+  /** Supabase user ID — verified against stored session */
+  user_id: string;
+  /** Existing sync_job_id to resume, or omit for a fresh sync */
+  sync_job_id?: string;
+}
+
+export interface SyncProgressPayload {
+  sync_job_id: string;
+  status: SyncJobStatus;
+  phase: 1 | 2;
+  connections_imported: number;
+  profiles_enriched: number;
+  total_connections: number | null;
+  cap_hit: boolean;
+}
+
+export interface SyncCompletePayload {
+  sync_job_id: string;
+  connections_imported: number;
+  profiles_enriched: number;
+  total_connections: number | null;
+  cap_hit: boolean;
+}
+
+export interface SyncFailedPayload {
+  sync_job_id: string | null;
+  reason: string;
 }

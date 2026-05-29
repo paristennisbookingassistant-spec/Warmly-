@@ -23,8 +23,13 @@ import type {
   EducationEntry,
   GoalStatus,
   GoalType,
+  LinkedInEducationEntry,
+  LinkedInExperienceEntry,
   NetworkingGoal,
   NetworkingPreferences,
+  SyncJob,
+  SyncJobPhase,
+  SyncJobStatus,
   User,
   UserGoals,
 } from "./database";
@@ -355,3 +360,95 @@ export interface UpdateUserRequest {
 }
 
 export type UpdateUserResponse = ApiResponse<User>;
+
+// ---------------------------------------------------------------------------
+// LinkedIn Network Sync — /api/sync-jobs
+// ---------------------------------------------------------------------------
+
+export interface CreateSyncJobRequest {
+  // No body required — server creates the job for the authed user
+}
+
+export type CreateSyncJobResponse = ApiResponse<SyncJob>;
+
+export interface PatchSyncJobRequest {
+  status?: SyncJobStatus;
+  phase?: SyncJobPhase;
+  total_contacts?: number;
+  processed_contacts?: number;
+  last_completed_page?: number;
+  last_processed_urn_index?: number;
+  error?: string | null;
+  completed_at?: string | null;
+}
+
+export type PatchSyncJobResponse = ApiResponse<SyncJob>;
+
+export type GetSyncJobResponse = ApiResponse<SyncJob>;
+
+/**
+ * GET /api/sync-jobs (no id) → returns the user's most recent sync_job,
+ * regardless of status, or null if the user has never synced.
+ * Used by Settings → Connections to render a "last sync" summary row.
+ */
+export type GetLatestSyncJobResponse = ApiResponse<SyncJob | null>;
+
+// ---------------------------------------------------------------------------
+// LinkedIn Network Sync — /api/contacts/bulk-import
+// ---------------------------------------------------------------------------
+
+/** Date range shape shared by experience and education entries */
+export interface VoyagerDateRange {
+  start: string | null;
+  end: string | null;
+}
+
+/** Single contact record as sent by the extension (Phase 1 or Phase 2) */
+export interface BulkImportContactItem {
+  linkedinUrl: string;
+  linkedinUrn: string;
+  name: string;
+  headline?: string;
+  photoUrl?: string;
+  currentCompany?: string;
+  currentTitle?: string;
+  // Phase 2 only — omitted during Phase 1 list sync
+  bio?: string;
+  experience?: Array<{
+    title: string;
+    company: string;
+    dateRange?: VoyagerDateRange;
+    description?: string;
+    location?: string;
+  }>;
+  education?: Array<{
+    school: string;
+    degree?: string;
+    fieldOfStudy?: string;
+    dateRange?: VoyagerDateRange;
+  }>;
+  location?: string;
+}
+
+export interface BulkImportRequest {
+  /** The sync_job this batch belongs to */
+  syncJobId: string;
+  /** "list" = Phase 1 basic data; "batch" = Phase 2 deep enrichment */
+  phase: "list" | "batch";
+  /** Up to 50 contacts per batch (extension enforces this client-side) */
+  batch: BulkImportContactItem[];
+}
+
+export interface BulkImportResponseData {
+  /** Contacts that did not previously exist and were inserted */
+  inserted: number;
+  /** Contacts that already existed and were updated */
+  updated: number;
+  /** Per-item failures — batch as a whole still succeeds */
+  errors: Array<{ linkedinUrn: string; error: string }>;
+}
+
+export type BulkImportResponse = ApiResponse<BulkImportResponseData>;
+
+// Re-export enrichment entry types for convenience (frontend + extension can import from api.ts)
+export type { LinkedInExperienceEntry, LinkedInEducationEntry, SyncJob, SyncJobStatus, SyncJobPhase };

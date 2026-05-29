@@ -210,6 +210,80 @@ export async function uploadProfile(
 }
 
 // ---------------------------------------------------------------------------
+// LinkedIn Network Sync — bulk import + sync job management
+// ---------------------------------------------------------------------------
+
+import type { BulkImportRequest, SyncJob } from "../shared/types";
+
+/**
+ * POSTs a batch of contacts to the bulk-import endpoint.
+ * Returns true on success, null on failure.
+ *
+ * Phase 1: basic contacts (name, headline, photo, company, URL)
+ * Phase 2: enriched contacts (experience, education, location, bio)
+ */
+export async function bulkImportContacts(
+  request: BulkImportRequest
+): Promise<{ imported: number } | null> {
+  return apiFetch<{ imported: number }>("/api/contacts/bulk-import", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+/**
+ * Creates a sync_job record on the backend.
+ * Returns the created SyncJob on success, null on failure.
+ */
+export async function createSyncJobRecord(userId: string): Promise<SyncJob | null> {
+  const now = new Date().toISOString();
+  const localJob: SyncJob = {
+    id: crypto.randomUUID(),
+    user_id: userId,
+    status: "pending",
+    created_at: now,
+    updated_at: now,
+    total_connections: null,
+    connections_imported: 0,
+    profiles_enriched: 0,
+    last_completed_page: -1,
+    last_processed_urn_index: 0,
+    collected_urns: [],
+    cap_hit: false,
+    backoff_count: 0,
+    resume_after_ts: null,
+  };
+
+  // Attempt to persist to backend (best-effort; local fallback if offline)
+  const backendJob = await apiFetch<SyncJob>("/api/sync-jobs", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId }),
+  });
+
+  // Use backend-assigned ID if available; otherwise use local UUID
+  if (backendJob?.id) {
+    return { ...localJob, ...backendJob };
+  }
+
+  console.warn("[API Client] createSyncJob: backend unavailable, using local UUID");
+  return localJob;
+}
+
+/**
+ * Updates a sync_job record on the backend.
+ * Best-effort — failures are logged but not thrown.
+ */
+export async function updateSyncJobRecord(
+  jobId: string,
+  update: Partial<SyncJob>
+): Promise<void> {
+  await apiFetch(`/api/sync-jobs/${jobId}`, {
+    method: "PATCH",
+    body: JSON.stringify(update),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Batch ranking — runs after discovery saves N candidates so the popup can
 // show "picked because: shared INSEAD class, same Bain → growth VC pivot..."
 // rather than opaque scores. One LLM call, comparative ranking using

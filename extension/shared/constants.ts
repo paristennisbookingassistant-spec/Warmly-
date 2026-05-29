@@ -140,7 +140,65 @@ export const STORAGE_KEYS = {
   AUTH_TOKEN: "auth_token",
   SUPABASE_SESSION: "supabase_session",
   BACKEND_URL: "backend_url",
+  /** Persisted sync-job state for resume-on-reload */
+  SYNC_JOB: "sync_job",
 } as const;
+
+// ---------------------------------------------------------------------------
+// LinkedIn Network Sync — Voyager API throttle tiers
+// Hard-coded, non-user-configurable per spec requirement.
+// ±25% jitter is applied at call sites.
+// ---------------------------------------------------------------------------
+
+/**
+ * Base delay between connections-list page fetches (Phase 1).
+ * Effective range with ±25% jitter: 2,250 ms – 3,750 ms.
+ * Spec minimum: 3 s. Keep base at 3 s so jitter floor stays just above 2 s.
+ */
+export const LIST_THROTTLE_MS = 3_000;
+
+/**
+ * Base delay between batch profile-enrichment fetches (Phase 2).
+ * Effective range with ±25% jitter: 7,500 ms – 12,500 ms.
+ */
+export const BATCH_THROTTLE_MS = 10_000;
+
+/**
+ * Maximum number of connections to sync per plan tier (v1 cap).
+ * Sync stops at this count and sets cap_hit: true on SYNC_COMPLETE.
+ */
+export const PLAN_CAP = 2_500;
+
+/**
+ * Number of profile URNs fetched per batch-enrichment request (Phase 2).
+ * LinkedIn's Voyager batch endpoint handles ~25 comfortably.
+ */
+export const BATCH_SIZE = 25;
+
+/**
+ * Number of connections fetched per connections-list page (Phase 1).
+ * LinkedIn's `count` parameter for the relationships endpoint.
+ */
+export const CONNECTIONS_PAGE_SIZE = 40;
+
+/**
+ * Number of basic contacts batched before sending to service worker (Phase 1).
+ * Service worker forwards to /api/contacts/bulk-import.
+ */
+export const BASIC_BATCH_SIZE = 50;
+
+/**
+ * How long to pause sync after a 429 / 999 response from LinkedIn (ms).
+ * 60 minutes per spec.
+ */
+export const RATE_LIMIT_PAUSE_MS = 60 * 60 * 1_000;
+
+/**
+ * Decoration ID for the full profile endpoint.
+ * Version-controlled here — update when LinkedIn rotates the schema.
+ */
+export const VOYAGER_DECORATION_ID =
+  "com.linkedin.voyager.dash.deco.identity.profile.FullProfile";
 
 // ---------------------------------------------------------------------------
 // Default backend URL

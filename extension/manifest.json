@@ -9,7 +9,8 @@
     "alarms",
     "tabs",
     "activeTab",
-    "debugger"
+    "debugger",
+    "cookies"
   ],
 
   "host_permissions": [

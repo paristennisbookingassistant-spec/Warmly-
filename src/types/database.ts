@@ -346,6 +346,30 @@ export interface Contact {
   user_action: ContactUserAction | null;
   /** Timestamp of the swipe action. NULL until the user makes a decision. */
   reviewed_at: ISODateString | null;
+
+  // ---------------------------------------------------------------------------
+  // LinkedIn Network Sync enrichment fields (added in migration 20260529000001)
+  // ---------------------------------------------------------------------------
+
+  /** LinkedIn profile URN, e.g. "urn:li:fsd_profile:ACoAAA...". Set in Phase 1. */
+  linkedin_urn: string | null;
+  /** LinkedIn "About" / headline text. Set in Phase 2. */
+  linkedin_bio: string | null;
+  /**
+   * LinkedIn work experience entries from Phase 2 deep profile.
+   * Shape: LinkedInExperienceEntry[]
+   */
+  experience: LinkedInExperienceEntry[] | null;
+  /**
+   * LinkedIn education entries from Phase 2 deep profile.
+   * Stored in education_v2 to avoid overwriting hand-entered education data.
+   * Shape: LinkedInEducationEntry[]
+   */
+  education_v2: LinkedInEducationEntry[] | null;
+  /** LinkedIn CDN profile photo URL. v1 URL-only; Storage upload is v2. */
+  photo_url: string | null;
+  /** FK to sync_jobs.id — which bulk sync created/last updated this contact. */
+  sync_job_id: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -469,6 +493,61 @@ export interface NetworkingGoal {
   /** Computed from real data — see PRD Section 5.6 */
   progress: GoalProgress;
   status: GoalStatus;
+}
+
+// ---------------------------------------------------------------------------
+// LinkedIn Network Sync
+// ---------------------------------------------------------------------------
+
+export type SyncJobStatus = "pending" | "in_progress" | "paused" | "completed" | "failed";
+export type SyncJobPhase = "list" | "batch" | "done";
+
+/**
+ * Tracks the state of a bulk LinkedIn connection sync for a user.
+ * Resumable: last_completed_page (Phase 1) and last_processed_urn_index (Phase 2)
+ * allow the extension to pick up exactly where it left off after a browser close.
+ */
+export interface SyncJob {
+  id: string;
+  user_id: string;
+  status: SyncJobStatus;
+  phase: SyncJobPhase;
+  /** Total connections discovered in Phase 1 (updated as pages arrive) */
+  total_contacts: number;
+  /** Contacts fully processed (upserted into the contacts table) */
+  processed_contacts: number;
+  /** Last connections-list page successfully flushed to the backend (0 = not started) */
+  last_completed_page: number;
+  /** Last URN index processed during Phase 2 batch enrichment (0 = not started) */
+  last_processed_urn_index: number;
+  /** Human-readable error when status is "failed" or "paused" */
+  error: string | null;
+  started_at: ISODateString;
+  updated_at: ISODateString;
+  completed_at: ISODateString | null;
+}
+
+/**
+ * One work-experience entry from a LinkedIn deep profile (Phase 2 enrichment).
+ * Stored in contacts.experience (JSONB array).
+ */
+export interface LinkedInExperienceEntry {
+  title: string;
+  company: string;
+  dateRange: { start: string | null; end: string | null };
+  description?: string;
+  location?: string;
+}
+
+/**
+ * One education entry from a LinkedIn deep profile (Phase 2 enrichment).
+ * Stored in contacts.education_v2 (JSONB array).
+ */
+export interface LinkedInEducationEntry {
+  school: string;
+  degree?: string;
+  fieldOfStudy?: string;
+  dateRange: { start: string | null; end: string | null };
 }
 
 // ---------------------------------------------------------------------------

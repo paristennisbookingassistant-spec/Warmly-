@@ -1732,6 +1732,78 @@ async function handleMessage(
       }
     }
 
+    // ---- LinkedIn Network Sync --------------------------------------------
+    case "START_NETWORK_SYNC": {
+      const { handleStartNetworkSync } = await import("./sync-coordinator");
+      return handleStartNetworkSync(
+        message.payload as import("../shared/types").StartNetworkSyncPayload
+      );
+    }
+
+    case "SYNC_CREATE_JOB": {
+      const { handleCreateJob } = await import("./sync-coordinator");
+      return handleCreateJob(
+        message.payload as { user_id: string }
+      );
+    }
+
+    case "SYNC_GET_JOB": {
+      const { handleGetJob } = await import("./sync-coordinator");
+      return handleGetJob(
+        message.payload as { job_id: string }
+      );
+    }
+
+    case "SYNC_UPDATE_JOB": {
+      const { handleUpdateJob } = await import("./sync-coordinator");
+      await handleUpdateJob(
+        message.payload as Partial<import("../shared/types").SyncJob> & { id: string }
+      );
+      return { ok: true };
+    }
+
+    case "SYNC_BULK_IMPORT": {
+      const { handleBulkImport } = await import("./sync-coordinator");
+      await handleBulkImport(
+        message.payload as import("../shared/types").BulkImportRequest
+      );
+      return { ok: true };
+    }
+
+    case "SYNC_STATUS_REQUEST": {
+      const { loadPersistedSyncJob } = await import("./sync-coordinator");
+      const job = await loadPersistedSyncJob();
+      return { ok: true, job };
+    }
+
+    case "GET_CSRF_TOKEN": {
+      // Fallback: content script couldn't read document.cookie (HttpOnly JSESSIONID)
+      const { getCsrfTokenViaCookies } = await import("./sync-coordinator");
+      const csrfToken = await getCsrfTokenViaCookies();
+      return { csrfToken };
+    }
+
+    case "TRIGGER_NETWORK_SYNC": {
+      // SW → LinkedIn content script: start/resume the sync loop
+      const tabs = await chrome.tabs.query({ url: ["*://www.linkedin.com/*"] });
+      for (const tab of tabs) {
+        if (tab.id) {
+          chrome.tabs.sendMessage(tab.id, message).catch(() => {});
+        }
+      }
+      return { ok: true };
+    }
+
+    // Web app relay (content script on warmly.app sends WEBAPP_* messages)
+    case "WEBAPP_SYNC_PROGRESS":
+    case "WEBAPP_SYNC_COMPLETE":
+    case "WEBAPP_SYNC_FAILED": {
+      const { handleWebAppRelay } = await import("./sync-coordinator");
+      const type = (message.type as string).replace("WEBAPP_", "");
+      await handleWebAppRelay(type, message.payload);
+      return { ok: true };
+    }
+
     default:
       console.warn("[SW] Unknown message type:", message.type);
       return null;
