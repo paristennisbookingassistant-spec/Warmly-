@@ -44,6 +44,33 @@ export async function clearPersistedSyncJob(): Promise<void> {
   await chrome.storage.local.remove(STORAGE_KEYS.SYNC_JOB);
 }
 
+/**
+ * Builds a fresh extension-shaped SyncJob seeded with a canonical id.
+ * Used when the web app created the sync_job server-side (so it exists in the
+ * backend with that id) but the extension has no local copy yet. The extension
+ * model is richer than the backend record (collected_urns, cap_hit, etc.), so
+ * we materialize a local job rather than trying to map the backend shape.
+ */
+function buildFreshLocalJob(userId: string, jobId: string): SyncJob {
+  const now = new Date().toISOString();
+  return {
+    id: jobId,
+    user_id: userId,
+    status: "pending",
+    created_at: now,
+    updated_at: now,
+    total_connections: null,
+    connections_imported: 0,
+    profiles_enriched: 0,
+    last_completed_page: -1,
+    last_processed_urn_index: 0,
+    collected_urns: [],
+    cap_hit: false,
+    backoff_count: 0,
+    resume_after_ts: null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Web app relay — broadcast sync events to warmly.app tabs
 // ---------------------------------------------------------------------------
@@ -153,16 +180,20 @@ export async function handleStartNetworkSync(
   let job: SyncJob | null = null;
 
   if (resumeJobId) {
-    // Resume: load from storage (local fallback) or backend
     job = await loadPersistedSyncJob();
     if (job?.id !== resumeJobId) {
-      // Not in local storage — fetch from backend
-      job = null; // content script will fetch via SYNC_GET_JOB
+      // The web app created this sync_job server-side (it exists in the backend
+      // with this id) but the extension has no local copy. Seed a fresh local
+      // extension-shaped job with the canonical id so the orchestrator and its
+      // resume logic have the rich model they expect. This also makes
+      // handleGetJob (loadPersistedSyncJob) resolve it for the content script.
+      job = buildFreshLocalJob(user_id, resumeJobId);
+      await persistSyncJob(job);
     }
   }
 
   if (!job && !resumeJobId) {
-    // Create a new job record
+    // No job id supplied — create a brand-new one (extension-initiated sync).
     job = await createSyncJobRecord(user_id);
     if (!job) {
       return { ok: false, error: "Failed to create sync job" };
