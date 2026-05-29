@@ -76,12 +76,42 @@ async function relayToWebApp(type: string, payload: unknown): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Finds an active LinkedIn tab to send the sync start trigger to.
+ * Finds an active LinkedIn tab, or creates one in the background if none is
+ * open. The sync orchestrator runs as a content script on linkedin.com, so a
+ * LinkedIn tab must exist for the sync to run. Per the build playbook, the
+ * system creates the prerequisite rather than telling the user to "open X first".
  */
-async function findLinkedInTab(): Promise<number | null> {
+async function findOrCreateLinkedInTab(): Promise<number | null> {
   const tabs = await chrome.tabs.query({ url: "*://www.linkedin.com/*" });
   if (tabs.length > 0 && tabs[0].id) return tabs[0].id;
-  return null;
+
+  // None open — create one in the background (don't steal focus).
+  const tab = await chrome.tabs.create({
+    url: "https://www.linkedin.com/feed/",
+    active: false,
+  });
+  if (!tab.id) return null;
+
+  // Wait for the tab to finish loading so the content script is injected
+  // and ready to receive TRIGGER_NETWORK_SYNC.
+  await new Promise<void>((resolve) => {
+    const listener = (tabId: number, changeInfo: { status?: string }) => {
+      if (tabId === tab.id && changeInfo.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    // Safety net: don't hang forever if onUpdated never fires.
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 12_000);
+  });
+
+  // Small extra delay so document_idle content-script registration settles.
+  await new Promise((r) => setTimeout(r, 1500));
+  return tab.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,10 +170,10 @@ export async function handleStartNetworkSync(
     await persistSyncJob(job);
   }
 
-  // Find LinkedIn tab and trigger the content script sync
-  const tabId = await findLinkedInTab();
+  // Find or create a LinkedIn tab, then trigger the content script sync.
+  const tabId = await findOrCreateLinkedInTab();
   if (!tabId) {
-    return { ok: false, error: "No LinkedIn tab open. Please open linkedin.com first." };
+    return { ok: false, error: "Could not open a LinkedIn tab for sync." };
   }
 
   chrome.tabs.sendMessage(tabId, {

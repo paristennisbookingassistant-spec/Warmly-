@@ -38,12 +38,14 @@ export default function ConnectLinkedInPage() {
       // Job created on the server — now tell the extension to begin
       setActiveJobId(body.data.id);
 
-      // Extension receives this message and begins Phase 1
+      // Extension receives this message and begins Phase 1.
+      // The auth-bridge requires user_id, and the SW expects sync_job_id —
+      // both are present on the job record the server just returned.
       window.postMessage(
         {
           source: "WARMLY_WEBAPP",
           type: "START_NETWORK_SYNC",
-          payload: { jobId: body.data.id },
+          payload: { user_id: body.data.user_id, sync_job_id: body.data.id },
         },
         "*"
       );

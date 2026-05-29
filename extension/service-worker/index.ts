@@ -1773,7 +1773,29 @@ async function handleMessage(
     case "SYNC_STATUS_REQUEST": {
       const { loadPersistedSyncJob } = await import("./sync-coordinator");
       const job = await loadPersistedSyncJob();
-      return { ok: true, job };
+      // Detect LinkedIn login by checking for the li_at session cookie.
+      // Requires the "cookies" permission + linkedin.com host permission
+      // (both present in manifest). The frontend's useExtensionBridge
+      // expects { installed, linkedinLoggedIn, currentJobId } as the payload.
+      let linkedinLoggedIn = false;
+      try {
+        // Use getAll with a domain filter rather than get({url}) — the li_at
+        // cookie may be scoped to either ".linkedin.com" or ".www.linkedin.com"
+        // depending on how the session was established, and get({url}) matching
+        // is brittle across that difference. getAll({domain}) catches both.
+        const liCookies = await chrome.cookies.getAll({ domain: "linkedin.com" });
+        linkedinLoggedIn = liCookies.some(
+          (c) => c.name === "li_at" && Boolean(c.value)
+        );
+      } catch (err) {
+        console.warn("[SW] li_at cookie check failed:", err);
+        linkedinLoggedIn = false;
+      }
+      return {
+        installed: true,
+        linkedinLoggedIn,
+        currentJobId: job?.id,
+      };
     }
 
     case "GET_CSRF_TOKEN": {
