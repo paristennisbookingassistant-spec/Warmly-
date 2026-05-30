@@ -387,8 +387,13 @@ async function runPhase2(
       console.warn(`[ConnectionsSync] Phase 2: batch at index ${i} returned null (skipping)`);
       consecutiveParseFailures++;
       if (consecutiveParseFailures >= 3) {
-        console.error("[ConnectionsSync] Phase 2: 3 consecutive batch failures — aborting Phase 2");
-        emitFailed(job.id, "batch_enrichment_repeated_failures");
+        // Deep enrichment (full work history / education) is gated behind
+        // per-profile "card" fetches that aren't available via this batch
+        // endpoint. Rather than failing the whole sync, stop Phase 2 gracefully
+        // and let the orchestrator complete: Phase 1 already imported every
+        // connection with basic data, which is the core value. Deep enrichment
+        // happens lazily on contact open (see Contact Detail).
+        console.warn("[ConnectionsSync] Phase 2: deep enrichment unavailable in bulk — completing with Phase 1 data, deep fields will fill in on demand");
         return;
       }
     } else {
