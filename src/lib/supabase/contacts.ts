@@ -60,6 +60,7 @@ export async function bulkUpsertContacts(
           .maybeSingle();
 
         const isNew = !existing;
+        const existingId = existing?.id as string | undefined;
 
         // Build the row to upsert.
         // Fields NOT included here are protected from sync overwrites:
@@ -105,13 +106,15 @@ export async function bulkUpsertContacts(
           }
         }
 
-        const { error: upsertError } = await supabase
-          .from("contacts")
-          .upsert(row, {
-            onConflict: "user_id,linkedin_url",
-            // ignoreDuplicates: false means DO UPDATE (not DO NOTHING)
-            ignoreDuplicates: false,
-          });
+        // Explicit insert-or-update rather than .upsert({onConflict}). The
+        // production unique index on (user_id, linkedin_url) is PARTIAL
+        // (WHERE linkedin_url IS NOT NULL), which Postgres ON CONFLICT cannot
+        // target without the matching predicate — it errors "no unique or
+        // exclusion constraint matching the ON CONFLICT specification". We
+        // already know isNew from the existence check above, so branch on it.
+        const { error: upsertError } = isNew
+          ? await supabase.from("contacts").insert(row)
+          : await supabase.from("contacts").update(row).eq("id", existingId!);
 
         if (upsertError) {
           errors.push({ linkedinUrn: item.linkedinUrn, error: upsertError.message });

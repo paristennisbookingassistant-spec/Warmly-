@@ -296,6 +296,10 @@ export async function fetchConnectionsPage(
   csrfToken: string
 ): Promise<ConnectionsPage | null> {
   const url = new URL("https://www.linkedin.com/voyager/api/relationships/dash/connections");
+  // q=search is the Rest.li finder name and is REQUIRED — without it the
+  // endpoint returns HTTP 400. (Verified empirically against the live API:
+  // the same request 400s without q=search and 200s with it.)
+  url.searchParams.set("q", "search");
   url.searchParams.set("count", String(CONNECTIONS_PAGE_SIZE));
   url.searchParams.set("start", String(start));
   url.searchParams.set("sortType", "RECENTLY_ADDED");
@@ -343,6 +347,71 @@ export async function fetchConnectionsPage(
 }
 
 /**
+ * Parses a single dash Profile entity (from included[]) into a VoyagerConnection.
+ * Shape (verified live, May 2026):
+ *   { $type: "...identity.profile.Profile", firstName, lastName, headline,
+ *     publicIdentifier, entityUrn: "urn:li:fsd_profile:...", profilePicture }
+ */
+function parseProfileEntity(rec: Record<string, unknown>): VoyagerConnection | null {
+  try {
+    const urn = safeString(rec, "entityUrn");
+    if (!urn) return null;
+
+    const first = safeString(rec, "firstName");
+    const last = safeString(rec, "lastName");
+    const name = first && last ? `${first} ${last}` : (first ?? last ?? null);
+
+    const headline =
+      safeString(rec, "headline") ??
+      safeString(rec, "occupation") ??
+      null;
+
+    const publicIdentifier = safeString(rec, "publicIdentifier");
+    const linkedinUrl = buildProfileUrl(publicIdentifier);
+
+    // Current company: parse from a "Title at Company" headline pattern.
+    let currentCompany: string | null = null;
+    if (headline?.includes(" at ")) {
+      currentCompany = headline.split(" at ").slice(1).join(" at ").trim() || null;
+    }
+
+    // Photo: profilePicture.displayImageReference.vectorImage.{rootUrl,artifacts}
+    let photoUrl: string | null = null;
+    try {
+      const pp = rec["profilePicture"] as Record<string, unknown> | null;
+      const vector =
+        ((pp?.["displayImageReference"] as Record<string, unknown> | null)?.["vectorImage"] as Record<string, unknown> | null) ??
+        (pp?.["vectorImage"] as Record<string, unknown> | null);
+      const rootUrl = safeString(vector ?? {}, "rootUrl");
+      const artifacts = vector?.["artifacts"] as Array<Record<string, unknown>> | null;
+      if (rootUrl && Array.isArray(artifacts) && artifacts.length > 0) {
+        const seg = safeString(artifacts[artifacts.length - 1], "fileIdentifyingUrlPathSegment");
+        if (seg) photoUrl = `${rootUrl}${seg}`;
+      }
+    } catch {
+      photoUrl = null;
+    }
+
+    return {
+      urn,
+      entityId: extractEntityId(urn),
+      name,
+      headline,
+      currentCompany,
+      linkedinUrl,
+      photoUrl,
+      // connectedAt lives on the Connection entity, not the Profile; not needed
+      // for import. Left null rather than cross-referencing for a field we
+      // don't use downstream.
+      connectedAt: null,
+    };
+  } catch (err) {
+    console.warn("[VoyagerList] Failed to parse profile entity:", err);
+    return null;
+  }
+}
+
+/**
  * Parses the Voyager connections-list response body.
  * Defensive: every field access is wrapped; partial data is returned rather
  * than throwing on a missing field.
@@ -356,43 +425,51 @@ function parseConnectionsResponse(body: unknown, start: number): ConnectionsPage
 
     const root = body as Record<string, unknown>;
 
-    // Total count from paging metadata
+    // The `accept: application/vnd.linkedin.normalized+json+2.1` response is a
+    // NORMALIZED envelope: entities live flat in `included[]`, and `data` holds
+    // `*elements` (URN refs) + `paging`. The connection profiles are the
+    // `included[]` items whose $type ends in `identity.profile.Profile`.
+    // (Verified empirically against the live API, May 2026.)
+    const data = root["data"] as Record<string, unknown> | null;
+
+    // Total count from paging metadata (data.paging.total)
     let total: number | null = null;
     try {
-      const paging = root["paging"] as Record<string, unknown> | null;
-      if (typeof paging?.["total"] === "number") total = paging["total"];
+      const paging = (data?.["paging"] ?? root["paging"]) as Record<string, unknown> | null;
+      if (typeof paging?.["total"] === "number") total = paging["total"] as number;
     } catch {
       // non-fatal
     }
 
-    // Elements array — the list of connection records
-    const elements = root["elements"] as unknown[] | null;
-    if (!Array.isArray(elements)) {
-      console.warn("[VoyagerList] No elements array in response at start=" + start);
+    const included = Array.isArray(root["included"]) ? (root["included"] as unknown[]) : [];
+    if (included.length === 0) {
+      console.warn("[VoyagerList] No included[] entities in response at start=" + start);
       return { connections: [], total, hasMore: false };
     }
 
-    // Included entities for cross-reference lookup
-    const included = Array.isArray(root["included"]) ? (root["included"] as unknown[]) : [];
-
     const connections: VoyagerConnection[] = [];
     let parseFailures = 0;
+    let profileCount = 0;
 
-    for (const element of elements) {
-      if (typeof element !== "object" || element === null) { parseFailures++; continue; }
-      const conn = parseConnectionElement(element as Record<string, unknown>, included);
-      if (conn) {
-        connections.push(conn);
-      } else {
-        parseFailures++;
-      }
+    for (const item of included) {
+      if (typeof item !== "object" || item === null) continue;
+      const rec = item as Record<string, unknown>;
+      const type = String(rec["$type"] ?? "");
+      // Only the Profile entities are people; skip Connection/other records.
+      if (!type.endsWith("identity.profile.Profile") && !rec["firstName"]) continue;
+      profileCount++;
+      const conn = parseProfileEntity(rec);
+      if (conn) connections.push(conn);
+      else parseFailures++;
     }
 
     if (parseFailures > 0) {
-      console.warn(`[VoyagerList] ${parseFailures}/${elements.length} elements failed to parse at start=${start}`);
+      console.warn(`[VoyagerList] ${parseFailures}/${profileCount} profile entities failed to parse at start=${start}`);
     }
 
-    const hasMore = elements.length === CONNECTIONS_PAGE_SIZE && (total === null || start + elements.length < total);
+    // hasMore: a full page of profiles came back AND we haven't reached total.
+    const pageFull = profileCount >= CONNECTIONS_PAGE_SIZE;
+    const hasMore = pageFull && (total === null || start + profileCount < total);
 
     return { connections, total, hasMore };
   } catch (err) {

@@ -225,9 +225,49 @@ import type { BulkImportRequest, SyncJob } from "../shared/types";
 export async function bulkImportContacts(
   request: BulkImportRequest
 ): Promise<{ imported: number } | null> {
+  // The backend bulk-import endpoint uses a different (camelCase) contract than
+  // the extension's internal snake_case model, and its Zod schema (a) requires
+  // linkedinUrl to be a valid URL + name to be non-empty, and (b) rejects null
+  // for optional fields (only omitted/undefined is allowed). Transform here so
+  // the extension's model stays internal and the wire payload validates.
+  const isUrl = (s: string | null): s is string =>
+    typeof s === "string" && /^https?:\/\//.test(s);
+
+  type WireItem = Record<string, unknown>;
+  const batch: WireItem[] = [];
+  for (const c of request.contacts) {
+    // Required by the backend schema — skip items that can't satisfy them.
+    if (!isUrl(c.linkedin_url) || !c.linkedin_urn || !c.name) continue;
+
+    const item: WireItem = {
+      linkedinUrl: c.linkedin_url,
+      linkedinUrn: c.linkedin_urn,
+      name: c.name,
+    };
+    // Only include optional fields when present (omit, never send null).
+    if (c.headline) item.headline = c.headline;
+    if (isUrl(c.photo_url)) item.photoUrl = c.photo_url;
+    if (c.current_company) item.currentCompany = c.current_company;
+    if (c.location) item.location = c.location;
+    if (c.linkedin_bio) item.bio = c.linkedin_bio;
+    if (Array.isArray(c.experience) && c.experience.length) item.experience = c.experience;
+    if (Array.isArray(c.education) && c.education.length) item.education = c.education;
+    batch.push(item);
+  }
+
+  if (batch.length === 0) {
+    // Nothing valid to import in this batch (e.g. all connections lacked a
+    // public profile URL). Treat as a no-op success rather than a failed POST.
+    return { imported: 0 };
+  }
+
   return apiFetch<{ imported: number }>("/api/contacts/bulk-import", {
     method: "POST",
-    body: JSON.stringify(request),
+    body: JSON.stringify({
+      syncJobId: request.sync_job_id,
+      phase: request.phase === 2 ? "batch" : "list",
+      batch,
+    }),
   });
 }
 
