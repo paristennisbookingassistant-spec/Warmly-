@@ -289,6 +289,7 @@ export async function createSyncJobRecord(userId: string): Promise<SyncJob | nul
     last_completed_page: -1,
     last_processed_urn_index: 0,
     collected_urns: [],
+    collected_profiles: [],
     cap_hit: false,
     backoff_count: 0,
     resume_after_ts: null,

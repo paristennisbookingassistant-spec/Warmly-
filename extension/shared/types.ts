@@ -166,11 +166,24 @@ export interface VoyagerConnection {
   headline: string | null;
   /** Current employer name, if present in the list response */
   currentCompany: string | null;
+  /** LinkedIn public identifier (vanity slug), e.g. "marc-becker-489151".
+   *  Required by Phase 2 to build the details-page URL. Null when missing. */
+  publicId: string | null;
   /** LinkedIn profile URL derived from the public identifier */
   linkedinUrl: string | null;
   /** Profile photo URL (LinkedIn CDN) */
   photoUrl: string | null;
   connectedAt: string | null;
+}
+
+/**
+ * Minimal profile reference stored per-connection in collected_profiles.
+ * Carries both the URN (needed for deduplication + lookup) and the
+ * publicIdentifier (needed for Phase 2 RSC detail-page URL construction).
+ */
+export interface CollectedProfile {
+  urn: string;
+  publicId: string | null;
 }
 
 /**
@@ -252,8 +265,17 @@ export interface SyncJob {
   last_completed_page: number;
   /** Last successfully processed URN index in Phase 2 (for resume) */
   last_processed_urn_index: number;
-  /** All collected URNs — needed for Phase 2 and resume */
+  /**
+   * All collected URNs — kept for backward compatibility and deduplication
+   * during Phase 1. Phase 2 uses collected_profiles for publicId access.
+   */
   collected_urns: string[];
+  /**
+   * Parallel to collected_urns. Carries { urn, publicId } per connection so
+   * Phase 2 can build https://www.linkedin.com/in/<publicId>/details/experience/
+   * without a second lookup. Populated during Phase 1 alongside collected_urns.
+   */
+  collected_profiles: CollectedProfile[];
   /** Whether the 2500-cap was hit */
   cap_hit: boolean;
   /** Consecutive 429/999 count (for exponential backoff) */

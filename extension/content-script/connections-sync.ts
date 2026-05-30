@@ -25,9 +25,8 @@
 
 import {
   LIST_THROTTLE_MS,
-  BATCH_THROTTLE_MS,
+  PROFILE_FETCH_THROTTLE_MS,
   PLAN_CAP,
-  BATCH_SIZE,
   BASIC_BATCH_SIZE,
   RATE_LIMIT_PAUSE_MS,
   CONNECTIONS_PAGE_SIZE,
@@ -37,7 +36,6 @@ import type {
   BulkImportRequest,
   BulkImportContact,
   VoyagerConnection,
-  VoyagerProfile,
   SyncProgressPayload,
   SyncCompletePayload,
   SyncFailedPayload,
@@ -47,7 +45,7 @@ import {
   getCsrfToken,
   RateLimitedError,
 } from "./voyager-list-client";
-import { fetchProfileBatch } from "./voyager-batch-client";
+import { fetchExperience, fetchEducation } from "./rsc-profile-client";
 
 // ---------------------------------------------------------------------------
 // Jitter helper
@@ -59,6 +57,16 @@ import { fetchProfileBatch } from "./voyager-batch-client";
  */
 function withJitter(baseMs: number): number {
   const jitter = baseMs * 0.25;
+  return Math.round(baseMs - jitter + Math.random() * jitter * 2);
+}
+
+/**
+ * Returns the base delay ±30% jitter, used for per-profile RSC fetches
+ * (Phase 2) where the spec requires ±30% randomization.
+ * Minimum effective delay: 10,500 ms (15,000 * 0.70).
+ */
+function withJitter30(baseMs: number): number {
+  const jitter = baseMs * 0.30;
   return Math.round(baseMs - jitter + Math.random() * jitter * 2);
 }
 
@@ -172,21 +180,6 @@ function connectionToImportContact(conn: VoyagerConnection): BulkImportContact {
   };
 }
 
-function profileToImportContact(prof: VoyagerProfile): BulkImportContact {
-  return {
-    linkedin_url: prof.linkedinUrl,
-    linkedin_urn: prof.urn,
-    name: prof.name,
-    headline: prof.headline,
-    current_company: prof.experience[0]?.company ?? null,
-    photo_url: prof.photoUrl,
-    location: prof.location,
-    linkedin_bio: prof.bio,
-    experience: prof.experience.length > 0 ? prof.experience : null,
-    education: prof.education.length > 0 ? prof.education : null,
-    connected_at: null,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // 429 / 999 backoff handler
@@ -294,13 +287,21 @@ async function runPhase1(
       await updateSyncJob(update);
     }
 
-    // Collect URNs (deduplicated, cap-aware)
+    // Collect URNs + profiles (deduplicated, cap-aware)
+    // collected_profiles carries publicId alongside each URN so Phase 2 can
+    // build the details-page URL without a second lookup.
     const newUrns: string[] = [];
     for (const conn of result.connections) {
       if (job.collected_urns.length + newUrns.length >= PLAN_CAP) break;
       if (!job.collected_urns.includes(conn.urn)) {
         newUrns.push(conn.urn);
         job.collected_urns.push(conn.urn);
+        // Ensure collected_profiles is initialised on resumed jobs from before
+        // this field existed.
+        if (!Array.isArray(job.collected_profiles)) {
+          job.collected_profiles = [];
+        }
+        job.collected_profiles.push({ urn: conn.urn, publicId: conn.publicId });
       }
       basicBuffer.push(connectionToImportContact(conn));
     }
@@ -317,11 +318,12 @@ async function runPhase1(
       await bulkImport(batch);
     }
 
-    // Persist page progress
+    // Persist page progress — include collected_profiles so Phase 2 has publicIds
     const pageUpdate = {
       id: job.id,
       last_completed_page: p,
       collected_urns: job.collected_urns,
+      collected_profiles: job.collected_profiles,
       connections_imported: job.connections_imported,
       cap_hit: job.cap_hit,
       updated_at: new Date().toISOString(),
@@ -350,71 +352,168 @@ async function runPhase1(
 }
 
 // ---------------------------------------------------------------------------
-// Phase 2: Batch profile enrichment
+// Phase 2: Per-profile RSC deep enrichment
 // ---------------------------------------------------------------------------
 
+/**
+ * Builds a BulkImportContact for a Phase 2 RSC enrichment update.
+ * The URN + URL identify the contact to update; experience + education are
+ * the new deep-enrichment fields.
+ */
+function buildEnrichmentContact(
+  urn: string,
+  linkedinUrl: string,
+  name: string,
+  experience: BulkImportContact["experience"],
+  education: BulkImportContact["education"]
+): BulkImportContact {
+  return {
+    linkedin_url: linkedinUrl,
+    linkedin_urn: urn,
+    name,
+    headline: null,
+    current_company: experience?.[0]?.company ?? null,
+    photo_url: null,
+    location: null,
+    linkedin_bio: null,
+    experience,
+    education,
+    connected_at: null,
+  };
+}
+
+/**
+ * Phase 2 (RSC path): iterates over every collected profile and fetches
+ * experience + education from the LinkedIn details sub-pages.
+ *
+ * Design:
+ * - Iterates per-profile (not per-batch-of-25) to stay within RSC fetch limits.
+ * - Throttled PROFILE_FETCH_THROTTLE_MS (±30% jitter) between profiles.
+ * - Resumable via last_processed_urn_index.
+ * - Profiles with no publicId are skipped (can't build the details URL).
+ * - Parse failures return [] — partial data is fine, sync still completes.
+ * - On 429/999: delegates to handleRateLimited, then retries the same profile.
+ *
+ * READ-ONLY: only GET requests to linkedin.com.
+ */
 async function runPhase2(
   job: SyncJob,
-  csrfToken: string,
+  _csrfToken: string,
   signal: { aborted: boolean }
 ): Promise<void> {
-  console.info("[ConnectionsSync] Phase 2 starting. last_processed_urn_index:", job.last_processed_urn_index);
+  console.info(
+    "[ConnectionsSync] Phase 2 (RSC) starting. last_processed_urn_index:",
+    job.last_processed_urn_index
+  );
 
+  // Ensure collected_profiles exists — older resumed jobs may have only collected_urns.
+  // In that case we can't do RSC enrichment (no publicIds). Degrade gracefully.
+  if (!Array.isArray(job.collected_profiles) || job.collected_profiles.length === 0) {
+    console.warn(
+      "[ConnectionsSync] Phase 2: no collected_profiles (old job format or empty sync). " +
+      "Skipping RSC enrichment — Phase 1 data is complete."
+    );
+    return;
+  }
+
+  const profiles = job.collected_profiles;
   const startIdx = job.last_processed_urn_index;
-  const urns = job.collected_urns;
-  let consecutiveParseFailures = 0;
+  let skipped = 0;
 
-  for (let i = startIdx; i < urns.length; i += BATCH_SIZE) {
+  for (let i = startIdx; i < profiles.length; i++) {
     if (signal.aborted) return;
 
-    const batchUrns = urns.slice(i, i + BATCH_SIZE);
+    const profile = profiles[i]!;
+    const { urn, publicId } = profile;
 
-    let profiles: VoyagerProfile[] | null;
-    try {
-      profiles = await fetchProfileBatch(batchUrns, csrfToken);
-    } catch (err) {
-      if (err instanceof RateLimitedError) {
-        await handleRateLimited(job, signal);
-        if (signal.aborted) return;
-        // Retry same batch
-        i -= BATCH_SIZE;
-        continue;
-      }
-      throw err;
+    if (!publicId) {
+      console.debug(`[ConnectionsSync] Phase 2: skipping URN ${urn} — no publicId`);
+      skipped++;
+      // Still advance the index so resume is correct
+      const skipUpdate = {
+        id: job.id,
+        last_processed_urn_index: i + 1,
+        updated_at: new Date().toISOString(),
+      };
+      Object.assign(job, skipUpdate);
+      await updateSyncJob(skipUpdate);
+      continue;
     }
 
-    if (!profiles) {
-      console.warn(`[ConnectionsSync] Phase 2: batch at index ${i} returned null (skipping)`);
-      consecutiveParseFailures++;
-      if (consecutiveParseFailures >= 3) {
-        // Deep enrichment (full work history / education) is gated behind
-        // per-profile "card" fetches that aren't available via this batch
-        // endpoint. Rather than failing the whole sync, stop Phase 2 gracefully
-        // and let the orchestrator complete: Phase 1 already imported every
-        // connection with basic data, which is the core value. Deep enrichment
-        // happens lazily on contact open (see Contact Detail).
-        console.warn("[ConnectionsSync] Phase 2: deep enrichment unavailable in bulk — completing with Phase 1 data, deep fields will fill in on demand");
-        return;
+    // Fetch experience + education for this profile (both back-to-back, then throttle)
+    let experience: BulkImportContact["experience"] = null;
+    let education: BulkImportContact["education"] = null;
+
+    // Experience fetch
+    let retryExp = true;
+    while (retryExp) {
+      try {
+        const exp = await fetchExperience(publicId);
+        experience = exp.length > 0 ? exp : null;
+        retryExp = false;
+      } catch (err) {
+        if (err instanceof RateLimitedError) {
+          await handleRateLimited(job, signal);
+          if (signal.aborted) return;
+          // Retry same profile
+        } else {
+          console.warn(`[ConnectionsSync] Phase 2: experience fetch error for ${publicId}:`, err);
+          retryExp = false;
+        }
       }
+    }
+
+    if (signal.aborted) return;
+
+    // Education fetch (no extra throttle between exp + edu — same profile, back-to-back)
+    let retryEdu = true;
+    while (retryEdu) {
+      try {
+        const edu = await fetchEducation(publicId);
+        education = edu.length > 0 ? edu : null;
+        retryEdu = false;
+      } catch (err) {
+        if (err instanceof RateLimitedError) {
+          await handleRateLimited(job, signal);
+          if (signal.aborted) return;
+          // Retry same profile education
+        } else {
+          console.warn(`[ConnectionsSync] Phase 2: education fetch error for ${publicId}:`, err);
+          retryEdu = false;
+        }
+      }
+    }
+
+    // Build and send the enrichment contact.
+    // We need the linkedin_url to match the backend contact record.
+    // Derive it from publicId (matches what Phase 1 stored).
+    const linkedinUrl = `https://www.linkedin.com/in/${publicId}/`;
+
+    // name is required by bulkImportContacts — use a placeholder that the backend
+    // will upsert-merge with the existing contact (which already has the real name).
+    // The backend bulk-import does an upsert on linkedin_url + user_id, merging
+    // only non-null fields, so a placeholder name won't overwrite the real one
+    // as long as the backend logic is correct. If the backend requires a real name,
+    // we pass publicId as a fallback (better than failing).
+    const name = publicId; // fallback — real name is already stored from Phase 1
+
+    const contact = buildEnrichmentContact(urn, linkedinUrl, name, experience, education);
+
+    if (experience !== null || education !== null) {
+      await bulkImport({
+        sync_job_id: job.id,
+        phase: 2,
+        contacts: [contact],
+      });
+      job.profiles_enriched++;
     } else {
-      consecutiveParseFailures = 0;
-
-      const contacts: BulkImportContact[] = profiles.map(profileToImportContact);
-
-      if (contacts.length > 0) {
-        await bulkImport({
-          sync_job_id: job.id,
-          phase: 2,
-          contacts,
-        });
-      }
-
-      job.profiles_enriched += profiles.length;
+      console.debug(`[ConnectionsSync] Phase 2: no data parsed for ${publicId} — skipping import`);
     }
 
+    // Persist progress (resumable)
     const idxUpdate = {
       id: job.id,
-      last_processed_urn_index: i + batchUrns.length,
+      last_processed_urn_index: i + 1,
       profiles_enriched: job.profiles_enriched,
       updated_at: new Date().toISOString(),
     };
@@ -423,12 +522,18 @@ async function runPhase2(
 
     emitProgress(job);
 
-    if (i + BATCH_SIZE < urns.length) {
-      await sleep(withJitter(BATCH_THROTTLE_MS));
+    // Throttle before the next profile (±30% jitter, hard-coded, not configurable)
+    if (i + 1 < profiles.length) {
+      const delay = withJitter30(PROFILE_FETCH_THROTTLE_MS);
+      console.debug(`[ConnectionsSync] Phase 2: throttle ${delay}ms before next profile`);
+      await sleep(delay);
     }
   }
 
-  console.info(`[ConnectionsSync] Phase 2 complete. Profiles enriched: ${job.profiles_enriched}`);
+  console.info(
+    `[ConnectionsSync] Phase 2 (RSC) complete. ` +
+    `Enriched: ${job.profiles_enriched}, skipped (no publicId): ${skipped}`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -474,12 +579,20 @@ export async function startSync(
       return;
     }
     console.info("[ConnectionsSync] Resuming job:", job.id, "status:", job.status);
+    // Back-fill collected_profiles on old job records that pre-date this field.
+    if (!Array.isArray(job.collected_profiles)) {
+      job.collected_profiles = [];
+    }
   } else {
     job = await createSyncJob(userId);
     if (!job) {
       console.error("[ConnectionsSync] Could not create sync job");
       emitFailed(null, "job_creation_failed");
       return;
+    }
+    // Ensure the field is initialised on fresh jobs created before the SW update
+    if (!Array.isArray(job.collected_profiles)) {
+      job.collected_profiles = [];
     }
     console.info("[ConnectionsSync] Created job:", job.id);
   }

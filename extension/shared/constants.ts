@@ -158,10 +158,17 @@ export const STORAGE_KEYS = {
 export const LIST_THROTTLE_MS = 3_000;
 
 /**
- * Base delay between batch profile-enrichment fetches (Phase 2).
+ * Base delay between batch profile-enrichment fetches (Phase 2, legacy Voyager path).
  * Effective range with ±25% jitter: 7,500 ms – 12,500 ms.
  */
 export const BATCH_THROTTLE_MS = 10_000;
+
+/**
+ * Base delay between per-profile RSC detail-page fetches (Phase 2, RSC path).
+ * Hard-coded at 15 s — NOT user-configurable. See PHASE2_DEEP_ENRICHMENT_RSC.md.
+ * Effective range with ±30% jitter: 10,500 ms – 19,500 ms.
+ */
+export const PROFILE_FETCH_THROTTLE_MS = 15_000;
 
 /**
  * Maximum number of connections to sync per plan tier (v1 cap).

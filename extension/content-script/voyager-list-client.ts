@@ -260,6 +260,7 @@ function parseConnectionElement(
       name,
       headline,
       currentCompany,
+      publicId: publicIdentifier,
       linkedinUrl,
       photoUrl,
       connectedAt,
@@ -398,6 +399,7 @@ function parseProfileEntity(rec: Record<string, unknown>): VoyagerConnection | n
       name,
       headline,
       currentCompany,
+      publicId: publicIdentifier,
       linkedinUrl,
       photoUrl,
       // connectedAt lives on the Connection entity, not the Profile; not needed
