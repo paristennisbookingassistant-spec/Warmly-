@@ -12,7 +12,15 @@
  */
 
 import { useMemo, useState } from "react";
-import type { Contact, Artifact, User } from "@/types/database";
+import type {
+  Contact,
+  Artifact,
+  User,
+  CareerHistoryEntry,
+  EducationEntry,
+  LinkedInExperienceEntry,
+  LinkedInEducationEntry,
+} from "@/types/database";
 import Avatar from "@/components/ui/Avatar";
 import ArtifactCard from "@/components/chat/ArtifactCard";
 import ArtifactDrawer from "@/components/chat/ArtifactDrawer";
@@ -77,6 +85,53 @@ const HEALTH_COLOR: Record<RelationshipHealth, string> = {
   red: "var(--bad)",
   gray: "var(--mute)",
 };
+
+// ---------------------------------------------------------------------------
+// Synced-profile normalisation — the LinkedIn network sync writes deep data to
+// contact.experience / contact.education_v2. When the legacy hand-entered
+// career_history / education are empty, fall back to the synced data so the
+// detail view shows what the sync captured (title, company, dates, location,
+// school, degree, field).
+// ---------------------------------------------------------------------------
+
+type TimelineRole = CareerHistoryEntry & { location?: string };
+
+const MONTH_ABBR = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** "2021-08" → "Aug 2021"; "2016" / "Present" pass through. */
+function formatDateLabel(d: string | null | undefined): string {
+  if (!d) return "";
+  const m = d.match(/^(\d{4})-(\d{2})$/);
+  if (m) return `${MONTH_ABBR[Number(m[2]) - 1] ?? ""} ${m[1]}`.trim();
+  return d;
+}
+
+function experienceToRole(e: LinkedInExperienceEntry): TimelineRole {
+  return {
+    title: e.title,
+    company: e.company,
+    start_date: e.dateRange?.start ?? "",
+    end_date: e.dateRange?.end === "Present" ? null : e.dateRange?.end ?? null,
+    description: e.description,
+    location: e.location,
+  };
+}
+
+function educationV2ToEntry(e: LinkedInEducationEntry): EducationEntry {
+  const start = e.dateRange?.start ?? null;
+  const end = e.dateRange?.end ?? null;
+  const year =
+    start && end ? (start === end ? start : `${start} – ${end}`) : end ?? start ?? "";
+  return {
+    school: e.school,
+    degree: e.degree ?? "",
+    field: e.fieldOfStudy,
+    year,
+  };
+}
 
 function groupArtifactsByType(artifacts: Artifact[]) {
   return artifacts.reduce<Record<string, Artifact[]>>((acc, a) => {
@@ -257,6 +312,17 @@ export default function ContactDetail({
 
   const nextSteps = useMemo(() => buildNextSteps(contact), [contact]);
 
+  // Prefer hand-entered career/education; fall back to the LinkedIn-synced data.
+  const careerItems = useMemo<TimelineRole[]>(() => {
+    if (contact.career_history?.length) return contact.career_history;
+    return (contact.experience ?? []).map(experienceToRole);
+  }, [contact.career_history, contact.experience]);
+
+  const educationItems = useMemo<EducationEntry[]>(() => {
+    if (contact.education?.length) return contact.education;
+    return (contact.education_v2 ?? []).map(educationV2ToEntry);
+  }, [contact.education, contact.education_v2]);
+
   async function handleNotesBlur() {
     if (notes === (contact.notes ?? "")) return;
     setIsSavingNotes(true);
@@ -388,49 +454,55 @@ export default function ContactDetail({
             <StageTrack currentStage={contact.status} />
           </section>
 
-          {/* Career timeline */}
-          {(contact.career_history?.length ?? 0) > 0 && (
+          {/* Career timeline — hand-entered, else LinkedIn-synced experience */}
+          {careerItems.length > 0 && (
             <section>
               <h3 className="text-[13px] font-semibold text-ink mb-4">
                 Career path
               </h3>
               <Timeline
-                items={contact.career_history ?? []}
-                renderItem={(role) => (
-                  <div>
-                    <div className="text-[14px] font-medium text-ink leading-snug">
-                      {role.title}
+                items={careerItems}
+                renderItem={(role) => {
+                  const start = formatDateLabel(role.start_date);
+                  const end =
+                    role.end_date === null
+                      ? "Present"
+                      : formatDateLabel(role.end_date);
+                  const dates = [start, end].filter(Boolean).join(" — ");
+                  return (
+                    <div>
+                      <div className="text-[14px] font-medium text-ink leading-snug">
+                        {role.title}
+                      </div>
+                      <div className="text-[12.5px] text-ink-2 mt-0.5">
+                        {role.company}
+                      </div>
+                      <div className="text-[11.5px] text-ink-3 mt-0.5 flex flex-wrap gap-x-2">
+                        {dates && <span>{dates}</span>}
+                        {role.location && (
+                          <span className="text-ink-4">· {role.location}</span>
+                        )}
+                      </div>
+                      {role.description && (
+                        <p className="text-[12px] text-ink-3 mt-1.5 line-clamp-2">
+                          {role.description}
+                        </p>
+                      )}
                     </div>
-                    <div className="text-[12.5px] text-ink-2 mt-0.5">
-                      {role.company}
-                    </div>
-                    <div className="text-[11.5px] text-ink-3 mt-0.5">
-                      {role.start_date}
-                      {role.end_date === null
-                        ? " — Present"
-                        : role.end_date
-                        ? ` — ${role.end_date}`
-                        : ""}
-                    </div>
-                    {role.description && (
-                      <p className="text-[12px] text-ink-3 mt-1.5 line-clamp-2">
-                        {role.description}
-                      </p>
-                    )}
-                  </div>
-                )}
+                  );
+                }}
               />
             </section>
           )}
 
-          {/* Education timeline */}
-          {(contact.education?.length ?? 0) > 0 && (
+          {/* Education timeline — hand-entered, else LinkedIn-synced education */}
+          {educationItems.length > 0 && (
             <section>
               <h3 className="text-[13px] font-semibold text-ink mb-4">
                 Education
               </h3>
               <Timeline
-                items={contact.education ?? []}
+                items={educationItems}
                 renderItem={(edu) => (
                   <div>
                     <div className="text-[14px] font-medium text-ink leading-snug">

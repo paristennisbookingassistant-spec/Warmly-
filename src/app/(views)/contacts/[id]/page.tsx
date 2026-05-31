@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useContacts } from "@/hooks/useContacts";
 import ContactDetail from "@/components/contacts/ContactDetail";
@@ -13,9 +13,25 @@ interface PageProps {
 export default function ContactDetailPage({ params }: PageProps) {
   const { id } = use(params);
   const router = useRouter();
-  const { getContact, getArtifactsForContact, isLoading, deleteContact } = useContacts();
+  const { getContact, loadContactDetail, getArtifactsForContact, isLoading, deleteContact } = useContacts();
 
-  const contact = getContact(id);
+  // The list cache is "lite" (heavy JSON columns like experience/education_v2
+  // are omitted). Load the full row so the detail view can render the synced
+  // LinkedIn deep profile. Show the lite cache instantly while it loads.
+  const liteContact = getContact(id);
+  const [fullContact, setFullContact] = useState<Contact | null>(null);
+  const [detailLoading, setDetailLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setDetailLoading(true);
+    loadContactDetail(id)
+      .then((c) => { if (active) setFullContact(c); })
+      .finally(() => { if (active) setDetailLoading(false); });
+    return () => { active = false; };
+  }, [id, loadContactDetail]);
+
+  const contact = fullContact ?? liteContact;
   const artifacts = getArtifactsForContact(id);
 
   function handleOpenSession(c: Contact) {
@@ -29,7 +45,7 @@ export default function ContactDetailPage({ params }: PageProps) {
     if (ok) router.push("/contacts");
   }
 
-  if (isLoading) {
+  if (!contact && (isLoading || detailLoading)) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
