@@ -104,42 +104,56 @@ async function fetchSectionFlight(
   const url =
     `https://www.linkedin.com/flagship-web/rsc-action/actions/pagination` +
     `?sduiid=${encodeURIComponent(pagerId)}&parentSpanId=AAAAAAAAAAA%3D`;
+  const requestBody = JSON.stringify(buildActionBody(publicId, profileId, section));
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "content-type": "application/json",
-        "csrf-token": csrfToken,
-        "x-li-rsc-stream": "true",
-        "x-li-anchor-page-key": `d_flagship3_profile_view_base_${section}_details`,
-        referer: `https://www.linkedin.com/in/${encodeURIComponent(publicId)}/details/${section}/`,
-      },
-      body: JSON.stringify(buildActionBody(publicId, profileId, section)),
-    });
-  } catch (err) {
-    console.error(`[RscProfile] Network error fetching ${section} for ${publicId}:`, err);
-    return null;
-  }
+  // Transient failures (network ERR_FAILED — e.g. an anti-bot script briefly
+  // interfering, or a 5xx) are retried once after a short pause so we don't
+  // silently skip a profile's enrichment. Rate limits (429/999) are NOT retried
+  // here — they propagate so the orchestrator can do its longer backoff.
+  const MAX_ATTEMPTS = 2;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+          "csrf-token": csrfToken,
+          "x-li-rsc-stream": "true",
+          "x-li-anchor-page-key": `d_flagship3_profile_view_base_${section}_details`,
+          referer: `https://www.linkedin.com/in/${encodeURIComponent(publicId)}/details/${section}/`,
+        },
+        body: requestBody,
+      });
+    } catch (err) {
+      console.warn(`[RscProfile] Network error (attempt ${attempt}) for ${publicId}/${section}:`, err);
+      if (attempt < MAX_ATTEMPTS) { await new Promise((r) => setTimeout(r, 2500)); continue; }
+      return null;
+    }
 
-  if (response.status === 429 || response.status === 999) {
-    console.warn(`[RscProfile] Rate limited (HTTP ${response.status}) for ${publicId}/${section}`);
-    throw new RateLimitedError(response.status);
-  }
-  if (!response.ok) {
-    console.warn(`[RscProfile] HTTP ${response.status} for ${publicId}/${section}`);
-    return null;
-  }
+    if (response.status === 429 || response.status === 999) {
+      console.warn(`[RscProfile] Rate limited (HTTP ${response.status}) for ${publicId}/${section}`);
+      throw new RateLimitedError(response.status);
+    }
+    if (!response.ok) {
+      console.warn(`[RscProfile] HTTP ${response.status} (attempt ${attempt}) for ${publicId}/${section}`);
+      // Retry server-side / transient statuses; give up on clear client errors.
+      if (response.status >= 500 && attempt < MAX_ATTEMPTS) { await new Promise((r) => setTimeout(r, 2500)); continue; }
+      return null;
+    }
 
-  try {
-    const text = await response.text();
-    return text.length > 0 ? text : null;
-  } catch (err) {
-    console.error("[RscProfile] Failed to read response text:", err);
-    return null;
+    try {
+      const text = await response.text();
+      if (text.length > 0) return text;
+      if (attempt < MAX_ATTEMPTS) { await new Promise((r) => setTimeout(r, 2500)); continue; }
+      return null;
+    } catch (err) {
+      console.error("[RscProfile] Failed to read response text:", err);
+      return null;
+    }
   }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

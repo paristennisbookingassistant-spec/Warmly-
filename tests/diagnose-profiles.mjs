@@ -13,7 +13,7 @@ const PROFILE = join(ROOT, ".playwright-profile");
 const require = createRequire(join(ROOT, "extension/package.json"));
 const esbuild = require("esbuild");
 
-const PIDS = ["doraqian", "nichamon-damrongkitkarn"];
+const PIDS = ["evasinha", "elayachimehdi"];
 
 const ctx = await chromium.launchPersistentContext(PROFILE, {
   headless: false, args: ["--window-position=-9999,-9999", "--window-size=1366,900"],
