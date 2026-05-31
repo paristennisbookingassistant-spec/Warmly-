@@ -378,8 +378,10 @@ function cleanLocation(t: string): string {
 }
 function isLocation(t: string): boolean {
   const s = cleanLocation(t.trim());
-  // Connector words signal a comma-bearing job TITLE ("Manager, Sales and
-  // Operations"), never a place name — reject so titles aren't lost to location.
+  // Job-title words ("Assistant Manager, People Team") and connector words
+  // ("Manager, Sales and Operations") signal a comma-bearing TITLE, never a
+  // place name — reject so titles aren't lost to the location slot.
+  if (JOB_WORD_RE.test(s)) return false;
   if (/\b(and|or|for|with)\b/i.test(s) || /&/.test(s)) return false;
   if (/ Area$/.test(s)) return true;
   // "City, Region[, Country]" — 1-3 comma-separated proper-noun segments.
@@ -391,6 +393,18 @@ function isLocation(t: string): boolean {
 function isDescription(t: string): boolean {
   return /^[-•*–]\s/.test(t) || t.includes("\n") || t.length > 140;
 }
+/**
+ * A type/duration meta line that must never be picked as a title, e.g.
+ * "Full-time · 4 yrs 6 mos" (employment type + total duration on grouped cards)
+ * or a bare duration "3 yrs 4 mos".
+ */
+function isMetaLine(t: string): boolean {
+  const first = t.split(/\s*[·•]\s*/)[0]!.trim();
+  return EMPLOYMENT_TYPES.has(first) || isDuration(t);
+}
+// Role words that disambiguate a "X, Y" comma-title (a job title) from a
+// "City, Country" location.
+const JOB_WORD_RE = /\b(Manager|Director|Engineer|Analyst|Lead|Head|Officer|Associate|Consultant|Intern|Internship|Coordinator|Specialist|Founder|President|VP|Coach|Advisor|Adviser|Team|Partner|Executive|Strategist|Designer|Developer|Scientist|Architect|Administrator|Supervisor|Representative|Agent|Assistant|Trainee|Fellow|Researcher|Counsel|Controller|Recruiter|Buyer|Planner|Operator|Technician|Editor|Producer|Banker|Trader|Auditor|Accountant|Teacher|Professor|Instructor|Chief|Owner|Principal|Stagiaire|Apprentice)\b/i;
 function parseExpDate(t: string): { start: string | null; end: string | null } {
   const m = t.match(EXP_DATE_RE);
   if (!m) return { start: null, end: null };
@@ -439,9 +453,9 @@ function parseExperienceCard(rawLeaves: string[]): ExperienceEntry[] {
     }
     // Title is always BEFORE the date; never location-filter it (titles can
     // contain commas, e.g. "Consultant, Deal Advisory"), but skip description
-    // bullets that can render before the date.
+    // bullets and type/duration meta lines that can render before the date.
     const title = toks.find(
-      (t, i) => i < di && t !== ctLine && t !== company && !isEmploymentType(t) && !isDuration(t) && !isDescription(t)
+      (t, i) => i < di && t !== ctLine && t !== company && !isMetaLine(t) && !isDescription(t)
     );
     const after = toks.slice(di + 1);
     const locRaw = after.find((t) => isLocation(t));
@@ -454,7 +468,7 @@ function parseExperienceCard(rawLeaves: string[]): ExperienceEntry[] {
     // Grouped: [Company, "Type · TotalDur"?, GroupLoc?, (Title, Type?, Date, Loc?, Desc?)×N]
     let company = companyLogo;
     const headerIdx = toks.findIndex(
-      (t) => !isEmploymentType(t) && !isDuration(t) && !isLocation(t) && !EXP_DATE_RE.test(t)
+      (t) => !isMetaLine(t) && !isLocation(t) && !EXP_DATE_RE.test(t) && !isDescription(t)
     );
     if (!company && headerIdx >= 0) company = toks[headerIdx]!;
     let groupLoc: string | null = null;
@@ -469,7 +483,7 @@ function parseExperienceCard(rawLeaves: string[]): ExperienceEntry[] {
       for (let j = di - 1; j > prevDate; j--) {
         if (used.has(j)) continue;
         const t = toks[j]!;
-        if (isEmploymentType(t) || isDuration(t) || isLocation(t) || EXP_DATE_RE.test(t) || isDescription(t)) continue;
+        if (isMetaLine(t) || isLocation(t) || EXP_DATE_RE.test(t) || isDescription(t)) continue;
         if (t === company) continue;
         title = t; used.add(j); break;
       }
@@ -502,56 +516,87 @@ function parseExperienceFlight(body: string): ExperienceEntry[] {
 }
 
 // ---------------------------------------------------------------------------
-// Education parsing — flat leaf stream, anchored on year ranges
+// Education parsing — flat leaf stream. State machine over the ordered leaves so
+// it handles BOTH dated entries (anchored on year ranges) AND dateless ones
+// (anchored on the school logo), and schools with no logo. Entry shape in
+// document order: [<School> logo?, School, Degree[, Field via comma], Date?,
+// Activities/notes?].
 // ---------------------------------------------------------------------------
+
+interface EduAcc {
+  school: string;
+  degree: string | null;
+  start: string | null;
+  end: string | null;
+  dated: boolean;
+}
 
 function parseEducationFlight(body: string): EducationEntry[] {
   const { flat } = walkFlight(body);
   const leaves = dedupAdjacent(flat);
 
-  const dateIdx: number[] = [];
-  leaves.forEach((t, i) => { if (EDU_DATE_RE.test(t)) dateIdx.push(i); });
-
   const entries: EducationEntry[] = [];
-  let prev = -1;
-  for (const di of dateIdx) {
-    const window: string[] = [];
-    let logo: string | null = null;
-    for (let j = prev + 1; j < di; j++) {
-      const t = leaves[j]!;
-      if (isLogo(t)) { logo = logoName(t); continue; }
-      if (/^Activities and societies:/i.test(t)) continue;
-      window.push(t);
-    }
-    let school = logo;
-    let degree: string | null = null;
-    let fieldOfStudy: string | null = null;
-    if (logo) {
-      const nonSchool = window.filter((w) => w !== logo);
-      degree = nonSchool.length ? nonSchool[nonSchool.length - 1]! : null;
-    } else {
-      school = window[0] ?? null;
-      degree = window.length > 1 ? window[window.length - 1]! : null;
-    }
+  let cur: EduAcc | null = null;
+
+  const flush = (): void => {
+    if (!cur || !cur.school) { cur = null; return; }
+    let degree = cur.degree;
+    let field: string | null = null;
     if (degree) {
       const cm = degree.lastIndexOf(", ");
-      if (cm >= 0) {
-        fieldOfStudy = degree.slice(cm + 2).trim();
-        degree = degree.slice(0, cm).trim();
-      }
+      if (cm >= 0) { field = degree.slice(cm + 2).trim(); degree = degree.slice(0, cm).trim(); }
     }
-    const m = leaves[di]!.match(EDU_DATE_RE)!;
-    const start = (m[1]!.match(/\d{4}/) ?? [])[0] ?? null;
-    const end = (m[2]!.match(/\d{4}/) ?? [])[0] ?? (/Present/.test(m[2]!) ? "Present" : null);
-    prev = di;
-    if (!school) continue;
     entries.push({
-      school,
+      school: cur.school,
       ...(degree ? { degree } : {}),
-      ...(fieldOfStudy ? { fieldOfStudy } : {}),
-      dateRange: { start, end },
+      ...(field ? { fieldOfStudy: field } : {}),
+      dateRange: { start: cur.start, end: cur.end },
     });
+    cur = null;
+  };
+  const newAcc = (school: string): EduAcc => ({ school, degree: null, start: null, end: null, dated: false });
+  // Activities / honours / grade / scholarship notes — never a school or degree.
+  const isEduNote = (t: string) =>
+    /^(Activities and societies:|Grade:)/i.test(t) ||
+    /\b(Scholarship|Recipient|Honors|Honours|Dean's List|Cum Laude|Valedictorian|GPA|CGPA)\b/i.test(t) ||
+    /^[-•*–]\s/.test(t) || t.includes("\n") || t.length > 160;
+  // Leading nav/header noise before the first entry (section title, vanity slug).
+  const isHeaderNoise = (t: string) => t === "Education" || /^[a-z][a-z0-9-]+$/.test(t);
+  // Detects a logo-less school name so consecutive dateless/dated entries split.
+  const SCHOOL_KW = /\b(universit|college|school|institut|academy|academia|colegio|écol|ecol|lyc[eé]e|hochschule|polytechni|gymnasium|seminary|conservator|escuela|faculdad|sciences\s+po|gakuin|daigaku|vidhyalaya|vidyalaya|mahavidyalaya|vidyapeeth)\b/i;
+  const BARE_YEAR = /^(?:19|20)\d{2}$/;
+
+  for (const t of leaves) {
+    if (isLogo(t)) { flush(); cur = newAcc(logoName(t)); continue; }
+    if (!cur && isHeaderNoise(t)) continue;
+
+    const dm = t.match(EDU_DATE_RE);
+    if (dm) {
+      if (!cur) cur = newAcc("");
+      // First date per entry wins — a later date belongs to the NEXT entry and
+      // must not overwrite this one (guards logo-less schools we couldn't split).
+      if (!cur.dated) {
+        cur.start = (dm[1]!.match(/\d{4}/) ?? [])[0] ?? null;
+        cur.end = (dm[2]!.match(/\d{4}/) ?? [])[0] ?? (/Present/.test(dm[2]!) ? "Present" : null);
+        cur.dated = true;
+      }
+      continue;
+    }
+    // bare single year ("2016") — treat as the entry's date, not a degree
+    if (cur && !cur.dated && BARE_YEAR.test(t)) { cur.start = t; cur.end = t; cur.dated = true; continue; }
+
+    // plain text leaf
+    if (!cur) { if (!isEduNote(t)) cur = newAcc(t); continue; }   // first school
+    if (t === cur.school) continue;     // school name repeated after its logo
+    if (isEduNote(t)) continue;         // honours / activities / grades — ignore
+    // A new logo-less school: only once the current entry already has a degree,
+    // so we don't mistake a degree that happens to say "School of …" for a school.
+    if (SCHOOL_KW.test(t) && cur.school && cur.degree) { flush(); cur = newAcc(t); continue; }
+    if (!cur.school) { cur.school = t; continue; }
+    if (!cur.degree) { cur.degree = t; continue; }
+    // any further text is a secondary note — ignore
   }
+  flush();
 
   const seen = new Set<string>();
   return entries.filter((e) => {
