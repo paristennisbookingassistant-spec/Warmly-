@@ -40,7 +40,7 @@ function load(name) {
   return c;
 }
 
-for (const pid of ["mariana-alvaro", "daominhanh10"]) {
+for (const pid of ["mariana-alvaro", "daominhanh10", "anishka-moona", "puneet-d-b1563aa"]) {
   console.log(`\n###### ${pid} ######`);
   const exp = __test.parseExperienceFlight(load(`${pid}_REPLAY_expBody.txt`));
   console.log(`EXPERIENCE (${exp.length}):`);

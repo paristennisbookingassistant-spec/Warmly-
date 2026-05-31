@@ -165,18 +165,66 @@ function isJunkLeaf(t: string): boolean {
   // and their "X, Y …" shape can be mistaken for a location.
   if (/^Thumbnail\b/i.test(t)) return true;
   if (/\bcover photo$/i.test(t)) return true;
+  // Skills-section noise that trails a role: "Skills:", "Skills for X at Y",
+  // "SAP IBP, … +6 skills".
+  if (/^Skills(:| for )/i.test(t)) return true;
+  if (/\+\d+\s+skills?\b/i.test(t)) return true;
   if (t.length > 600) return true;
   return false;
 }
 
+/**
+ * Advances a JS-string index by `byteLen` UTF-8 bytes. React-Flight text rows
+ * (`T<hexlen>,<text>`) declare their length in bytes and the text can contain
+ * newlines, so we must honour the byte length rather than split on "\n".
+ */
+function advanceBytes(str: string, start: number, byteLen: number): number {
+  let bytes = 0;
+  let i = start;
+  while (i < str.length && bytes < byteLen) {
+    const cp = str.codePointAt(i)!;
+    bytes += cp <= 0x7f ? 1 : cp <= 0x7ff ? 2 : cp <= 0xffff ? 3 : 4;
+    i += cp > 0xffff ? 2 : 1;
+  }
+  return i;
+}
+
+/**
+ * Builds the Flight chunk map (id → raw row value). CRITICAL: text rows
+ * (`T<hexlen>,<text>`) may contain embedded newlines (multi-line job
+ * descriptions), so we read exactly `<hexlen>` UTF-8 bytes for those and only
+ * split on "\n" for ordinary single-line rows. A naive `body.split("\n")`
+ * mis-segments multi-line descriptions into bogus rows, corrupting reference
+ * resolution and dropping entire experience cards.
+ */
 function buildChunkMap(body: string): Map<string, string> {
   const map = new Map<string, string>();
-  for (const line of body.split("\n")) {
-    const colon = line.indexOf(":");
-    if (colon < 0) continue;
-    const id = line.slice(0, colon);
-    if (!/^[0-9a-f]+$/.test(id)) continue;
-    map.set(id, line.slice(colon + 1));
+  let i = 0;
+  const n = body.length;
+  while (i < n) {
+    const colon = body.indexOf(":", i);
+    if (colon < 0) break;
+    const id = body.slice(i, colon);
+    if (!/^[0-9a-f]+$/.test(id)) {
+      // Not a real row start (stray continuation) — skip to the next line.
+      const nl = body.indexOf("\n", i);
+      if (nl < 0) break;
+      i = nl + 1;
+      continue;
+    }
+    if (body[colon + 1] === "T") {
+      const comma = body.indexOf(",", colon + 1);
+      const hexlen = parseInt(body.slice(colon + 2, comma), 16) || 0;
+      const textEnd = advanceBytes(body, comma + 1, hexlen);
+      map.set(id, body.slice(colon + 1, textEnd)); // keep "T<hex>,<text>"
+      i = textEnd;
+      if (body[i] === "\n") i++;
+    } else {
+      let nl = body.indexOf("\n", colon + 1);
+      if (nl < 0) nl = n;
+      map.set(id, body.slice(colon + 1, nl));
+      i = nl + 1;
+    }
   }
   return map;
 }
@@ -302,11 +350,15 @@ const MONTHS: Record<string, string> = {
   Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12",
 };
 
-// Experience date range, e.g. "Jul 2025 - Present · 11 mos" / "Jan 2025 - Oct 2025 · 10 mos"
-const EXP_DATE_RE = /^([A-Z][a-z]{2}) (\d{4}) - (Present|([A-Z][a-z]{2}) (\d{4}))/;
+// Experience date range. Handles BOTH month form ("Jul 2025 - Present",
+// "Jan 2025 - Oct 2025") AND year-only form ("2024 - 2025", "2019 - Present"),
+// which some profiles use. Groups: 1=startMon? 2=startYear 3=endRaw 4=endMon? 5=endYear.
+const EXP_DATE_RE = /^(?:([A-Z][a-z]{2}) )?(\d{4}) - (Present|(?:([A-Z][a-z]{2}) )?(\d{4}))/;
 // Education range, e.g. "2018 – 2022" / "Jan 2026 – Dec 2026" (note en-dash)
 const EDU_DATE_RE = /^((?:[A-Z][a-z]{2} )?\d{4})\s*[–\-—]\s*((?:[A-Z][a-z]{2} )?(?:\d{4}|Present))$/;
 const DURATION_RE = /^[·•\s]*\d+\s*(yr|yrs|mo|mos)\b/;
+// Work-mode suffix LinkedIn appends to locations: "Mumbai, India · Hybrid".
+const WORK_MODE_RE = /\s*[·•]\s*(Hybrid|Remote|On-?site)\s*$/i;
 
 function isLogo(t: string): boolean {
   return / logo$/.test(t);
@@ -320,18 +372,32 @@ function isEmploymentType(t: string): boolean {
 function isDuration(t: string): boolean {
   return DURATION_RE.test(t.trim());
 }
+/** Strips the "· Hybrid/Remote/On-site" work-mode suffix from a location. */
+function cleanLocation(t: string): string {
+  return t.replace(WORK_MODE_RE, "").trim();
+}
 function isLocation(t: string): boolean {
-  const s = t.trim();
+  const s = cleanLocation(t.trim());
+  // Connector words signal a comma-bearing job TITLE ("Manager, Sales and
+  // Operations"), never a place name — reject so titles aren't lost to location.
+  if (/\b(and|or|for|with)\b/i.test(s) || /&/.test(s)) return false;
   if (/ Area$/.test(s)) return true;
-  if (s.length < 80 && /^[A-Za-zÀ-ÿ.''\-\s]+, [A-Za-zÀ-ÿ.''\-\s]+$/.test(s)) return true;
+  // "City, Region[, Country]" — 1-3 comma-separated proper-noun segments.
+  if (s.length < 80 && /^[A-Za-zÀ-ÿ.''\-\s]+(, [A-Za-zÀ-ÿ.''\-\s]+){1,3}$/.test(s)) return true;
   if (/^(Panama|France|Vietnam|Singapore|Germany|Spain|India|China|Brazil|Mexico|Canada|Australia|Switzerland|Belgium|Netherlands|Italy|Portugal|Japan|Remote)$/.test(s)) return true;
   return false;
+}
+/** A job-description bullet, not a title — multi-line, leading bullet, or very long. */
+function isDescription(t: string): boolean {
+  return /^[-•*–]\s/.test(t) || t.includes("\n") || t.length > 140;
 }
 function parseExpDate(t: string): { start: string | null; end: string | null } {
   const m = t.match(EXP_DATE_RE);
   if (!m) return { start: null, end: null };
-  const start = `${m[2]}-${MONTHS[m[1]!] ?? "01"}`;
-  const end = m[3] === "Present" ? "Present" : `${m[5]}-${MONTHS[m[4]!] ?? "01"}`;
+  const start = m[1] ? `${m[2]}-${MONTHS[m[1]] ?? "01"}` : m[2]!;
+  let end: string;
+  if (m[3] === "Present") end = "Present";
+  else end = m[4] ? `${m[5]}-${MONTHS[m[4]] ?? "01"}` : m[5]!;
   return { start, end };
 }
 function dedupAdjacent(arr: string[]): string[] {
@@ -372,12 +438,14 @@ function parseExperienceCard(rawLeaves: string[]): ExperienceEntry[] {
       if (!company) company = parts[0]!.trim();
     }
     // Title is always BEFORE the date; never location-filter it (titles can
-    // contain commas, e.g. "Consultant, Deal Advisory").
+    // contain commas, e.g. "Consultant, Deal Advisory"), but skip description
+    // bullets that can render before the date.
     const title = toks.find(
-      (t, i) => i < di && t !== ctLine && t !== company && !isEmploymentType(t) && !isDuration(t)
+      (t, i) => i < di && t !== ctLine && t !== company && !isEmploymentType(t) && !isDuration(t) && !isDescription(t)
     );
     const after = toks.slice(di + 1);
-    const location = after.find((t) => isLocation(t)) ?? undefined;
+    const locRaw = after.find((t) => isLocation(t));
+    const location = locRaw ? cleanLocation(locRaw) : undefined;
     const description = after.find((t) => !isLocation(t) && !isDuration(t) && !isEmploymentType(t)) ?? undefined;
     if (title && company) {
       roles.push({ title, company, dateRange, ...(location ? { location } : {}), ...(description ? { description } : {}) });
@@ -401,15 +469,15 @@ function parseExperienceCard(rawLeaves: string[]): ExperienceEntry[] {
       for (let j = di - 1; j > prevDate; j--) {
         if (used.has(j)) continue;
         const t = toks[j]!;
-        if (isEmploymentType(t) || isDuration(t) || isLocation(t) || EXP_DATE_RE.test(t)) continue;
+        if (isEmploymentType(t) || isDuration(t) || isLocation(t) || EXP_DATE_RE.test(t) || isDescription(t)) continue;
         if (t === company) continue;
         title = t; used.add(j); break;
       }
       let location: string | null = null;
       for (let j = di + 1; j < toks.length && !dateIdx.includes(j); j++) {
-        if (isLocation(toks[j]!)) { location = toks[j]!; break; }
+        if (isLocation(toks[j]!)) { location = cleanLocation(toks[j]!); break; }
       }
-      const loc = location ?? groupLoc;
+      const loc = location ?? (groupLoc ? cleanLocation(groupLoc) : null);
       if (title && company) {
         roles.push({ title, company, dateRange: parseExpDate(toks[di]!), ...(loc ? { location: loc } : {}) });
       }

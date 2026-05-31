@@ -75,6 +75,33 @@ function sleep(ms: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Test-only profile cap
+// ---------------------------------------------------------------------------
+// Lets a bounded test sync run (e.g. 50 contacts) through the REAL pipeline so
+// timing + correctness can be measured without the full ~2,500 crawl. Read from
+// chrome.storage.local key "warmly_sync_test_max". Production never sets this
+// key, so the effective cap stays at PLAN_CAP for real users.
+let _testMaxProfiles = 0;
+
+async function loadTestMaxProfiles(): Promise<void> {
+  try {
+    const r = await chrome.storage.local.get("warmly_sync_test_max");
+    const v = Number(r["warmly_sync_test_max"]);
+    _testMaxProfiles = Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+    if (_testMaxProfiles > 0) {
+      console.warn(`[ConnectionsSync] TEST cap active: ${_testMaxProfiles} contacts`);
+    }
+  } catch {
+    _testMaxProfiles = 0;
+  }
+}
+
+/** Effective collection/enrichment cap (test cap if set, else the plan cap). */
+function profileCap(): number {
+  return _testMaxProfiles > 0 ? Math.min(_testMaxProfiles, PLAN_CAP) : PLAN_CAP;
+}
+
+// ---------------------------------------------------------------------------
 // Service worker communication helpers
 // (all sync state management goes through the SW, not direct storage)
 // ---------------------------------------------------------------------------
@@ -247,16 +274,17 @@ async function runPhase1(
 
   // A page value of -1 means "haven't started"; 0 means first page complete.
   const startPage = page < 0 ? 0 : page + 1;
+  const cap = profileCap();
 
   for (let p = startPage; ; p++) {
     if (signal.aborted) return;
 
     const start = p * CONNECTIONS_PAGE_SIZE;
 
-    // Check plan cap
-    if (job.collected_urns.length >= PLAN_CAP) {
+    // Check plan cap (or test cap)
+    if (job.collected_urns.length >= cap) {
       job.cap_hit = true;
-      console.info(`[ConnectionsSync] Phase 1: plan cap (${PLAN_CAP}) reached`);
+      console.info(`[ConnectionsSync] Phase 1: cap (${cap}) reached`);
       break;
     }
 
@@ -292,7 +320,7 @@ async function runPhase1(
     // build the details-page URL without a second lookup.
     const newUrns: string[] = [];
     for (const conn of result.connections) {
-      if (job.collected_urns.length + newUrns.length >= PLAN_CAP) break;
+      if (job.collected_urns.length + newUrns.length >= cap) break;
       if (!job.collected_urns.includes(conn.urn)) {
         newUrns.push(conn.urn);
         job.collected_urns.push(conn.urn);
@@ -422,9 +450,11 @@ async function runPhase2(
 
   const profiles = job.collected_profiles;
   const startIdx = job.last_processed_urn_index;
+  // Honour the test cap (else enrich everything collected).
+  const limit = _testMaxProfiles > 0 ? Math.min(profiles.length, _testMaxProfiles) : profiles.length;
   let skipped = 0;
 
-  for (let i = startIdx; i < profiles.length; i++) {
+  for (let i = startIdx; i < limit; i++) {
     if (signal.aborted) return;
 
     const profile = profiles[i]!;
@@ -566,6 +596,9 @@ export async function startSync(
   _activeSyncSignal = signal;
 
   console.info("[ConnectionsSync] Starting sync. userId:", userId, "resumeJobId:", resumeJobId ?? "none");
+
+  // Load the optional test cap (test runs only; no-op in production).
+  await loadTestMaxProfiles();
 
   // CSRF token extraction (required for all Voyager calls)
   const csrfToken = await getCsrfToken();

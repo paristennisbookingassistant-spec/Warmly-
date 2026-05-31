@@ -9,15 +9,43 @@ import { dirname, join } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, "probe-out");
 
-// ---------- flight stream -> chunk map ----------
+// ---------- flight stream -> chunk map (T-length aware) ----------
+function advanceBytes(str, start, byteLen) {
+  let bytes = 0, i = start;
+  while (i < str.length && bytes < byteLen) {
+    const cp = str.codePointAt(i);
+    bytes += cp <= 0x7f ? 1 : cp <= 0x7ff ? 2 : cp <= 0xffff ? 3 : 4;
+    i += cp > 0xffff ? 2 : 1;
+  }
+  return i;
+}
 function chunkMap(body) {
   const map = new Map();
-  for (const line of body.split("\n")) {
-    const c = line.indexOf(":");
-    if (c < 0) continue;
-    const id = line.slice(0, c);
-    if (!/^[0-9a-f]+$/.test(id)) continue;
-    map.set(id, line.slice(c + 1));
+  let i = 0;
+  const n = body.length;
+  while (i < n) {
+    const colon = body.indexOf(":", i);
+    if (colon < 0) break;
+    const id = body.slice(i, colon);
+    if (!/^[0-9a-f]+$/.test(id)) {
+      const nl = body.indexOf("\n", i);
+      if (nl < 0) break;
+      i = nl + 1;
+      continue;
+    }
+    if (body[colon + 1] === "T") {
+      const comma = body.indexOf(",", colon + 1);
+      const hexlen = parseInt(body.slice(colon + 2, comma), 16) || 0;
+      const textEnd = advanceBytes(body, comma + 1, hexlen);
+      map.set(id, body.slice(colon + 1, textEnd));
+      i = textEnd;
+      if (body[i] === "\n") i++;
+    } else {
+      let nl = body.indexOf("\n", colon + 1);
+      if (nl < 0) nl = n;
+      map.set(id, body.slice(colon + 1, nl));
+      i = nl + 1;
+    }
   }
   return map;
 }
@@ -109,27 +137,30 @@ function collect(body) {
 // ---------- classification ----------
 const TYPES = new Set(["Full-time", "Part-time", "Freelance", "Self-employed", "Contract", "Internship", "Apprenticeship", "Seasonal"]);
 const MONTHS = { Jan:"01",Feb:"02",Mar:"03",Apr:"04",May:"05",Jun:"06",Jul:"07",Aug:"08",Sep:"09",Oct:"10",Nov:"11",Dec:"12" };
-const EXP_DATE = /^([A-Z][a-z]{2}) (\d{4}) - (Present|([A-Z][a-z]{2}) (\d{4}))/;
+const EXP_DATE = /^(?:([A-Z][a-z]{2}) )?(\d{4}) - (Present|(?:([A-Z][a-z]{2}) )?(\d{4}))/;
 const EDU_DATE = /^((?:[A-Z][a-z]{2} )?\d{4})\s*[–\-—]\s*((?:[A-Z][a-z]{2} )?(?:\d{4}|Present))$/;
 const DURATION = /^[·•\s]*\d+\s*(yr|yrs|mo|mos)\b/;
+const WORK_MODE = /\s*[·•]\s*(Hybrid|Remote|On-?site)\s*$/i;
 
 function isLogo(t) { return / logo$/.test(t); }
 function logoName(t) { return t.replace(/ logo$/, "").trim(); }
 function isType(t) { return TYPES.has(t.trim()); }
 function isDuration(t) { return DURATION.test(t.trim()); }
+function cleanLocation(t) { return t.replace(WORK_MODE, "").trim(); }
+function isDescription(t) { return /^[-•*–]\s/.test(t) || t.includes("\n") || t.length > 140; }
 function isLocation(t) {
-  const s = t.trim();
+  const s = cleanLocation(t.trim());
+  if (/\b(and|or|for|with)\b/i.test(s) || /&/.test(s)) return false;
   if (/ Area$/.test(s)) return true;
-  if (/^[A-Za-zÀ-ÿ.''\-\s]+, [A-Za-zÀ-ÿ.''\-\s]+$/.test(s) && s.length < 80) return true;
-  // single-token country
+  if (s.length < 80 && /^[A-Za-zÀ-ÿ.''\-\s]+(, [A-Za-zÀ-ÿ.''\-\s]+){1,3}$/.test(s)) return true;
   if (/^(Panama|France|Vietnam|Singapore|Germany|Spain|India|China|Brazil|Mexico|Canada|Australia|Switzerland|Belgium|Netherlands|Italy|Portugal|Japan|Remote)$/.test(s)) return true;
   return false;
 }
 function parseExpDate(t) {
   const m = t.match(EXP_DATE);
   if (!m) return { startDate: null, endDate: null };
-  const start = `${m[2]}-${MONTHS[m[1]] || "01"}`;
-  const end = m[3] === "Present" ? "Present" : `${m[5]}-${MONTHS[m[4]] || "01"}`;
+  const start = m[1] ? `${m[2]}-${MONTHS[m[1]] || "01"}` : m[2];
+  const end = m[3] === "Present" ? "Present" : (m[4] ? `${m[5]}-${MONTHS[m[4]] || "01"}` : m[5]);
   return { startDate: start, endDate: end };
 }
 function dedupAdjacent(arr) {
