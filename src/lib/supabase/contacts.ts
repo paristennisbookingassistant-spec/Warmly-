@@ -71,17 +71,25 @@ export async function bulkUpsertContacts(
           user_id: userId,
           linkedin_url: item.linkedinUrl,
           linkedin_urn: item.linkedinUrn,
-          name: item.name,
-          current_title: item.currentTitle ?? null,
-          company: item.currentCompany ?? null,
-          avatar_url: item.photoUrl ?? null,
-          photo_url: item.photoUrl ?? null,
           sync_job_id: syncJobId,
           source: "discovery",
           // New contacts from sync default to 'pending' triage so they flow
           // through the swipe deck rather than appearing unreviewed in /contacts.
           ...(isNew ? { user_action: "pending", status: "discovered" } : {}),
         };
+
+        // Identity fields are owned by Phase 1 (the connections list). Phase 2
+        // enrichment sends the URL slug as a name placeholder and no photo, so
+        // we must NOT let it clobber them: only write name on insert or Phase 1,
+        // and only overwrite a field when a real value is supplied (never null
+        // it out). This prevents enrichment from wiping the real name + photo.
+        if (isNew || phase === "list") row.name = item.name;
+        if (item.currentTitle) row.current_title = item.currentTitle;
+        if (item.currentCompany) row.company = item.currentCompany;
+        if (item.photoUrl) {
+          row.avatar_url = item.photoUrl;
+          row.photo_url = item.photoUrl;
+        }
 
         // Phase 2: deep enrichment fields
         if (phase === "batch") {
