@@ -369,6 +369,12 @@ export default function ContactDetail({
                   {contact.company}
                 </p>
               )}
+              {/* LinkedIn headline (tagline) — synced from the connections list. */}
+              {contact.linkedin_bio && (
+                <p className="text-[13px] text-ink-3 mt-1.5 leading-snug">
+                  {contact.linkedin_bio}
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-[12.5px] text-ink-3">
                 {contact.location && (
                   <span className="inline-flex items-center gap-1.5">

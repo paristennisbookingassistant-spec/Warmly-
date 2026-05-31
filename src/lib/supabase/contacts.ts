@@ -90,10 +90,15 @@ export async function bulkUpsertContacts(
           row.avatar_url = item.photoUrl;
           row.photo_url = item.photoUrl;
         }
+        // Headline (the LinkedIn tagline, e.g. "Growth Investing | INSEAD MBA")
+        // is captured in Phase 1 and stored in linkedin_bio (whose own purpose
+        // is "headline text"). Only write when present so enrichment never nulls it.
+        if (item.headline) row.linkedin_bio = item.headline;
 
         // Phase 2: deep enrichment fields
         if (phase === "batch") {
-          if (item.bio !== undefined) row.linkedin_bio = item.bio;
+          // Only overwrite the stored headline if Phase 2 supplies a real bio.
+          if (item.bio) row.linkedin_bio = item.bio;
           if (item.location !== undefined) row.location = item.location;
           if (item.experience !== undefined) {
             row.experience = item.experience.map((e) => ({

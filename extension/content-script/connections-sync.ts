@@ -415,6 +415,64 @@ function buildEnrichmentContact(
 }
 
 /**
+ * Fetches experience + education for one profile, handling rate limits (pause +
+ * backoff, then retry the same profile). Returns nulls for sections that yielded
+ * no data. `aborted` is true if the sync was cancelled mid-fetch (caller returns).
+ */
+async function fetchExpEdu(
+  publicId: string,
+  profileId: string,
+  csrfToken: string,
+  job: SyncJob,
+  signal: { aborted: boolean }
+): Promise<{
+  experience: BulkImportContact["experience"];
+  education: BulkImportContact["education"];
+  aborted: boolean;
+}> {
+  let experience: BulkImportContact["experience"] = null;
+  let education: BulkImportContact["education"] = null;
+
+  let retryExp = true;
+  while (retryExp) {
+    try {
+      const exp = await fetchExperience(publicId, profileId, csrfToken);
+      experience = exp.length > 0 ? exp : null;
+      retryExp = false;
+    } catch (err) {
+      if (err instanceof RateLimitedError) {
+        await handleRateLimited(job, signal);
+        if (signal.aborted) return { experience, education, aborted: true };
+      } else {
+        console.warn(`[ConnectionsSync] Phase 2: experience fetch error for ${publicId}:`, err);
+        retryExp = false;
+      }
+    }
+  }
+
+  if (signal.aborted) return { experience, education, aborted: true };
+
+  let retryEdu = true;
+  while (retryEdu) {
+    try {
+      const edu = await fetchEducation(publicId, profileId, csrfToken);
+      education = edu.length > 0 ? edu : null;
+      retryEdu = false;
+    } catch (err) {
+      if (err instanceof RateLimitedError) {
+        await handleRateLimited(job, signal);
+        if (signal.aborted) return { experience, education, aborted: true };
+      } else {
+        console.warn(`[ConnectionsSync] Phase 2: education fetch error for ${publicId}:`, err);
+        retryEdu = false;
+      }
+    }
+  }
+
+  return { experience, education, aborted: false };
+}
+
+/**
  * Phase 2 (RSC path): iterates over every collected profile and fetches
  * experience + education from the LinkedIn details sub-pages.
  *
@@ -453,6 +511,8 @@ async function runPhase2(
   // Honour the test cap (else enrich everything collected).
   const limit = _testMaxProfiles > 0 ? Math.min(profiles.length, _testMaxProfiles) : profiles.length;
   let skipped = 0;
+  // Profiles that returned no data on the first pass — retried once at the end.
+  const emptyProfiles: Array<{ urn: string; publicId: string; profileId: string }> = [];
 
   for (let i = startIdx; i < limit; i++) {
     if (signal.aborted) return;
@@ -476,47 +536,16 @@ async function runPhase2(
     }
 
     // Fetch experience + education for this profile (both back-to-back, then throttle)
-    let experience: BulkImportContact["experience"] = null;
-    let education: BulkImportContact["education"] = null;
+    const fetched = await fetchExpEdu(publicId, profileId, csrfToken, job, signal);
+    if (fetched.aborted) return;
+    const { experience, education } = fetched;
 
-    // Experience fetch
-    let retryExp = true;
-    while (retryExp) {
-      try {
-        const exp = await fetchExperience(publicId, profileId, csrfToken);
-        experience = exp.length > 0 ? exp : null;
-        retryExp = false;
-      } catch (err) {
-        if (err instanceof RateLimitedError) {
-          await handleRateLimited(job, signal);
-          if (signal.aborted) return;
-          // Retry same profile
-        } else {
-          console.warn(`[ConnectionsSync] Phase 2: experience fetch error for ${publicId}:`, err);
-          retryExp = false;
-        }
-      }
-    }
-
-    if (signal.aborted) return;
-
-    // Education fetch (no extra throttle between exp + edu — same profile, back-to-back)
-    let retryEdu = true;
-    while (retryEdu) {
-      try {
-        const edu = await fetchEducation(publicId, profileId, csrfToken);
-        education = edu.length > 0 ? edu : null;
-        retryEdu = false;
-      } catch (err) {
-        if (err instanceof RateLimitedError) {
-          await handleRateLimited(job, signal);
-          if (signal.aborted) return;
-          // Retry same profile education
-        } else {
-          console.warn(`[ConnectionsSync] Phase 2: education fetch error for ${publicId}:`, err);
-          retryEdu = false;
-        }
-      }
+    // A profile that comes back with NOTHING is usually a transient block
+    // (LinkedIn anti-bot serving a challenge instead of data) rather than a
+    // genuinely empty profile. Collect it for one retry pass at the end, when
+    // the request burst has settled.
+    if (experience === null && education === null) {
+      emptyProfiles.push({ urn, publicId, profileId });
     }
 
     // Build and send the enrichment contact.
@@ -563,6 +592,37 @@ async function runPhase2(
       console.debug(`[ConnectionsSync] Phase 2: throttle ${delay}ms before next profile`);
       await sleep(delay);
     }
+  }
+
+  // --- Retry pass: re-attempt the profiles that returned nothing -----------
+  if (emptyProfiles.length > 0 && !signal.aborted) {
+    console.info(`[ConnectionsSync] Phase 2: retry pass over ${emptyProfiles.length} empty profiles`);
+    let recovered = 0;
+    for (const p of emptyProfiles) {
+      if (signal.aborted) return;
+      // Throttle before each retry, same as the main pass.
+      await sleep(withJitter30(PROFILE_FETCH_THROTTLE_MS));
+      const fetched = await fetchExpEdu(p.publicId, p.profileId, csrfToken, job, signal);
+      if (fetched.aborted) return;
+      const { experience, education } = fetched;
+      if (experience !== null || education !== null) {
+        const linkedinUrl = `https://www.linkedin.com/in/${p.publicId}/`;
+        const contact = buildEnrichmentContact(p.urn, linkedinUrl, p.publicId, experience, education);
+        await bulkImport({ sync_job_id: job.id, phase: 2, contacts: [contact] });
+        job.profiles_enriched++;
+        recovered++;
+        console.info(`[ConnectionsSync] Phase 2 retry: recovered ${p.publicId}`);
+      } else {
+        console.warn(`[ConnectionsSync] Phase 2 retry: ${p.publicId} still empty (likely no public data or persistent block)`);
+      }
+    }
+    await updateSyncJob({
+      id: job.id,
+      profiles_enriched: job.profiles_enriched,
+      updated_at: new Date().toISOString(),
+    });
+    emitProgress(job);
+    console.info(`[ConnectionsSync] Phase 2 retry pass recovered ${recovered}/${emptyProfiles.length}`);
   }
 
   console.info(
