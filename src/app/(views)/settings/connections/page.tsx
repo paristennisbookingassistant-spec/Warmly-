@@ -63,8 +63,16 @@ export default function ConnectionsSettingsPage() {
         return;
       }
       setActiveJobId(body.data.id);
+      // The auth-bridge requires user_id, and the service worker expects
+      // sync_job_id — both are on the job record the server just returned.
+      // (Posting { jobId } silently fails: auth-bridge bails on the missing
+      // user_id.)
       window.postMessage(
-        { source: "WARMLY_WEBAPP", type: "START_NETWORK_SYNC", payload: { jobId: body.data.id } },
+        {
+          source: "WARMLY_WEBAPP",
+          type: "START_NETWORK_SYNC",
+          payload: { user_id: body.data.user_id, sync_job_id: body.data.id },
+        },
         "*"
       );
     } catch {
