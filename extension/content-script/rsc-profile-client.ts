@@ -1,83 +1,141 @@
 /**
  * content-script/rsc-profile-client.ts
  *
- * Fetches deep experience + education data from LinkedIn profile "details"
- * sub-pages and parses the React Server Components (RSC) hydration payload
- * embedded in each page.
+ * Fetches deep experience + education for a LinkedIn profile and parses the
+ * result. Runs INSIDE the content script so the user's session cookies attach
+ * automatically.
  *
- * Background: the Voyager batch profile endpoint does NOT return work history
- * or education inline. The real data is server-rendered into:
- *   https://www.linkedin.com/in/<publicId>/details/experience/
- *   https://www.linkedin.com/in/<publicId>/details/education/
- * as an RSC flight payload inside <script id="rehydrate-data">.
+ * ── How it works (verified live, 2026-05-31) ───────────────────────────────
+ * LinkedIn's profile is now a fully server-driven UI (SDUI). There is NO clean
+ * JSON API for experience/education (profileView → 410 Gone; no GraphQL call
+ * returns it). The data is delivered as a React Server Components (Flight) wire
+ * payload by the SDUI pagination endpoint that the profile page itself calls
+ * when you scroll a section:
  *
- * VERIFIED (2026-05-29 live probe):
- *   - Data lives in window.__como_rehydration__ RSC flight serialization.
- *   - Text values are in "children":["<value>"] arrays.
- *   - Date-range strings: "Jun 2025 - Present · 1 yr" (Month YYYY - ... pattern).
- *   - Company name: "children":["Deloitte"] immediately before the date-range.
- *   - Noise: ads/sidebars also use children arrays; scope ONLY to subtrees that
- *     contain date-range strings to avoid garbage like "Acquire customers...".
+ *   POST /flagship-web/rsc-action/actions/pagination
+ *        ?sduiid=com.linkedin.sdui.pagers.profile.details.{experience|education}
+ *        &parentSpanId=<any>            ← NOT validated; a constant works
+ *   body: { pagerId, clientArguments:{ payload:{ vanityName, profileId,
+ *           start, count, detailSectionReplaceableComponentRef } ... } ... }
  *
- * READ-ONLY: only GET requests. No POST/PUT/DELETE to linkedin.com.
- * See docs/LINKEDIN_GUARDRAILS.md.
+ * The body is fully constructible from the public identifier + the fsd_profile
+ * id (the connection URN minus its "urn:li:fsd_profile:" prefix) — both of which
+ * Phase 1 already captured. One scoped POST per section returns the COMPLETE
+ * list (count: 50), not just the SSR'd first page.
  *
- * Runs INSIDE the content script — session cookies attach automatically.
+ * The response is a Flight stream (newline-separated "id:value" rows with
+ * $<id> cross-references). We resolve the references, walk the tree, group
+ * leaves by their nearest `entity-collection-item` card (experience) or read the
+ * flat ordered leaf stream (education), and structure each card's fields.
+ *
+ * ── Read-only ──────────────────────────────────────────────────────────────
+ * This POST is a DATA READ (it returns the profile's public experience/education
+ * exactly as the page renders on scroll). It performs NO state-changing action —
+ * no message, connection, post, like, or profile edit. It complies with
+ * docs/LINKEDIN_GUARDRAILS.md (which prohibits state-changing actions, not data
+ * fetches). The output shape matches the backend bulk-import Zod contract.
  */
 
 import type { VoyagerProfile } from "../shared/types";
 import { RateLimitedError } from "./voyager-list-client";
 
 // ---------------------------------------------------------------------------
-// Types
+// Public entry types (match the backend ExperienceEntrySchema / EducationEntrySchema)
 // ---------------------------------------------------------------------------
 
 export type ExperienceEntry = VoyagerProfile["experience"][number];
 export type EducationEntry = VoyagerProfile["education"][number];
 
+type Section = "experience" | "education";
+
 // ---------------------------------------------------------------------------
-// Navigation fetch helper
+// Network: POST the SDUI pagination action for one profile section
 // ---------------------------------------------------------------------------
 
+function buildActionBody(publicId: string, profileId: string, section: Section) {
+  const Section = section === "experience" ? "Experience" : "Education";
+  const pagerId = `com.linkedin.sdui.pagers.profile.details.${section}`;
+  const screenId = `com.linkedin.sdui.flagshipnav.profile.Profile${Section}Details`;
+  const ref = `com.linkedin.sdui.profile.card.ref${profileId}${Section}DetailsSection`;
+  const payload = {
+    vanityName: publicId,
+    profileId,
+    start: 0,
+    count: 50,
+    detailSectionReplaceableComponentRef: ref,
+  };
+  const requestedArguments = {
+    $type: "proto.sdui.actions.requests.RequestedArguments",
+    payload,
+    requestedStateKeys: [],
+    requestMetadata: { $type: "proto.sdui.common.RequestMetadata" },
+  };
+  return {
+    pagerId,
+    clientArguments: { ...requestedArguments, states: [], screenId },
+    paginationRequest: {
+      $type: "proto.sdui.actions.requests.PaginationRequest",
+      pagerId,
+      requestedArguments,
+      trigger: {
+        $case: "itemDistanceTrigger",
+        itemDistanceTrigger: {
+          $type: "proto.sdui.actions.requests.ItemDistanceTrigger",
+          preloadDistance: 3,
+          preloadLength: 250,
+        },
+      },
+      retryCount: 2,
+    },
+  };
+}
+
 /**
- * Fetches a LinkedIn profile detail page with navigation headers so LinkedIn
- * serves the full SSR page (with rehydrate-data) rather than a stripped SPA stub.
- *
- * READ-ONLY — GET only.
+ * Fetches the raw Flight stream for a profile section. Returns null on a
+ * non-OK/empty response. Throws RateLimitedError on HTTP 429/999.
  */
-async function fetchDetailsPage(url: string): Promise<string | null> {
+async function fetchSectionFlight(
+  publicId: string,
+  profileId: string,
+  section: Section,
+  csrfToken: string
+): Promise<string | null> {
+  const pagerId = `com.linkedin.sdui.pagers.profile.details.${section}`;
+  const url =
+    `https://www.linkedin.com/flagship-web/rsc-action/actions/pagination` +
+    `?sduiid=${encodeURIComponent(pagerId)}&parentSpanId=AAAAAAAAAAA%3D`;
+
   let response: Response;
   try {
     response = await fetch(url, {
-      method: "GET",
+      method: "POST",
       credentials: "include",
       headers: {
-        accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "accept-language": "en-US,en;q=0.9",
-        "sec-fetch-mode": "navigate",
-        "sec-fetch-dest": "document",
-        "sec-fetch-site": "same-origin",
-        "upgrade-insecure-requests": "1",
+        "content-type": "application/json",
+        "csrf-token": csrfToken,
+        "x-li-rsc-stream": "true",
+        "x-li-anchor-page-key": `d_flagship3_profile_view_base_${section}_details`,
+        referer: `https://www.linkedin.com/in/${encodeURIComponent(publicId)}/details/${section}/`,
       },
+      body: JSON.stringify(buildActionBody(publicId, profileId, section)),
     });
   } catch (err) {
-    console.error("[RscProfile] Network error fetching", url, err);
+    console.error(`[RscProfile] Network error fetching ${section} for ${publicId}:`, err);
     return null;
   }
 
   if (response.status === 429 || response.status === 999) {
-    console.warn(`[RscProfile] Rate limited (HTTP ${response.status}) for ${url}`);
+    console.warn(`[RscProfile] Rate limited (HTTP ${response.status}) for ${publicId}/${section}`);
     throw new RateLimitedError(response.status);
   }
-
   if (!response.ok) {
-    console.warn(`[RscProfile] HTTP ${response.status} for ${url}`);
+    console.warn(`[RscProfile] HTTP ${response.status} for ${publicId}/${section}`);
     return null;
   }
 
   try {
-    return await response.text();
+    const text = await response.text();
+    return text.length > 0 ? text : null;
   } catch (err) {
     console.error("[RscProfile] Failed to read response text:", err);
     return null;
@@ -85,332 +143,290 @@ async function fetchDetailsPage(url: string): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
-// RSC payload extraction
+// Flight deserialization — chunk map + lazy reference resolution
 // ---------------------------------------------------------------------------
 
-/**
- * Extracts the raw content of <script id="rehydrate-data"> from the page HTML.
- * Returns null if the script tag is absent.
- */
-function extractRehydrateScript(html: string): string | null {
-  const match = html.match(/<script[^>]*id="rehydrate-data"[^>]*>([\s\S]*?)<\/script>/);
-  if (!match?.[1]) return null;
-  return match[1].trim();
+interface FlightWalkResult {
+  cards: Array<{ id: string; leaves: string[] }>;
+  flat: string[];
 }
 
-/**
- * Unescapes the RSC string so we can walk it with plain string operations.
- *
- * BUG 4 FIX: also decode \uXXXX Unicode escapes and common HTML entities
- * (&amp; → &, &lt; → <, &gt; → >, &quot; → ").
- */
-function unescapeRsc(raw: string): string {
-  return raw
-    // Standard JSON-style string escapes
-    .replace(/\\"/g, '"')
-    .replace(/\\\\/g, "\\")
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "")
-    // BUG 4: Unicode escape sequences (\uXXXX)
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
-      String.fromCharCode(parseInt(hex, 16))
-    )
-    // BUG 4: HTML entities that sometimes appear inside RSC string values
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
+const SKIP_LEAVES = new Set(["SHORT_PRESS", "LONG_PRESS", "SWIPE", "default"]);
 
-// ---------------------------------------------------------------------------
-// Content subtree scoping
-// ---------------------------------------------------------------------------
-
-/**
- * Date-range pattern for experience entries.
- * Matches strings like:
- *   "Jun 2025 - Present · 1 yr"
- *   "Nov 2022 - Jun 2025 · 2 yrs 7 mos"
- *   "Mar 2008 - Aug 2017"
- */
-const DATE_RANGE_RE =
-  /[A-Z][a-z]{2} \d{4} - (?:Present|[A-Z][a-z]{2} \d{4})(?:\s*[··]\s*[^"]+)?/g;
-
-/**
- * Education year-range pattern.
- * Matches "2016 - 2020", "2016–2020", "2016 – 2020", "2016—2020".
- * Also handles the single-year "2020" format for partial dates.
- */
-const EDU_YEAR_RE = /(?:19|20)\d{2}\s*[-–—]\s*(?:19|20)\d{2}/g;
-
-const CONTEXT_WINDOW = 12_000;
-
-/**
- * BUG 3 FIX: For education, the year-range anchor is unreliable because many
- * education entries have no dates. We now also try a broader window that simply
- * grabs everything between the first and last occurrence of any date OR the
- * first school-like string in the page. scopeToContentSubtree is called with a
- * fallbackToFullPayload flag for education.
- */
-function scopeToContentSubtree(
-  payload: string,
-  kind: "experience" | "education"
-): string {
-  const anchorRe = kind === "experience" ? DATE_RANGE_RE : EDU_YEAR_RE;
-  anchorRe.lastIndex = 0;
-
-  let firstPos = -1;
-  let lastPos = -1;
-  let m: RegExpExecArray | null;
-
-  while ((m = anchorRe.exec(payload)) !== null) {
-    if (firstPos === -1) firstPos = m.index;
-    lastPos = m.index + m[0].length;
-  }
-
-  if (firstPos === -1) {
-    if (kind === "education") {
-      // BUG 3 FIX: No year-range anchors found for education — fall back to
-      // the full payload so the school-name heuristic in the parser can still
-      // find entries. Truncate to a reasonable size to avoid pathological input.
-      console.debug("[RscProfile] No edu year anchors; using full payload for school-name scan");
-      return payload.slice(0, 60_000);
-    }
-    return "";
-  }
-
-  const start = Math.max(0, firstPos - CONTEXT_WINDOW);
-  const end = Math.min(payload.length, lastPos + CONTEXT_WINDOW);
-  return payload.slice(start, end);
-}
-
-// ---------------------------------------------------------------------------
-// Children-string extraction helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Extracts all plain-string values from "children":["<value>"] arrays in the
- * given payload segment. Returns them in document order.
- */
-function extractChildrenStrings(segment: string): Array<{ pos: number; values: string[] }> {
-  const results: Array<{ pos: number; values: string[] }> = [];
-  const re = /"children":\[("(?:[^"\\]|\\.)*"(?:,\s*"(?:[^"\\]|\\.)*")*)\]/g;
-  let m: RegExpExecArray | null;
-
-  while ((m = re.exec(segment)) !== null) {
-    const inner = m[1];
-    const strings: string[] = [];
-    const strRe = /"((?:[^"\\]|\\.)*)"/g;
-    let sm: RegExpExecArray | null;
-    while ((sm = strRe.exec(inner)) !== null) {
-      const val = sm[1]
-        .replace(/\\"/g, '"')
-        .replace(/\\\\/g, "\\")
-        .replace(/\\n/g, " ")
-        // Decode unicode escapes within individual field values too
-        .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
-          String.fromCharCode(parseInt(hex, 16))
-        )
-        .trim();
-      if (val.length > 0) strings.push(val);
-    }
-    if (strings.length > 0) {
-      results.push({ pos: m.index, values: strings });
-    }
-  }
-
-  return results;
-}
-
-// ---------------------------------------------------------------------------
-// BUG 1 helpers — filter noise before title/company pairing
-// ---------------------------------------------------------------------------
-
-/**
- * Employment type strings LinkedIn appends to company names (e.g. "Deloitte · Full-time").
- * These also appear as standalone children strings in some RSC structures.
- */
-const EMPLOYMENT_TYPES = new Set([
-  "full-time", "part-time", "freelance", "self-employed", "contract",
-  "internship", "apprenticeship", "seasonal",
-]);
-
-/**
- * Returns true if the string is an employment-type label.
- */
-function isEmploymentType(s: string): boolean {
-  return EMPLOYMENT_TYPES.has(s.toLowerCase().trim());
-}
-
-/**
- * Returns true if the string looks like a location (city, region, country).
- * Heuristics:
- *  - Contains ", " with ≥2 words on each side (e.g. "New York, United States")
- *  - Ends in " Area" (e.g. "Greater Paris Metropolitan Area")
- *  - Matches known country/region suffixes
- */
-function isLocation(s: string): boolean {
-  const t = s.trim();
-  if (t.endsWith(" Area")) return true;
-  // "City, State" or "City, Country" — comma with at least one letter on each side
-  if (/^[A-Za-zÀ-ÿ\s\-'.]+,\s+[A-Za-zÀ-ÿ\s\-'.]+$/.test(t)) return true;
+function isJunkLeaf(t: string): boolean {
+  if (!t) return true;
+  if (SKIP_LEAVES.has(t)) return true;
+  if (t[0] === "$") return true;
+  if (t.startsWith("var(")) return true;
+  if (/^_?[0-9a-f]{6,}$/.test(t)) return true;
+  if (t[0] === "{" && t.endsWith("}")) return true; // stray json fragment
+  // Media alt-text noise — "Thumbnail for <post>", "<X> cover photo", etc.
+  // These are image accessibility strings, never experience/education content,
+  // and their "X, Y …" shape can be mistaken for a location.
+  if (/^Thumbnail\b/i.test(t)) return true;
+  if (/\bcover photo$/i.test(t)) return true;
+  if (t.length > 600) return true;
   return false;
 }
 
-/**
- * Returns true if the string is a standalone duration/tenure token.
- * Matches: "1 yr", "2 yrs 3 mos", "· 8 yrs 9 mos", etc.
- */
-function isDuration(s: string): boolean {
-  return /^[··\s]*\d+\s+(?:yr|yrs|mos|mo)/.test(s.trim());
-}
-
-/**
- * Returns true if the string is (or contains) a date range we'd use as anchor.
- * We already have anchors but we also want to skip stray date strings in the
- * candidate list (e.g. "Jun 2025 - Present" showing up as a child value).
- */
-function looksLikeDateRange(s: string): boolean {
-  return /[A-Z][a-z]{2} \d{4}/.test(s) || /^\d{4}[-–]/.test(s);
-}
-
-/**
- * BUG 1 FIX: Strips noise tokens from a candidate string list.
- * Also splits on " · " within company strings to discard the employment-type
- * suffix LinkedIn appends (e.g. "Deloitte · Full-time" → "Deloitte").
- */
-function filterCandidates(raw: string[]): string[] {
-  const out: string[] = [];
-  for (const s of raw) {
-    const t = s.trim();
-    if (!t) continue;
-    if (looksLikeDateRange(t)) continue;
-    if (isEmploymentType(t)) continue;
-    if (isLocation(t)) continue;
-    if (isDuration(t)) continue;
-    // Split on " · " — take only the part before the bullet (strips "Full-time" suffix)
-    const clean = t.split(/\s*[··]\s*/)[0]?.trim() ?? t;
-    if (!clean || isEmploymentType(clean)) continue;
-    out.push(clean);
+function buildChunkMap(body: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const line of body.split("\n")) {
+    const colon = line.indexOf(":");
+    if (colon < 0) continue;
+    const id = line.slice(0, colon);
+    if (!/^[0-9a-f]+$/.test(id)) continue;
+    map.set(id, line.slice(colon + 1));
   }
+  return map;
+}
+
+function parseRowModel(raw: string | undefined): unknown {
+  if (raw == null) return undefined;
+  const t = raw[0];
+  if (t === "I") return { __module: true };
+  if (t === "H") return undefined;
+  if (t === "T") {
+    const c = raw.indexOf(",");
+    return c >= 0 ? raw.slice(c + 1) : raw.slice(1);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * Walks the Flight tree, resolving $<id> references (global visited-guard so
+ * cycles can't explode), and collects text leaves both globally (flat) and
+ * grouped by the nearest `entity-collection-item` card.
+ */
+function walkFlight(body: string): FlightWalkResult {
+  const map = buildChunkMap(body);
+  const cards: FlightWalkResult["cards"] = [];
+  const flat: string[] = [];
+  let current: { id: string; leaves: string[] } | null = null;
+  const visited = new Set<string>();
+
+  const push = (value: unknown): void => {
+    const t = String(value).trim();
+    if (isJunkLeaf(t)) return;
+    flat.push(t);
+    if (current) current.leaves.push(t);
+  };
+
+  const walk = (node: unknown, depth: number): void => {
+    if (node == null || depth > 240) return;
+
+    if (typeof node === "string") {
+      if (node.length > 1 && node[0] === "$" && node !== "$") {
+        if (node[1] === "$") return push(node.slice(1));
+        const id = node[1] === "L" ? node.slice(2) : node.slice(1);
+        if (!map.has(id) || visited.has(id)) return;
+        visited.add(id);
+        return walk(parseRowModel(map.get(id)), depth + 1);
+      }
+      // double-serialized Flight subtree stored as a string → re-parse + recurse
+      if ((node.startsWith('[["$"') || node.startsWith('["$"')) && node.length > 8) {
+        try {
+          return walk(JSON.parse(node), depth + 1);
+        } catch {
+          /* fall through to push */
+        }
+      }
+      return push(node);
+    }
+
+    if (Array.isArray(node)) {
+      // Flight element: ["$", type, key, props]
+      if (node[0] === "$" && node.length >= 4 && typeof node[1] === "string") {
+        const props = node[3] as Record<string, unknown> | null;
+        if (props && typeof props === "object" && typeof props.a11yText === "string") {
+          push(props.a11yText);
+        }
+        return walk(props, depth + 1);
+      }
+      for (const el of node) walk(el, depth + 1);
+      return;
+    }
+
+    if (typeof node === "object") {
+      const obj = node as Record<string, unknown>;
+      if (obj.__module) return;
+      const ck = (obj.componentkey ?? obj.componentKey) as string | undefined;
+      const started = typeof ck === "string" && /entity-collection-item/.test(ck);
+      const prev = current;
+      if (started) {
+        current = { id: ck as string, leaves: [] };
+        cards.push(current);
+      }
+      if (typeof obj.a11yText === "string") push(obj.a11yText);
+      if (obj.children !== undefined) walk(obj.children, depth + 1);
+      if (obj.textProps !== undefined) walk(obj.textProps, depth + 1);
+      if (typeof obj.text === "string") push(obj.text);
+      for (const [k, v] of Object.entries(obj)) {
+        if (
+          ["children", "textProps", "text", "componentkey", "componentKey",
+            "className", "style", "a11yText", "accessibilityText"].includes(k)
+        ) continue;
+        if (v && typeof v === "object") walk(v, depth + 1);
+        else if (typeof v === "string" && v[0] === "$" && v !== "$") walk(v, depth + 1);
+      }
+      if (started) current = prev;
+    }
+  };
+
+  for (const [id, raw] of map) {
+    if (visited.has(id)) continue;
+    const model = parseRowModel(raw);
+    if (model && typeof model === "object" && !(model as Record<string, unknown>).__module) {
+      walk(model, 0);
+    }
+  }
+
+  return { cards, flat };
+}
+
+// ---------------------------------------------------------------------------
+// Field classification
+// ---------------------------------------------------------------------------
+
+const EMPLOYMENT_TYPES = new Set([
+  "Full-time", "Part-time", "Freelance", "Self-employed", "Contract",
+  "Internship", "Apprenticeship", "Seasonal",
+]);
+
+const MONTHS: Record<string, string> = {
+  Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
+  Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12",
+};
+
+// Experience date range, e.g. "Jul 2025 - Present · 11 mos" / "Jan 2025 - Oct 2025 · 10 mos"
+const EXP_DATE_RE = /^([A-Z][a-z]{2}) (\d{4}) - (Present|([A-Z][a-z]{2}) (\d{4}))/;
+// Education range, e.g. "2018 – 2022" / "Jan 2026 – Dec 2026" (note en-dash)
+const EDU_DATE_RE = /^((?:[A-Z][a-z]{2} )?\d{4})\s*[–\-—]\s*((?:[A-Z][a-z]{2} )?(?:\d{4}|Present))$/;
+const DURATION_RE = /^[·•\s]*\d+\s*(yr|yrs|mo|mos)\b/;
+
+function isLogo(t: string): boolean {
+  return / logo$/.test(t);
+}
+function logoName(t: string): string {
+  return t.replace(/ logo$/, "").trim();
+}
+function isEmploymentType(t: string): boolean {
+  return EMPLOYMENT_TYPES.has(t.trim());
+}
+function isDuration(t: string): boolean {
+  return DURATION_RE.test(t.trim());
+}
+function isLocation(t: string): boolean {
+  const s = t.trim();
+  if (/ Area$/.test(s)) return true;
+  if (s.length < 80 && /^[A-Za-zÀ-ÿ.''\-\s]+, [A-Za-zÀ-ÿ.''\-\s]+$/.test(s)) return true;
+  if (/^(Panama|France|Vietnam|Singapore|Germany|Spain|India|China|Brazil|Mexico|Canada|Australia|Switzerland|Belgium|Netherlands|Italy|Portugal|Japan|Remote)$/.test(s)) return true;
+  return false;
+}
+function parseExpDate(t: string): { start: string | null; end: string | null } {
+  const m = t.match(EXP_DATE_RE);
+  if (!m) return { start: null, end: null };
+  const start = `${m[2]}-${MONTHS[m[1]!] ?? "01"}`;
+  const end = m[3] === "Present" ? "Present" : `${m[5]}-${MONTHS[m[4]!] ?? "01"}`;
+  return { start, end };
+}
+function dedupAdjacent(arr: string[]): string[] {
+  const out: string[] = [];
+  for (const x of arr) if (out[out.length - 1] !== x) out.push(x);
   return out;
 }
 
 // ---------------------------------------------------------------------------
-// Experience parser
+// Experience parsing — one entity-collection-item card → 1+ roles
 // ---------------------------------------------------------------------------
 
-/**
- * Parses experience entries from the scoped RSC payload segment.
- *
- * BUG 1 FIX: Filter employment types, locations, and duration strings from
- * candidate list before pairing title/company.
- * BUG 2 FIX: Parse dateRange start/end from the anchor string explicitly.
- */
-function parseExperienceFromSegment(segment: string): ExperienceEntry[] {
-  const entries: ExperienceEntry[] = [];
-  if (!segment) return entries;
-
-  const groups = extractChildrenStrings(segment);
-  if (groups.length === 0) return entries;
-
-  // Find date-range anchors with their parsed start/end
-  const dateRangeRe =
-    /[A-Z][a-z]{2} \d{4}\s*-\s*(?:Present|[A-Z][a-z]{2} \d{4})(?:\s*[··]\s*[^"]{0,80})?/g;
-  dateRangeRe.lastIndex = 0;
-
-  interface DateAnchor {
-    pos: number;
-    raw: string;
-    startText: string;
-    endText: string;
+function parseExperienceCard(rawLeaves: string[]): ExperienceEntry[] {
+  const leaves = dedupAdjacent(rawLeaves);
+  let companyLogo: string | null = null;
+  for (const l of leaves) {
+    if (isLogo(l)) { companyLogo = logoName(l); break; }
   }
+  const toks = leaves.filter((l) => !isLogo(l));
+  if (!toks.length) return [];
 
-  const dateAnchors: DateAnchor[] = [];
-  let dm: RegExpExecArray | null;
-  while ((dm = dateRangeRe.exec(segment)) !== null) {
-    const raw = dm[0];
-    // BUG 2 FIX: split on " - " (with possible surrounding whitespace)
-    // and strip the " · N yrs" duration suffix from the end part.
-    const dashIdx = raw.indexOf(" - ");
-    const startText = (dashIdx >= 0 ? raw.slice(0, dashIdx) : raw).trim();
-    const afterDash = dashIdx >= 0 ? raw.slice(dashIdx + 3) : "";
-    // Strip duration suffix: everything from " · " onward
-    const endText = afterDash.split(/\s*[··]/)[0]?.trim() ?? "";
-    dateAnchors.push({ pos: dm.index, raw, startText, endText });
-  }
+  const dateIdx: number[] = [];
+  toks.forEach((t, i) => { if (EXP_DATE_RE.test(t)) dateIdx.push(i); });
+  if (!dateIdx.length) return [];
 
-  if (dateAnchors.length === 0) return entries;
+  const roles: ExperienceEntry[] = [];
 
-  // General noise filter (for UI chrome strings, not experience-specific)
-  function isUiNoise(s: string): boolean {
-    if (s.length > 150) return true;
-    const noisePatterns = [
-      /^People also viewed$/i,
-      /^Acquire customers/i,
-      /^Grow your business/i,
-      /^LinkedIn/i,
-      /^Try Premium/i,
-      /^\d+$/,
-      /^[··]/,
-    ];
-    return noisePatterns.some((p) => p.test(s.trim()));
-  }
-
-  for (const anchor of dateAnchors) {
-    const before = groups.filter((g) => g.pos < anchor.pos);
-    if (before.length === 0) continue;
-
-    // Flatten and apply full noise filters (BUG 1 FIX)
-    const rawCandidates: string[] = [];
-    for (const g of before) {
-      for (const v of g.values) {
-        if (!isUiNoise(v)) rawCandidates.push(v);
+  if (dateIdx.length === 1) {
+    // Single role: [Title, "Company · Type", Date, Location?, Description?]
+    const di = dateIdx[0]!;
+    const dateRange = parseExpDate(toks[di]!);
+    let company = companyLogo;
+    const ctLine = toks.find(
+      (t, i) => i < di && / · /.test(t) && isEmploymentType(t.split(" · ").pop()!.trim())
+    );
+    if (ctLine) {
+      const parts = ctLine.split(" · ");
+      if (!company) company = parts[0]!.trim();
+    }
+    // Title is always BEFORE the date; never location-filter it (titles can
+    // contain commas, e.g. "Consultant, Deal Advisory").
+    const title = toks.find(
+      (t, i) => i < di && t !== ctLine && t !== company && !isEmploymentType(t) && !isDuration(t)
+    );
+    const after = toks.slice(di + 1);
+    const location = after.find((t) => isLocation(t)) ?? undefined;
+    const description = after.find((t) => !isLocation(t) && !isDuration(t) && !isEmploymentType(t)) ?? undefined;
+    if (title && company) {
+      roles.push({ title, company, dateRange, ...(location ? { location } : {}), ...(description ? { description } : {}) });
+    }
+  } else {
+    // Grouped: [Company, "Type · TotalDur"?, GroupLoc?, (Title, Type?, Date, Loc?, Desc?)×N]
+    let company = companyLogo;
+    const headerIdx = toks.findIndex(
+      (t) => !isEmploymentType(t) && !isDuration(t) && !isLocation(t) && !EXP_DATE_RE.test(t)
+    );
+    if (!company && headerIdx >= 0) company = toks[headerIdx]!;
+    let groupLoc: string | null = null;
+    for (let j = 0; j < dateIdx[0]!; j++) {
+      if (isLocation(toks[j]!)) { groupLoc = toks[j]!; break; }
+    }
+    const used = new Set<number>();
+    if (headerIdx >= 0) used.add(headerIdx);
+    let prevDate = -1;
+    for (const di of dateIdx) {
+      let title: string | null = null;
+      for (let j = di - 1; j > prevDate; j--) {
+        if (used.has(j)) continue;
+        const t = toks[j]!;
+        if (isEmploymentType(t) || isDuration(t) || isLocation(t) || EXP_DATE_RE.test(t)) continue;
+        if (t === company) continue;
+        title = t; used.add(j); break;
       }
+      let location: string | null = null;
+      for (let j = di + 1; j < toks.length && !dateIdx.includes(j); j++) {
+        if (isLocation(toks[j]!)) { location = toks[j]!; break; }
+      }
+      const loc = location ?? groupLoc;
+      if (title && company) {
+        roles.push({ title, company, dateRange: parseExpDate(toks[di]!), ...(loc ? { location: loc } : {}) });
+      }
+      prevDate = di;
     }
-    const candidates = filterCandidates(rawCandidates);
-
-    // BUG 2 FIX: parse start/end dates
-    const [startYear, startMonth] = parseMonthYear(anchor.startText);
-    const isPresent = anchor.endText.toLowerCase() === "present";
-    const [endYear, endMonth] = isPresent
-      ? [null, null]
-      : parseMonthYear(anchor.endText);
-
-    if (candidates.length === 0) continue;
-
-    if (candidates.length < 2) {
-      const title = candidates[candidates.length - 1]!;
-      entries.push({
-        title,
-        company: "Unknown",
-        duration: anchor.raw,
-        startDate: formatDate(startYear, startMonth),
-        endDate: isPresent ? "Present" : formatDate(endYear, endMonth),
-      });
-      continue;
-    }
-
-    // In LinkedIn's RSC order: title is rendered first (heading), company second.
-    // Both appear before the date range. After filtering, the last two candidates
-    // are [title, company] in document order.
-    const title = candidates[candidates.length - 2]!;
-    const company = candidates[candidates.length - 1]!;
-
-    entries.push({
-      title,
-      company,
-      duration: anchor.raw,
-      startDate: formatDate(startYear, startMonth),
-      endDate: isPresent ? "Present" : formatDate(endYear, endMonth),
-    });
   }
+  return roles;
+}
 
-  // Deduplicate by (title, company, startDate)
+function parseExperienceFlight(body: string): ExperienceEntry[] {
+  const { cards } = walkFlight(body);
+  const all: ExperienceEntry[] = [];
+  for (const c of cards) all.push(...parseExperienceCard(c.leaves));
   const seen = new Set<string>();
-  return entries.filter((e) => {
-    const key = `${e.title}|${e.company}|${e.startDate ?? ""}`;
+  return all.filter((e) => {
+    if (!e.title || !e.company) return false;
+    const key = `${e.title}|${e.company}|${e.dateRange?.start ?? ""}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -418,129 +434,57 @@ function parseExperienceFromSegment(segment: string): ExperienceEntry[] {
 }
 
 // ---------------------------------------------------------------------------
-// Education parser
+// Education parsing — flat leaf stream, anchored on year ranges
 // ---------------------------------------------------------------------------
 
-/**
- * Parses education entries from the scoped RSC payload segment.
- *
- * BUG 3 FIX: Two-pass strategy.
- *
- * Pass 1 (date-anchored): find year-range strings, look backward for school +
- * degree. Handles dated entries.
- *
- * Pass 2 (school-name scan): if Pass 1 finds nothing, scan the full candidate
- * list for strings that match school-name heuristics. This catches dateless
- * entries and profiles where the education RSC uses no year anchors.
- *
- * Critically, the education page is now scoped more broadly (full payload when
- * no year anchors found) so Pass 2 always has something to work with.
- */
-function parseEducationFromSegment(segment: string): EducationEntry[] {
+function parseEducationFlight(body: string): EducationEntry[] {
+  const { flat } = walkFlight(body);
+  const leaves = dedupAdjacent(flat);
+
+  const dateIdx: number[] = [];
+  leaves.forEach((t, i) => { if (EDU_DATE_RE.test(t)) dateIdx.push(i); });
+
   const entries: EducationEntry[] = [];
-  if (!segment) return entries;
-
-  const groups = extractChildrenStrings(segment);
-  if (groups.length === 0) return entries;
-
-  function isNoise(s: string): boolean {
-    if (s.length > 200) return true;
-    const noisePatterns = [
-      /^People also viewed$/i,
-      /^Acquire customers/i,
-      /^LinkedIn/i,
-      /^Try Premium/i,
-      /^\d+$/,
-      /^[··]/,
-    ];
-    return noisePatterns.some((p) => p.test(s.trim()));
-  }
-
-  // --- Pass 1: anchor on year-ranges ---
-  // BUG 3 FIX: broaden dash matching to include em-dash and en-dash variants
-  const yearRangeRe = /(?:19|20)\d{2}\s*[-–—]\s*(?:19|20)\d{2}/g;
-  yearRangeRe.lastIndex = 0;
-
-  interface YearAnchor {
-    pos: number;
-    raw: string;
-    startYear: string;
-    endYear: string;
-  }
-
-  const yearAnchors: YearAnchor[] = [];
-  let ym: RegExpExecArray | null;
-  while ((ym = yearRangeRe.exec(segment)) !== null) {
-    const raw = ym[0];
-    // BUG 3 FIX: split on any dash variant
-    const parts = raw.split(/[-–—]/);
-    yearAnchors.push({
-      pos: ym.index,
-      raw,
-      startYear: (parts[0] ?? "").trim(),
-      endYear: (parts[parts.length - 1] ?? "").trim(),
-    });
-  }
-
-  for (const anchor of yearAnchors) {
-    const before = groups
-      .filter((g) => g.pos < anchor.pos)
-      .flatMap((g) => g.values)
-      .filter((v) => !isNoise(v) && !/^\d{4}$/.test(v) && !looksLikeDateRange(v));
-
-    if (before.length === 0) continue;
-
-    const school = before.length >= 2 ? before[before.length - 2]! : before[before.length - 1]!;
-    const degree = before.length >= 2 ? before[before.length - 1]! : null;
-
-    entries.push({
-      school,
-      degree: degree ?? null,
-      fieldOfStudy: null,
-      startYear: anchor.startYear,
-      endYear: anchor.endYear,
-    });
-  }
-
-  // --- Pass 2 (fallback): school-name heuristic ---
-  // Run always if Pass 1 found nothing. Keeps dateless entries.
-  if (entries.length === 0) {
-    const schoolKeywords =
-      /university|college|school|institute|academy|insead|essec|hec|polytechnic|sciences\s+po|mba|bachelor|master|lycée|iut|business\s+school|grande\s+école|ecole|école/i;
-
-    for (let i = 0; i < groups.length; i++) {
-      const g = groups[i]!;
-      for (const val of g.values) {
-        if (schoolKeywords.test(val) && !isNoise(val) && !looksLikeDateRange(val)) {
-          // Look at the next 1-2 groups for degree / field of study
-          const next1 = groups[i + 1];
-          const next2 = groups[i + 2];
-          const degree =
-            (next1?.values[0] && !isNoise(next1.values[0]) && !schoolKeywords.test(next1.values[0]))
-              ? next1.values[0]
-              : null;
-          const field =
-            degree &&
-            next2?.values[0] &&
-            !isNoise(next2.values[0]) &&
-            !schoolKeywords.test(next2.values[0]) &&
-            !looksLikeDateRange(next2.values[0])
-              ? next2.values[0]
-              : null;
-
-          entries.push({
-            school: val,
-            degree: degree ?? null,
-            fieldOfStudy: field ?? null,
-            startYear: null,
-            endYear: null,
-          });
-        }
+  let prev = -1;
+  for (const di of dateIdx) {
+    const window: string[] = [];
+    let logo: string | null = null;
+    for (let j = prev + 1; j < di; j++) {
+      const t = leaves[j]!;
+      if (isLogo(t)) { logo = logoName(t); continue; }
+      if (/^Activities and societies:/i.test(t)) continue;
+      window.push(t);
+    }
+    let school = logo;
+    let degree: string | null = null;
+    let fieldOfStudy: string | null = null;
+    if (logo) {
+      const nonSchool = window.filter((w) => w !== logo);
+      degree = nonSchool.length ? nonSchool[nonSchool.length - 1]! : null;
+    } else {
+      school = window[0] ?? null;
+      degree = window.length > 1 ? window[window.length - 1]! : null;
+    }
+    if (degree) {
+      const cm = degree.lastIndexOf(", ");
+      if (cm >= 0) {
+        fieldOfStudy = degree.slice(cm + 2).trim();
+        degree = degree.slice(0, cm).trim();
       }
     }
+    const m = leaves[di]!.match(EDU_DATE_RE)!;
+    const start = (m[1]!.match(/\d{4}/) ?? [])[0] ?? null;
+    const end = (m[2]!.match(/\d{4}/) ?? [])[0] ?? (/Present/.test(m[2]!) ? "Present" : null);
+    prev = di;
+    if (!school) continue;
+    entries.push({
+      school,
+      ...(degree ? { degree } : {}),
+      ...(fieldOfStudy ? { fieldOfStudy } : {}),
+      dateRange: { start, end },
+    });
   }
 
-  // Deduplicate by school + degree
   const seen = new Set<string>();
   return entries.filter((e) => {
     const key = `${e.school}|${e.degree ?? ""}`;
@@ -551,112 +495,55 @@ function parseEducationFromSegment(segment: string): EducationEntry[] {
 }
 
 // ---------------------------------------------------------------------------
-// Date parsing utilities
+// Public API
 // ---------------------------------------------------------------------------
 
-const MONTH_MAP: Record<string, string> = {
-  Jan: "01", Feb: "02", Mar: "03", Apr: "04",
-  May: "05", Jun: "06", Jul: "07", Aug: "08",
-  Sep: "09", Oct: "10", Nov: "11", Dec: "12",
-};
-
-/** Parses "Jun 2025" → [year, month] as strings */
-function parseMonthYear(text: string): [string | null, string | null] {
-  const m = text.trim().match(/^([A-Z][a-z]{2})\s+(\d{4})$/);
-  if (!m) return [null, null];
-  return [m[2]!, MONTH_MAP[m[1]!] ?? null];
+/** Derives the fsd_profile id (needed for the SDUI body) from a connection URN. */
+export function profileIdFromUrn(urn: string): string {
+  return urn.replace(/^urn:li:fsd_profile:/, "");
 }
-
-/** Formats parsed year+month into "YYYY-MM" or "YYYY" or null */
-function formatDate(
-  year: string | null,
-  month: string | null
-): string | null {
-  if (!year) return null;
-  if (month) return `${year}-${month}`;
-  return year;
-}
-
-// ---------------------------------------------------------------------------
-// Public parser
-// ---------------------------------------------------------------------------
 
 /**
- * Parses the RSC hydration payload from a LinkedIn profile details page HTML.
- *
- * @param html   Raw HTML of the details page (from fetchDetailsPage).
- * @param kind   "experience" or "education".
- * @returns      Parsed entries array. Returns [] on any parse failure — never throws.
+ * Fetches + parses a profile's full work experience.
+ * @returns parsed entries, or [] on failure. Throws RateLimitedError on 429/999.
  */
-export function parseProfileDetailsRsc(
-  html: string,
-  kind: "experience" | "education"
-): ExperienceEntry[] | EducationEntry[] {
+export async function fetchExperience(
+  publicId: string,
+  profileId: string,
+  csrfToken: string
+): Promise<ExperienceEntry[]> {
+  const body = await fetchSectionFlight(publicId, profileId, "experience", csrfToken);
+  if (!body) return [];
   try {
-    const script = extractRehydrateScript(html);
-    if (!script) {
-      console.warn(`[RscProfile] No rehydrate-data script found for ${kind}`);
-      return [];
-    }
-
-    const payload = unescapeRsc(script);
-    const segment = scopeToContentSubtree(payload, kind);
-
-    if (!segment) {
-      console.warn(`[RscProfile] No ${kind} anchor strings found in RSC payload`);
-      return [];
-    }
-
-    if (kind === "experience") {
-      const result = parseExperienceFromSegment(segment);
-      console.debug(`[RscProfile] Parsed ${result.length} experience entries`);
-      return result;
-    } else {
-      const result = parseEducationFromSegment(segment);
-      console.debug(`[RscProfile] Parsed ${result.length} education entries`);
-      return result;
-    }
+    const result = parseExperienceFlight(body);
+    console.debug(`[RscProfile] ${publicId}: parsed ${result.length} experience entries`);
+    return result;
   } catch (err) {
-    // Defensive: never let a parse failure propagate — return empty
-    console.warn(`[RscProfile] parseProfileDetailsRsc error (${kind}):`, err);
+    console.warn(`[RscProfile] experience parse error for ${publicId}:`, err);
     return [];
   }
 }
 
-// ---------------------------------------------------------------------------
-// Public fetch functions
-// ---------------------------------------------------------------------------
-
 /**
- * Fetches and parses the experience details page for a LinkedIn public identifier.
- *
- * @param publicId  The vanity slug, e.g. "marc-becker-489151".
- * @returns         Parsed experience entries, or [] on failure.
- *                  Throws RateLimitedError on HTTP 429/999 (caller must backoff).
+ * Fetches + parses a profile's full education.
+ * @returns parsed entries, or [] on failure. Throws RateLimitedError on 429/999.
  */
-export async function fetchExperience(publicId: string): Promise<ExperienceEntry[]> {
-  const url = `https://www.linkedin.com/in/${encodeURIComponent(publicId)}/details/experience/`;
-  console.debug(`[RscProfile] Fetching experience: ${url}`);
-
-  const html = await fetchDetailsPage(url);
-  if (!html) return [];
-
-  return parseProfileDetailsRsc(html, "experience") as ExperienceEntry[];
+export async function fetchEducation(
+  publicId: string,
+  profileId: string,
+  csrfToken: string
+): Promise<EducationEntry[]> {
+  const body = await fetchSectionFlight(publicId, profileId, "education", csrfToken);
+  if (!body) return [];
+  try {
+    const result = parseEducationFlight(body);
+    console.debug(`[RscProfile] ${publicId}: parsed ${result.length} education entries`);
+    return result;
+  } catch (err) {
+    console.warn(`[RscProfile] education parse error for ${publicId}:`, err);
+    return [];
+  }
 }
 
-/**
- * Fetches and parses the education details page for a LinkedIn public identifier.
- *
- * @param publicId  The vanity slug, e.g. "marc-becker-489151".
- * @returns         Parsed education entries, or [] on failure.
- *                  Throws RateLimitedError on HTTP 429/999 (caller must backoff).
- */
-export async function fetchEducation(publicId: string): Promise<EducationEntry[]> {
-  const url = `https://www.linkedin.com/in/${encodeURIComponent(publicId)}/details/education/`;
-  console.debug(`[RscProfile] Fetching education: ${url}`);
-
-  const html = await fetchDetailsPage(url);
-  if (!html) return [];
-
-  return parseProfileDetailsRsc(html, "education") as EducationEntry[];
-}
+// Exported for offline unit testing against captured payloads.
+export const __test = { parseExperienceFlight, parseEducationFlight, walkFlight };

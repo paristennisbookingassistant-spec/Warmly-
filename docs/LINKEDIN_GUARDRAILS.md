@@ -61,6 +61,14 @@ These are fine to do without asking, as they don't change LinkedIn state from an
 - ✅ Download any data that LinkedIn renders publicly to logged-in users
 - ✅ Take screenshots
 - ✅ Navigate between pages
+- ✅ Issue **data-fetch requests** that only READ data the user can already see —
+  even when the HTTP method is POST. Some LinkedIn read endpoints (GraphQL
+  queries, and SDUI pagination such as
+  `POST /flagship-web/rsc-action/actions/pagination?sduiid=...profile.details.experience`)
+  use POST to carry a query body. These are how LinkedIn's own UI loads a section
+  when you scroll; they return data and change **nothing** on the account. The
+  Warmly network sync uses these to read connections' experience/education. The
+  test that matters is **state change**, not the HTTP verb (see below).
 
 ---
 
@@ -73,7 +81,10 @@ These aren't strictly read-only but they don't broadcast to other LinkedIn users
 - ⚠️ Mark a conversation as read
 - ⚠️ Star/flag a conversation
 - ⚠️ Use LinkedIn's search filters (changes URL but not LinkedIn-side state)
-- ⚠️ Click any UI control that triggers a network POST to LinkedIn's API
+- ⚠️ Click any UI control that triggers a **state-changing** network POST (save,
+  follow, mark-read, etc.). NOTE: a POST that only **reads** data (a GraphQL
+  query or SDUI pagination fetch — see the Allowed section) is not in this gray
+  area; the distinction is whether the request mutates account/relationship state.
 
 If unsure whether something is a gray area: treat it as a hard rule, ask.
 

@@ -45,7 +45,7 @@ import {
   getCsrfToken,
   RateLimitedError,
 } from "./voyager-list-client";
-import { fetchExperience, fetchEducation } from "./rsc-profile-client";
+import { fetchExperience, fetchEducation, profileIdFromUrn } from "./rsc-profile-client";
 
 // ---------------------------------------------------------------------------
 // Jitter helper
@@ -367,14 +367,18 @@ function buildEnrichmentContact(
   experience: BulkImportContact["experience"],
   education: BulkImportContact["education"]
 ): BulkImportContact {
+  // Most-recent role (experience is returned most-recent-first) fills the
+  // contact's current company + title — the contact card's "who is this".
+  const top = experience?.[0];
   return {
     linkedin_url: linkedinUrl,
     linkedin_urn: urn,
     name,
     headline: null,
-    current_company: experience?.[0]?.company ?? null,
+    current_company: top?.company ?? null,
+    current_title: top?.title ?? null,
     photo_url: null,
-    location: null,
+    location: top?.location ?? null,
     linkedin_bio: null,
     experience,
     education,
@@ -398,7 +402,7 @@ function buildEnrichmentContact(
  */
 async function runPhase2(
   job: SyncJob,
-  _csrfToken: string,
+  csrfToken: string,
   signal: { aborted: boolean }
 ): Promise<void> {
   console.info(
@@ -425,6 +429,7 @@ async function runPhase2(
 
     const profile = profiles[i]!;
     const { urn, publicId } = profile;
+    const profileId = profileIdFromUrn(urn);
 
     if (!publicId) {
       console.debug(`[ConnectionsSync] Phase 2: skipping URN ${urn} — no publicId`);
@@ -448,7 +453,7 @@ async function runPhase2(
     let retryExp = true;
     while (retryExp) {
       try {
-        const exp = await fetchExperience(publicId);
+        const exp = await fetchExperience(publicId, profileId, csrfToken);
         experience = exp.length > 0 ? exp : null;
         retryExp = false;
       } catch (err) {
@@ -469,7 +474,7 @@ async function runPhase2(
     let retryEdu = true;
     while (retryEdu) {
       try {
-        const edu = await fetchEducation(publicId);
+        const edu = await fetchEducation(publicId, profileId, csrfToken);
         education = edu.length > 0 ? edu : null;
         retryEdu = false;
       } catch (err) {

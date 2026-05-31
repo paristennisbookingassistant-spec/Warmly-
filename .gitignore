@@ -50,6 +50,8 @@ extension/dist/
 # test artifacts
 /test-results/
 /playwright-report/
+# captured LinkedIn payloads (real profile data — never commit)
+/tests/probe-out/
 
 # personal research files (not shared with team)
 /Pasted image *.png

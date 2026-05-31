@@ -198,19 +198,24 @@ export interface VoyagerProfile {
   linkedinUrl: string | null;
   photoUrl: string | null;
   bio: string | null;
+  /**
+   * Work history parsed from the SDUI flight payload. Shape matches the backend
+   * bulk-import ExperienceEntrySchema (dateRange.{start,end}) so it passes
+   * straight through api-client → backend with no field remapping.
+   */
   experience: Array<{
     title: string;
     company: string;
-    duration: string | null;
-    startDate: string | null;
-    endDate: string | null;
+    dateRange: { start: string | null; end: string | null };
+    location?: string;
+    description?: string;
   }>;
+  /** Education parsed from the SDUI flight payload. Matches EducationEntrySchema. */
   education: Array<{
     school: string;
-    degree: string | null;
-    fieldOfStudy: string | null;
-    startYear: string | null;
-    endYear: string | null;
+    degree?: string;
+    fieldOfStudy?: string;
+    dateRange: { start: string | null; end: string | null };
   }>;
 }
 
@@ -230,6 +235,8 @@ export interface BulkImportContact {
   name: string | null;
   headline: string | null;
   current_company: string | null;
+  /** Most-recent role title (Phase 2). Optional — Phase 1 has no title. */
+  current_title?: string | null;
   photo_url: string | null;
   location: string | null;
   linkedin_bio: string | null;

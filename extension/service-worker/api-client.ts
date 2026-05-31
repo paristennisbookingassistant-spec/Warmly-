@@ -248,6 +248,7 @@ export async function bulkImportContacts(
     if (c.headline) item.headline = c.headline;
     if (isUrl(c.photo_url)) item.photoUrl = c.photo_url;
     if (c.current_company) item.currentCompany = c.current_company;
+    if (c.current_title) item.currentTitle = c.current_title;
     if (c.location) item.location = c.location;
     if (c.linkedin_bio) item.bio = c.linkedin_bio;
     if (Array.isArray(c.experience) && c.experience.length) item.experience = c.experience;
