@@ -208,18 +208,12 @@ matters — see the parser in §2.3 and `rsc-profile-client.ts`.
 ## 3. Architecture & data flow
 
 ```
-warmly.app  /onboarding/connect-linkedin   ── user clicks "Sync my network"
-   │  POST /api/sync-jobs (creates a sync_job)
-   │  window.postMessage({source:"WARMLY_WEBAPP", type:"START_NETWORK_SYNC",
-   │                       payload:{ user_id, sync_job_id }})
-   ▼
-extension/content-script/auth-bridge.ts      (runs on warmly.app tabs)
-   │  chrome.runtime.sendMessage → service worker
+[ Web app starts the sync — this trigger UI is being rebuilt; not detailed here.
+  It just needs to hand the extension a user_id + sync_job_id to begin. ]
    ▼
 extension/service-worker/sync-coordinator.ts
-   │  - persists the sync job to chrome.storage.local (resumable)
-   │  - finds/opens a linkedin.com tab
-   │  - sends TRIGGER_NETWORK_SYNC to that tab's content script
+   │  - creates/persists the sync_job (resumable: chrome.storage.local + sync_jobs)
+   │  - finds/opens a linkedin.com tab and starts the content-script orchestrator
    ▼
 extension/content-script/connections-sync.ts   (THE ORCHESTRATOR)
    │  Runs in the content script — NOT the service worker — because MV3 service
@@ -310,7 +304,6 @@ future maintainer (or Claude Code) doesn't re-debug them.
 | Headline never stored | No `headline` column | Store in the existing unused `linkedin_bio` column; render as a tagline (no migration) |
 | ~4% returned nothing mid-sync (eva, mehdi) yet parse fine on re-fetch | Transient LinkedIn anti-bot block (protechts.net / crcldu.com challenge) | End-of-Phase-2 retry over empty profiles |
 | `ON CONFLICT` errored on upsert | The prod unique index on `(user_id, linkedin_url)` is PARTIAL (`WHERE linkedin_url IS NOT NULL`) | Explicit insert/update branching, not `ON CONFLICT` |
-| **Settings → Connections "re-sync" did nothing** | Posted `{ jobId }`; the auth-bridge needs `user_id` and the SW needs `sync_job_id` | Post `{ user_id, sync_job_id }` (the onboarding page already did) |
 
 ---
 
@@ -355,36 +348,14 @@ that file is the playbook. Summary:
   extension with `BACKEND_URL=http://localhost:3000` (it still writes to prod
   Supabase), then **rebuild for prod afterward**.
 
-### 7.1 How a USER triggers a sync (the in-app flow)
-
-The sync is started from the **web app**, not the extension popup (the popup is
-for the separate discovery / save-a-profile features). Sequence:
-
-1. The extension is installed and the user is logged into LinkedIn in the same
-   browser.
-2. The user clicks **"Sync my network"** (the `LinkedInSyncCard` button). It lives
-   in two places, both rendering the same card:
-   - **`/onboarding/connect-linkedin`** (onboarding step 2)
-   - **Settings → `/settings/connections`** ("Re-sync" — for after onboarding)
-3. That button: `POST /api/sync-jobs` (creates a `sync_job`) → then
-   `window.postMessage({ source:"WARMLY_WEBAPP", type:"START_NETWORK_SYNC",
-   payload:{ user_id, sync_job_id } })`.
-4. `auth-bridge.ts` (content script on warmly.app) verifies the origin and relays
-   to the service worker → which finds/opens a LinkedIn tab and tells the
-   `connections-sync.ts` content script to begin.
-
-> The exact `postMessage` payload matters: it MUST be `{ user_id, sync_job_id }`.
-> Posting `{ jobId }` silently fails (the auth-bridge bails on the missing
-> `user_id`) — this bug existed on the Settings page and was fixed.
+> Note: the user-facing trigger (the "Sync my network" button / onboarding flow)
+> is being rebuilt from scratch, so it is intentionally not documented here. The
+> only contract the new trigger must honor: hand the extension a `user_id` and a
+> `sync_job_id` to start.
 
 ---
 
 ## 8. Known gaps & caveats (be honest with yourself)
-
-- **UI discoverability.** There is currently no obvious sidebar nav link to
-  Settings → Connections, so the re-sync button is hard to find after onboarding.
-  Worth adding a clear "Sync / Re-sync network" entry point. (Direct URL works:
-  `/settings/connections` or `/onboarding/connect-linkedin`.)
 
 - **Parser fragility.** When LinkedIn changes the SDUI format, the parser breaks.
   The `tests/` probes are the recovery toolkit.
