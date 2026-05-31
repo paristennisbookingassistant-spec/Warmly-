@@ -24,7 +24,7 @@ const BUDGET_MS = 22 * 60 * 1000;
 
 function env(file) { const o = {}; try { for (const l of fs.readFileSync(path.join(ROOT, file), "utf8").split("\n")) { const m = l.match(/^([A-Z0-9_]+)=(.*)$/); if (m) o[m[1]] = m[2].trim().replace(/^["']|["']$/g, ""); } } catch {} return o; }
 const E = { ...env(".env.local"), ...env(".env.vercel"), ...env(".env.test") };
-const BASE = (E.WARMLY_PROD_URL || "https://ai-networking-coach.vercel.app").replace(/\/$/, "");
+const BASE = (process.env.WARMLY_BASE_URL || E.WARMLY_PROD_URL || "https://ai-networking-coach.vercel.app").replace(/\/$/, "");
 const SUPA = E.NEXT_PUBLIC_SUPABASE_URL, SVC = E.SUPABASE_SERVICE_ROLE_KEY;
 const USER = "deed7f54-3c3c-40a9-bf20-2e17bc6192e0";
 const log = (...m) => console.error("[timed]", ...m);

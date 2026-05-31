@@ -16,14 +16,16 @@ const SUPA=E.NEXT_PUBLIC_SUPABASE_URL,SVC=E.SUPABASE_SERVICE_ROLE_KEY,USER="deed
 const APP="http://localhost:3000";
 
 // 1) pick an enriched contact (experience not null) with a known name
-const r = await fetch(`${SUPA}/rest/v1/contacts?user_id=eq.${USER}&experience=not.is.null&select=id,name,company,experience,education_v2&limit=5`,{headers:{apikey:SVC,authorization:`Bearer ${SVC}`}});
+const r = await fetch(`${SUPA}/rest/v1/contacts?user_id=eq.${USER}&experience=not.is.null&select=id,name,company,experience,education_v2,linkedin_bio&limit=5`,{headers:{apikey:SVC,authorization:`Bearer ${SVC}`}});
 const rows = await r.json();
 if (!rows.length) { console.log("no enriched contacts found"); process.exit(1); }
 const c = rows.find((x)=>Array.isArray(x.education_v2)&&x.education_v2.length) || rows[0];
 const expTitle = c.experience[0]?.title || "";
 const expCompany = c.experience[0]?.company || "";
 const eduSchool = (c.education_v2&&c.education_v2[0]?.school) || "";
+const headline = c.linkedin_bio || "";
 console.log(`target contact: ${c.name} (${c.id})`);
+console.log(`  expect headline: "${headline}"`);
 console.log(`  expect exp: "${expTitle}" @ "${expCompany}"  edu: "${eduSchool}"`);
 
 for (const f of ["lockfile","SingletonLock","SingletonCookie","SingletonSocket"]) { try { fs.unlinkSync(path.join(PROFILE,f)); } catch {} }
@@ -48,13 +50,16 @@ try {
     await page.goto(`${APP}/contacts/${c.id}`, { waitUntil:"domcontentloaded", timeout:30000 });
     await page.waitForTimeout(2500);
   }
-  await page.waitForTimeout(3000); // allow loadContactDetail
+  // localhost dev mode compiles routes on first hit — wait for the spinner to clear.
+  await page.waitForFunction(() => !document.querySelector(".animate-spin") && /Career path|Education|My notes/.test(document.body.innerText), { timeout: 25000 }).catch(() => {});
+  await page.waitForTimeout(1500);
   console.log("final url:", page.url());
   fs.mkdirSync(SHOTS,{recursive:true});
   await page.screenshot({ path: path.join(SHOTS, "contact-detail.png"), fullPage:true });
   const body = await page.evaluate(()=>document.body.innerText);
   const has = (s)=> s && body.includes(s);
   console.log("\n=== RENDER CHECK ===");
+  console.log("  headline rendered    :", has(headline));
   console.log("  'Career path' heading:", body.includes("Career path"));
   console.log("  exp title rendered   :", has(expTitle));
   console.log("  exp company rendered :", has(expCompany));
