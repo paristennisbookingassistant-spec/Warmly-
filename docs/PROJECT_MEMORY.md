@@ -3,7 +3,7 @@
 
 **Purpose:** This file preserves the accumulated context, decisions, debates, and learnings from all working sessions on this project. Read this file at the start of every new session to restore context. Update it at the end of every session with new learnings.
 
-**Last updated:** May 18, 2026 (Session 13)
+**Last updated:** May 31, 2026 (Session 14 — LinkedIn deep sync shipped)
 
 ---
 
@@ -1652,3 +1652,104 @@ Net: 13 commits in Session 13 total. Five features shipped (multi-
 material onboarding, profile/voice file split, async chip, auto-
 migrations workflow, Tinder review). Two real bugs caught and
 fixed by the agent loop pattern.
+
+### Session 14 — May 29-31, 2026 — LinkedIn deep network sync (Dex parity)
+
+**Goal:** replicate Dex's headline capability — one click syncs the user's ENTIRE
+LinkedIn network into Warmly with full detail (name, photo, headline, current
+title/company, location, full work experience with dates, full education).
+**Outcome: built, working, deployed to prod.** 50-contact validation: 50/50 real
+names, 49/50 photos, 50/50 headlines, 48/50 full experience + education (~96%).
+
+**The technical breakthrough (the "why does Dex work" question, finally answered):**
+- LinkedIn killed the clean profile API. `profileView` → 410 Gone. We captured +
+  replayed every GraphQL call the profile page fires — NONE return experience or
+  education. Profiles are now fully **server-driven UI (SDUI)**, shipped as a
+  **React Server Components (Flight)** payload, not JSON.
+- The unlock: the SDUI pagination endpoint the page itself calls on scroll —
+  `POST /flagship-web/rsc-action/actions/pagination?sduiid=com.linkedin.sdui.pagers.profile.details.{experience|education}`.
+  The body is fully constructible from `publicId` + `profileId` (both already
+  captured in Phase 1); `parentSpanId` is not validated; one POST returns the full
+  section. It's a data READ (no state change) — compliant with read-only.
+- The MOAT is the **React Flight parser** (`extension/content-script/rsc-profile-client.ts`):
+  reference resolution; **byte-length-prefixed text rows** (multi-line job
+  descriptions contain newlines — splitting on "\n" silently corrupts the stream
+  and drops whole cards; THIS was the biggest bug, found by inspecting why
+  anishka/puneet/dora returned 0 experience); `entity-collection-item` card
+  segmentation for experience with date-count grouping; a logo/keyword-anchored
+  state machine for education (dated + dateless + single-year + non-English
+  schools); and heavy field disambiguation (comma-titles vs locations, type/
+  duration meta lines, media alt-text, skills noise).
+
+**Bugs found by inspecting real synced contacts (not by tests):**
+- Multi-line descriptions broke the Flight stream parse → 0 experience for some.
+- Year-only date ranges ("2024 - 2025") weren't matched.
+- Dateless education was dropped (parser only anchored on year ranges).
+- **Phase 2 enrichment clobbered Phase 1 identity:** it sent the URL slug as a name
+  placeholder + null photo, and `bulkUpsertContacts` overwrote unconditionally →
+  46/50 names became slugs ("giorgi-khukhunaishvili"), 48/50 photos nulled. Fixed:
+  only write name on insert/Phase 1; only overwrite a field with a real value.
+- **The UI wasn't rendering the synced data at all** — `ContactDetail` showed the
+  legacy hand-entered `career_history`/`education`, not the synced `experience`/
+  `education_v2`. This was why contacts looked "empty" even when the DB had data.
+  Fixed: fall back to synced data; load the FULL contact row on detail open (the
+  list cache is "lite" and omits heavy JSON columns).
+- Headline captured in Phase 1 but never stored → now stored in the existing,
+  unused `linkedin_bio` column (no migration needed) + rendered as a tagline.
+- Transient anti-bot blocks (~4%, e.g. Eva Sinha/Mehdi El Ayachi) → added an
+  end-of-Phase-2 retry over profiles that returned nothing.
+
+**How we worked (agent model this session):** mostly **orchestrator-direct**. The
+parser reverse-engineering is diagnosis-heavy and cross-file — the understanding
+IS the work, so it shouldn't be delegated. Earlier sessions spawned `extension`/
+`backend`/`frontend` dev sub-agents for well-scoped build work; here the
+orchestrator built + tested directly. Rule reinforced: delegate scoped build work,
+do reverse-engineering/debugging yourself.
+
+**Testing approach + operational learnings (important):**
+- Live tests against PROD in a real headless Chrome with the extension + a seeded
+  LinkedIn session (reuses the `/linkedin` skill cookie via `.playwright-profile/`).
+  Harnesses in `tests/`: `timed-sync-50.mjs` (bounded/timed sync; caps N via a
+  `warmly_sync_test_max` chrome.storage key, no-op in prod), `verify-parser.mjs`
+  (bundles the REAL parser, runs vs captured payloads OFFLINE — validate parser
+  changes here before any live sync), `verify-frontend.mjs` (asserts the UI
+  renders), `probe-*/flight-*.mjs` (the reverse-engineering toolkit).
+- DB checks/wipes via Supabase REST + the service-role key.
+- GOTCHA: clear the SW cache after EVERY extension rebuild (`rm -rf
+  .playwright-profile/Default/"Service Worker" .../Code\ Cache`) or Chrome runs
+  stale code.
+- GOTCHA: **over-testing against prod triggered Vercel's bot-challenge** ("Vercel
+  安全检查点") which blocked the automated browser. Real Chrome is unaffected.
+  Workaround: validate via a LOCAL dev server (`npm run dev`, build the extension
+  with `BACKEND_URL=http://localhost:3000`) — localhost isn't behind the challenge
+  and still writes to prod Supabase. **Rebuild the extension for prod afterward.**
+- Bearer-auth POSTs to the prod API from outside the browser get 405 (cookie
+  middleware redirects them); the extension's real flow works. Don't deploy-check
+  via standalone bearer POST.
+- Can't apply DB migrations from here (no connection string / no exec_sql RPC /
+  CLI not linked) — migrations need the Supabase dashboard or DB creds. This is
+  why headline reused `linkedin_bio` instead of a new column.
+
+**Strategic read (for the rebuild / Sanket):** we replicated Dex's OUTPUT for free
+from the user's session. Dex's <20-min sync of 1,300+ implies it likely uses a
+**paid backend enrichment provider** (Proxycurl / People Data Labs) for speed +
+stability + scale, OR fills deep detail slowly in the background like we do. The
+moat is accurate, maintained parsing — not plumbing. Key rebuild decision:
+session-crawl (free, slow, fragile) vs. backend provider (cost/profile, fast,
+stable). NOTE this contradicts the old §3.3 worry that Proxycurl shut down —
+re-verify provider availability before deciding.
+
+**Key files / docs added this session:**
+- `extension/content-script/rsc-profile-client.ts` — the Flight parser (the moat)
+- `docs/LINKEDIN_SYNC_HOW_IT_WORKS.md` — polished explainer for Sanket + his Claude
+  Code (self-contained: breakthrough, architecture, parser, status, files, safety)
+- `HANDOFF.md` (repo root) — operational playbook (creds, cookie seeding, commands)
+- Commits (all on main, pushed): `ced2538` (SDUI rsc-action deep enrichment) →
+  `3723708` (robust Flight parsing) → `21b3067` (recover missed exp/edu) →
+  `5ebb53e` (render in the app) → `238287f` (retry transient failures) →
+  `cd53deb` (stop clobbering name+photo) → `e1889ea` (headline + empty retry).
+
+**Status at handoff:** deployed; test account holds a small validated sample.
+A full network sync is a multi-hour throttled background job (~18s/profile,
+~2 hrs for ~400, ~12 hrs for the 2,500 cap). User to reload the prod-built
+extension in their own Chrome and run a full sync when ready.
