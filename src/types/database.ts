@@ -239,7 +239,8 @@ export type ContactSource =
   | "discovery"
   | "manual_chat"
   | "manual_url"
-  | "extension_bookmark";
+  | "extension_bookmark"
+  | "cv_book";
 
 export type ContactStatus =
   | "discovered"
@@ -370,6 +371,11 @@ export interface Contact {
   photo_url: string | null;
   /** FK to sync_jobs.id — which bulk sync created/last updated this contact. */
   sync_job_id: string | null;
+  /**
+   * FK to directory_profiles.id — links a saved INSEAD alum back to its origin.
+   * Only set for contacts with source='cv_book'. Null for all other sources.
+   */
+  directory_profile_id: string | null;
 }
 
 // ---------------------------------------------------------------------------
