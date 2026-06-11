@@ -1753,3 +1753,73 @@ re-verify provider availability before deciding.
 A full network sync is a multi-hour throttled background job (~18s/profile,
 ~2 hrs for ~400, ~12 hrs for the 2,500 cap). User to reload the prod-built
 extension in their own Chrome and run a full sync when ready.
+
+### Session 15 — June 11, 2026 — Speed pressure-test + Phase-1 truncation root-caused + trigger flow repaired
+
+**Mission:** pick up `docs/EXTENSION_SPEED_HANDOFF_2026-06-11.md` — pressure-test the
+fast deep-fetch at scale, fix Phase-1 truncation, repair the connect-linkedin trigger
+flow, run the three-agent loop.
+
+**Pressure-test results (all READ-ONLY probes, tester account, ~1,300 requests total):**
+- Baseline re-run 60 @ 700ms: 59/60 (identical to morning run). Session healthy.
+- **300 @ 700ms: 299/300 clean.** No clustering, latency flat (~1.0s) start-to-finish.
+- **150 @ 400ms: 149/150 clean.** ~25 min/1,000 extrapolated.
+- The ONLY failure in every run is Ali Asad (`ACoAAAFZbiYB…`) — profile-specific 500
+  at any speed. Cumulative detection NEVER engaged across ~582 profiles / ~1,170
+  requests in one day. **Decision: ship `PROFILE_FETCH_THROTTLE_MS = 700` (proven at
+  300-scale, most margin); 400ms is the tested dial-down path.**
+
+**Phase-1 truncation ROOT CAUSE (was misdiagnosed in the handoff):** the connections
+endpoint's paging object has **NO `total` field** (`{count,start,links}` only), and the
+ConnectionListWithProfile decoration **routinely omits Profile entities from
+`included[]` even on full pages** (verified live: 40 elements / 39 profiles). The old
+`profileCount >= 40` hasMore heuristic therefore ended pagination on ANY
+decoration-variance page → the 438-of-1,347 cap. **Fix: paginate on
+`data["*elements"].length`** (Connection refs, 1:1 per connection, decoration-independent);
+short/empty *elements* page = genuine end-of-list; thin-decoration pages (elements>0,
+profiles=0) get 3 retries (10/30/60s) then advance. Plus: null-result pages retry 3×
+instead of hard-breaking, and Phase 1 sets `total_connections = collected count` at
+completion (no total from LinkedIn) so the UI has a denominator.
+
+**Trigger-flow repair (worse than handoff knew):** the extension PATCHed
+`/api/sync-jobs/{id}` — a GET-only route → **every progress update 405'd silently**;
+backend job rows sat "pending" forever, so the existing SyncProgress UI could never
+work. Fixed: SW now PATCHes `/api/sync-jobs` (body route) with full field mapping
+(running→in_progress, phase derived list/batch/done, total_contacts←total_connections,
+processed_contacts per phase, completed_at on completion). Also fixed
+`useExtensionBridge` — its event types were fiction (camelCase/jobId); now matches the
+real snake_case payloads (sync_job_id, phase 1|2, connections_imported,
+profiles_enriched…); SyncProgress now merges live extension events (preferred) with
+DB polling (resume/refresh fallback); startSync requires {user_id, sync_job_id}.
+
+**Phase-2 batching:** real-extension pace was ~3.9s/profile vs probe's ~1.8s — the gap
+was per-profile awaited backend round-trips (bulk-import POST + job PATCH per profile).
+Now flushes every 10 profiles; resume state advances at flush boundaries (≤10 profiles
+re-fetched on crash, upserts idempotent). Measured ~2.1s/profile after the fix.
+
+**E2E verification (real extension, prod backend, via the REAL prod connect-linkedin
+page button):**
+- 50-cap run: 50/50 imported, **50/50 with full experience AND education**, Phase 1
+  31s (2 pages), Phase 2 1m44s (~2.1s/profile), total 2m16s.
+- Full-pagination run (cap 1500): **1,332 contacts imported across 34 pages in ~3 min**
+  — matches the official export (1,331) ±1, vs the old 438 ceiling. sync_jobs row
+  live-updated correctly (phase=batch, total_contacts=1332, processed ticking).
+  Previously-enriched contacts kept their experience through re-import (field
+  preservation works). Stopped after Phase 1 + first enrich batches; job marked paused.
+- **Full-network estimate: ~50 min for 1,332 @ 700ms** (~40 min if dialed to 400ms).
+  Sub-30-min/1,000 needs 400ms + (optionally) parallel exp/edu fetches — both untested
+  at full scale; decide after the first real full run.
+
+**Gotchas added:** Supabase REST caps un-Ranged selects at 1,000 rows — the timed
+harness's contacts=1000 plateau + exp-count "drops" were query-window artifacts, not
+data loss. The harness needs `Prefer: count=exact` + Range for >1k accounts.
+
+**Three-agent loop:** orchestrator (this session) + `extension` dev agent (truncation/
+throttle/PATCH) + `frontend` dev agent (bridge hook + SyncProgress) in parallel;
+orchestrator ran all live LinkedIn tests itself per HANDOFF §6 (tester can't drive the
+seeded browser); orchestrator added the elements-based pagination fix after live
+diagnosis disproved the agents' total-based assumption.
+
+**Remaining:** (1) true full-network Phase-2 acceptance run (~50 min) — recommend
+fresh day; (2) visual pass on the deployed SyncProgress UI; (3) decide 400ms dial-down
+after the acceptance run; (4) Ali-Asad-type profiles (~0.3%) permanently 500 — accept.
