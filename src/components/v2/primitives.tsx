@@ -182,6 +182,62 @@ export function SectionLabel({ children, className = "" }: { children: ReactNode
   return <div className={`font-mono-tag text-ink-3 ${className}`}>{children}</div>;
 }
 
+// ---------- StatusBadge ----------
+// Maps ContactStatus DB values → display labels and visual styles.
+// followUpDue is a derived flag (not a DB field): status ∈ {contacted, connected}
+// AND last_interaction_at older than 30 days.
+export type ContactStatusValue =
+  | "discovered"
+  | "contacted"
+  | "connected"
+  | "met"
+  | "ongoing";
+
+interface StatusBadgeProps {
+  status: ContactStatusValue;
+  followUpDue?: boolean;
+}
+
+const STATUS_MAP: Record<
+  ContactStatusValue,
+  { label: string; bg: string; fg: string; dot: string }
+> = {
+  discovered: { label: "New",        bg: "#f3e2cd", fg: "#7a4a25", dot: "#b87a4a" },
+  contacted:  { label: "Contacted",  bg: "#dde6ee", fg: "#2f4d63", dot: "#4a6f87" },
+  connected:  { label: "Connected",  bg: "#dcebd9", fg: "#34553e", dot: "#5e8d6a" },
+  met:        { label: "Met",        bg: "#ede9fe", fg: "#4c1d95", dot: "#7c3aed" },
+  ongoing:    { label: "Ongoing",    bg: "#dcebd9", fg: "#34553e", dot: "#5e8d6a" },
+};
+
+export function StatusBadge({ status, followUpDue }: StatusBadgeProps) {
+  const s = STATUS_MAP[status] ?? STATUS_MAP.discovered;
+
+  if (followUpDue) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 px-2 h-[22px] rounded-full text-[11.5px] font-medium"
+        style={{ background: "#fef3c7", color: "#92400e", border: "1px solid #f59e0b" }}
+      >
+        <Icon.Alert size={10} />
+        Follow-up due
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2 h-[22px] rounded-full text-[11.5px] font-medium"
+      style={{ background: s.bg, color: s.fg }}
+    >
+      <span
+        className="inline-block w-[6px] h-[6px] rounded-full"
+        style={{ background: s.dot }}
+      />
+      {s.label}
+    </span>
+  );
+}
+
 // ---------- Avatar ----------
 export function Avatar({ src, size = 40, className = "" }: { src?: string | null; size?: number; className?: string }) {
   return (

@@ -1,15 +1,10 @@
 /**
- * app/v2/contacts/page.tsx — scaffold placeholder (replaced in P2).
+ * app/v2/contacts/page.tsx
+ * Contacts list — replaced from P2 placeholder.
  */
 
-import Placeholder from "../Placeholder";
+import { ContactsList } from "@/components/v2/contacts/ContactsList";
 
 export default function V2ContactsPage() {
-  return (
-    <Placeholder
-      eyebrow="Contacts"
-      title="Your saved network."
-      body="The contacts list, detail view, and draft editor land in Phase 2, wired to your real saved contacts."
-    />
-  );
+  return <ContactsList />;
 }
