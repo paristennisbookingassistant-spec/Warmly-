@@ -1,0 +1,934 @@
+"use client";
+
+/**
+ * components/v2/discover/TinderView.tsx
+ * Full-viewport swipe deck workspace: card stack, queue banner, refine chat.
+ * Ported from design/warmly-v2/project/js/screens/discover-tinder.jsx.
+ */
+
+import { useEffect, useRef, useState } from "react";
+import { CHANNELS, type ChannelKey } from "../palette";
+import { Icon } from "../icons";
+import { Avatar, Btn, InseadPill, TierBadge } from "../primitives";
+import type { DeckCard, ChatMsg, SearchHint } from "./types";
+
+// ---------- Chat helpers (canned, local-only) ----------
+
+function seedChat(channel: ChannelKey): ChatMsg[] {
+  if (channel === "cv") {
+    return [
+      {
+        role: "agent",
+        text: "I'm pushing INSEAD alumni who match your target — Product Manager roles in Paris / Berlin, focused on AI / Tech.",
+      },
+      {
+        role: "agent",
+        text: "Save the ones worth a warm intro and skip the rest. Tell me anytime to narrow or widen, e.g. \"find someone with GTM experience\" or \"drop Berlin\".",
+      },
+    ];
+  }
+  return [
+    {
+      role: "agent",
+      text: "Reading your synced LinkedIn connections. I'm prioritising 1st-degree contacts where relevance to your goals is high.",
+    },
+    {
+      role: "agent",
+      text: "Save or skip, same as the directory. Or ask me to narrow: \"show only Paris\", \"VC connections\", \"anyone hiring\".",
+    },
+  ];
+}
+
+interface AgentReply {
+  reply: string;
+  hint: { label: string } | null;
+}
+
+function generateAgentReply(text: string): AgentReply {
+  const t = text.toLowerCase();
+  if (/(gtm|go-?to-?market|commercial)/i.test(t)) {
+    return {
+      reply: "Got it. Re-ranking the queue to prioritise GTM / commercial backgrounds. Pushing 2 fresh matches with strong GTM signal.",
+      hint: { label: "GTM signal" },
+    };
+  }
+  if (/(paris)/i.test(t)) {
+    return {
+      reply: "Narrowing to Paris-based only. 3 alumni in the queue match; Berlin and London cards are dropped.",
+      hint: { label: "Paris match" },
+    };
+  }
+  if (/(berlin)/i.test(t)) {
+    return {
+      reply: "Narrowing to Berlin-based only. 2 alumni in the queue match.",
+      hint: { label: "Berlin match" },
+    };
+  }
+  if (/(vc|venture|investor)/i.test(t)) {
+    return {
+      reply: "Filtering to VC / investor profiles. Re-ordering the queue, the next card is a Partner-level match.",
+      hint: { label: "VC profile" },
+    };
+  }
+  if (/(sponsor|visa|non-?eu)/i.test(t)) {
+    return {
+      reply: "Prioritising contacts whose teams have hired sponsorship-eligible candidates in the past 12 months. 2 strong matches surfaced.",
+      hint: { label: "Sponsorship-friendly" },
+    };
+  }
+  if (/(hiring|hire|opening)/i.test(t)) {
+    return {
+      reply: "Looking for contacts with hiring authority who have active openings on their team. 2 matches.",
+      hint: { label: "Hiring authority" },
+    };
+  }
+  if (/(drop|remove|exclude)/i.test(t)) {
+    return { reply: "Applied. Removing matching cards from the queue.", hint: null };
+  }
+  return { reply: "Got it, refining the queue based on that signal. Next card is a stronger match.", hint: { label: "Refined" } };
+}
+
+// ---------- TinderView ----------
+
+interface TinderViewProps {
+  channel: ChannelKey;
+  deck: DeckCard[];
+  onBack: () => void;
+  onSave: (card: DeckCard) => void;
+  onSkip: (card: DeckCard) => void;
+}
+
+export function TinderView({ channel, deck, onBack, onSave, onSkip }: TinderViewProps) {
+  const [idx, setIdx] = useState(0);
+  const [savedIds, setSavedIds] = useState<string[]>([]);
+  const [skippedIds, setSkippedIds] = useState<string[]>([]);
+  const [swipe, setSwipe] = useState<{ dir: "left" | "right" } | null>(null);
+  const [chat, setChat] = useState<ChatMsg[]>(() => seedChat(channel));
+  const [chatTyping, setChatTyping] = useState(false);
+  const [searchHint, setSearchHint] = useState<SearchHint | null>(null);
+
+  const current = deck[idx];
+  const done = idx >= deck.length;
+
+  const advance = () => {
+    setSwipe(null);
+    setIdx((i) => i + 1);
+  };
+
+  const handleSkip = () => {
+    if (!current || swipe) return;
+    setSkippedIds((s) => [...s, current.id]);
+    onSkip(current);
+    setSwipe({ dir: "left" });
+    setTimeout(advance, 280);
+  };
+
+  const handleSave = () => {
+    if (!current || swipe) return;
+    setSavedIds((s) => [...s, current.id]);
+    onSave(current);
+    setSwipe({ dir: "right" });
+    setTimeout(advance, 280);
+  };
+
+  const handleSendChat = (text: string) => {
+    if (!text.trim()) return;
+    setChat((prev) => [...prev, { role: "user", text }]);
+    setChatTyping(true);
+    setTimeout(() => {
+      const { reply, hint } = generateAgentReply(text);
+      setChat((prev) => [...prev, { role: "agent", text: reply }]);
+      setChatTyping(false);
+      if (hint) setSearchHint({ ...hint, idx });
+    }, 900);
+  };
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0 px-8 pt-6 pb-6 max-w-[1320px] mx-auto w-full">
+      <TopStrip channel={channel} onBack={onBack} />
+
+      <div
+        className="flex-1 mt-4 bg-white border rounded-3xl overflow-hidden flex min-h-0"
+        style={{
+          borderColor: "#e5d8be",
+          boxShadow: "0 1px 0 rgba(31,27,22,0.04), 0 12px 32px rgba(31,27,22,0.06)",
+        }}
+      >
+        {/* Left: card stage */}
+        <div
+          className="flex-1 flex flex-col relative min-w-0"
+          style={{
+            background:
+              channel === "cv"
+                ? "radial-gradient(circle at 50% 40%, #fdf8ec 0%, #faf2e0 75%)"
+                : "radial-gradient(circle at 50% 40%, #f4f8fc 0%, #ecf1f6 75%)",
+          }}
+        >
+          <div
+            className="absolute inset-0 opacity-[0.35] pointer-events-none"
+            style={{
+              backgroundImage:
+                channel === "cv"
+                  ? "radial-gradient(circle at 1px 1px, rgba(184,122,74,0.18) 1px, transparent 0)"
+                  : "radial-gradient(circle at 1px 1px, rgba(74,111,135,0.20) 1px, transparent 0)",
+              backgroundSize: "22px 22px",
+            }}
+          />
+
+          <QueueBanner
+            channel={channel}
+            deck={deck}
+            idx={idx}
+            savedIds={savedIds}
+            skippedIds={skippedIds}
+          />
+
+          <div className="flex-1 flex flex-col items-center justify-center px-10 pb-8 relative z-10 min-h-0">
+            {done ? (
+              <EmptyDeck channel={channel} savedCount={savedIds.length} onBack={onBack} />
+            ) : (
+              <>
+                <CardStack
+                  deck={deck}
+                  idx={idx}
+                  channel={channel}
+                  swipe={swipe}
+                  searchHint={searchHint}
+                />
+                <div className="flex items-center gap-5 mt-7">
+                  <SwipeBtn variant="skip" onClick={handleSkip} />
+                  <SwipeBtn variant="save" channel={channel} onClick={handleSave} />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Right: chat */}
+        <ChatSidebar
+          channel={channel}
+          messages={chat}
+          typing={chatTyping}
+          onSend={handleSendChat}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ---------- TopStrip ----------
+
+function TopStrip({ channel, onBack }: { channel: ChannelKey; onBack: () => void }) {
+  return (
+    <div className="flex items-center gap-4 flex-shrink-0">
+      <button
+        onClick={onBack}
+        className="inline-flex items-center gap-1.5 text-[13px] text-ink-3 hover:text-ink transition-colors flex-shrink-0"
+      >
+        <Icon.ArrowLeft size={14} />
+        Back to doors
+      </button>
+      <div className="w-px h-6" style={{ background: "#d9cdb4" }} />
+      <ChannelChip channel={channel} />
+      <div className="flex-1" />
+      <div className="text-[11.5px] text-ink-4 hidden md:block">
+        Tip: chat with your coach on the right to refine the queue.
+      </div>
+    </div>
+  );
+}
+
+function ChannelChip({ channel }: { channel: ChannelKey }) {
+  const c = CHANNELS[channel];
+  return (
+    <div
+      className="inline-flex items-center gap-2 px-2.5 h-8 rounded-full"
+      style={{ background: c.soft }}
+    >
+      {channel === "cv" ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src="/v2/insead-logo.png" alt="INSEAD" className="h-4 w-auto object-contain" />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src="/v2/linkedin-logo.png" alt="LinkedIn" className="h-3 w-auto object-contain" />
+      )}
+      <span className="text-[12px] font-medium" style={{ color: c.ink }}>
+        {c.label}
+      </span>
+      <span
+        className="inline-block w-[6px] h-[6px] rounded-full pulse-dot"
+        style={{ background: "#5e8d6a" }}
+      />
+      <span className="text-[11px] text-ink-3">live</span>
+    </div>
+  );
+}
+
+// ---------- QueueBanner ----------
+
+function QueueBanner({
+  channel,
+  deck,
+  idx,
+  savedIds,
+  skippedIds,
+}: {
+  channel: ChannelKey;
+  deck: DeckCard[];
+  idx: number;
+  savedIds: string[];
+  skippedIds: string[];
+}) {
+  const c = CHANNELS[channel];
+  const remaining = deck.length - idx;
+
+  return (
+    <div
+      className="relative z-10 px-7 border-b flex items-center gap-5 flex-shrink-0"
+      style={{
+        borderColor:
+          channel === "cv" ? "rgba(184,122,74,0.18)" : "rgba(74,111,135,0.20)",
+        height: 84,
+      }}
+    >
+      <div className="inline-flex items-baseline gap-2 flex-shrink-0">
+        <span
+          className="font-display text-ink leading-none"
+          style={{ fontSize: 36, fontStyle: "italic" }}
+        >
+          {remaining}
+        </span>
+        <div className="flex flex-col">
+          <span className="text-[12px] font-semibold text-ink-2 leading-tight">
+            {channel === "cv" ? "alumni" : "leads"}
+          </span>
+          <span className="text-[11px] text-ink-3 leading-tight">left to screen</span>
+        </div>
+      </div>
+
+      <div
+        className="w-px h-10"
+        style={{
+          background:
+            channel === "cv" ? "rgba(184,122,74,0.22)" : "rgba(74,111,135,0.24)",
+        }}
+      />
+
+      <div className="flex-1 min-w-0">
+        <div className="font-mono-tag mb-1.5" style={{ fontSize: 9, color: c.accent }}>
+          Queue
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {deck.map((p, i) => {
+            const isSaved = savedIds.includes(p.id);
+            const isSkipped = skippedIds.includes(p.id);
+            const isCurrent = i === idx;
+
+            let borderColor = "#d9cdb4";
+            let background = "#ffffff";
+            let boxShadow = "";
+            let opacity = 1;
+
+            if (isSaved) {
+              background = c.accent;
+              borderColor = c.accent;
+            } else if (isSkipped) {
+              background = "#cdbf9f";
+              borderColor = "#cdbf9f";
+              opacity = 0.55;
+            } else if (isCurrent) {
+              borderColor = c.accent;
+              boxShadow = `0 0 0 3px ${c.tint}`;
+            }
+
+            return (
+              <div
+                key={p.id}
+                className="rounded-full overflow-hidden flex-shrink-0 transition-all duration-300"
+                style={{
+                  width: isCurrent ? 30 : 24,
+                  height: isCurrent ? 30 : 24,
+                  background,
+                  border: `2px solid ${borderColor}`,
+                  boxShadow,
+                  opacity,
+                }}
+                title={p.name}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={p.avatar ?? undefined}
+                  alt=""
+                  className="w-full h-full object-cover rounded-full"
+                  style={{ opacity: isSkipped ? 0.5 : 1 }}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div
+        className="w-px h-10"
+        style={{
+          background:
+            channel === "cv" ? "rgba(184,122,74,0.22)" : "rgba(74,111,135,0.24)",
+        }}
+      />
+
+      <div className="flex flex-col gap-1.5 flex-shrink-0">
+        <div className="inline-flex items-center gap-1.5 text-[12.5px]">
+          <Icon.HeartFill size={12} style={{ color: c.accent }} />
+          <span className="text-ink-3">
+            <strong className="text-ink">{savedIds.length}</strong> saved
+          </span>
+        </div>
+        <div className="inline-flex items-center gap-1.5 text-[12.5px]">
+          <Icon.X size={12} className="text-ink-4" />
+          <span className="text-ink-3">
+            <strong className="text-ink-2">{skippedIds.length}</strong> skipped
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- CardStack ----------
+
+function CardStack({
+  deck,
+  idx,
+  channel,
+  swipe,
+  searchHint,
+}: {
+  deck: DeckCard[];
+  idx: number;
+  channel: ChannelKey;
+  swipe: { dir: "left" | "right" } | null;
+  searchHint: SearchHint | null;
+}) {
+  const cards = [];
+  for (let d = 3; d >= 0; d--) {
+    const card = deck[idx + d];
+    if (!card) continue;
+    cards.push(
+      <ProfileCard
+        key={card.id}
+        card={card}
+        channel={channel}
+        depth={d}
+        swipe={d === 0 ? swipe : null}
+        searchHint={d === 0 && searchHint && searchHint.idx === idx ? searchHint : null}
+      />
+    );
+  }
+  return (
+    <div className="relative w-full max-w-[460px] z-10" style={{ height: 540 }}>
+      {cards}
+    </div>
+  );
+}
+
+// ---------- ProfileCard ----------
+
+const DEPTH_STYLES: React.CSSProperties[] = [
+  {},
+  {
+    transform: "scale(0.955) translateY(-24px)",
+    filter: "saturate(0.85) brightness(0.985)",
+    boxShadow: "0 1px 0 rgba(31,27,22,0.04), 0 10px 22px rgba(31,27,22,0.07)",
+    background: "#faf3e6",
+  },
+  {
+    transform: "scale(0.91) translateY(-46px)",
+    filter: "saturate(0.7) brightness(0.97)",
+    boxShadow: "0 1px 0 rgba(31,27,22,0.03), 0 6px 14px rgba(31,27,22,0.05)",
+    background: "#f4ecdb",
+  },
+  {
+    transform: "scale(0.865) translateY(-66px)",
+    filter: "saturate(0.55) brightness(0.955)",
+    opacity: 0.55,
+    boxShadow: "0 1px 0 rgba(31,27,22,0.02), 0 3px 10px rgba(31,27,22,0.03)",
+    background: "#efe6d0",
+  },
+];
+
+function ProfileCard({
+  card: p,
+  channel,
+  depth = 0,
+  swipe,
+  searchHint,
+}: {
+  card: DeckCard;
+  channel: ChannelKey;
+  depth?: number;
+  swipe: { dir: "left" | "right" } | null;
+  searchHint: SearchHint | null;
+}) {
+  const c = CHANNELS[channel];
+  const interactive = depth === 0;
+
+  let style: React.CSSProperties = {
+    borderColor: "#e5d8be",
+    boxShadow: "0 1px 0 rgba(31,27,22,0.04), 0 18px 44px rgba(31,27,22,0.12)",
+    transition:
+      "transform 280ms cubic-bezier(.2,.7,.3,1.2), opacity 280ms ease, filter 200ms ease, box-shadow 200ms ease",
+    ...(DEPTH_STYLES[depth] ?? {}),
+    zIndex: 10 - depth,
+  };
+
+  if (swipe?.dir === "left") {
+    style = { ...style, transform: "translateX(-130%) rotate(-9deg)", opacity: 0 };
+  } else if (swipe?.dir === "right") {
+    style = { ...style, transform: "translateX(130%) rotate(9deg)", opacity: 0 };
+  }
+
+  return (
+    <div
+      className="absolute inset-0 bg-white border rounded-3xl overflow-hidden flex flex-col"
+      style={style}
+    >
+      {/* Source ribbon */}
+      <div
+        className="flex items-center gap-2 px-5 py-2.5 border-b flex-shrink-0"
+        style={{ background: c.soft, borderColor: `${c.accent}33` }}
+      >
+        {channel === "linkedin" ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/v2/linkedin-logo.png" alt="LinkedIn" className="h-3 w-auto object-contain" />
+            <span className="text-ink-4">·</span>
+            <div className="text-[11.5px] leading-tight flex-1 min-w-0 truncate" style={{ color: c.ink }}>
+              <span className="font-semibold">1st-degree connection</span>
+            </div>
+            <span
+              className="text-[10px] font-medium px-1.5 h-[18px] inline-flex items-center rounded-md"
+              style={{
+                background: "#ffffff",
+                color: c.ink,
+                fontFamily: '"JetBrains Mono", monospace',
+              }}
+            >
+              1st
+            </span>
+          </>
+        ) : (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/v2/insead-logo.png" alt="INSEAD" className="h-4 w-auto object-contain" />
+            <span className="text-ink-4">·</span>
+            <Icon.Book size={12} style={{ color: c.accent }} />
+            <div className="text-[11.5px] leading-tight flex-1" style={{ color: c.ink }}>
+              <span className="font-semibold">INSEAD CV book</span> · indexed alumnus
+            </div>
+            <span
+              className="text-[10px] font-medium px-1.5 h-[18px] inline-flex items-center rounded-md"
+              style={{
+                background: "#ffffff",
+                color: c.ink,
+                fontFamily: '"JetBrains Mono", monospace',
+              }}
+            >
+              1st
+            </span>
+          </>
+        )}
+      </div>
+
+      {/* Identity */}
+      <div className="px-6 pt-5 pb-3">
+        <div className="flex items-start gap-4">
+          <Avatar src={p.avatar} size={68} />
+          <div className="flex-1 min-w-0 pt-1">
+            <div
+              className="font-display text-[20px] text-ink leading-tight"
+              style={{ fontStyle: "italic" }}
+            >
+              {p.name}
+            </div>
+            {p.role && (
+              <div className="text-[13.5px] text-ink-2 mt-1 truncate">{p.role}</div>
+            )}
+            {(p.company || p.location) && (
+              <div className="text-[12.5px] text-ink-3 mt-0.5 truncate">
+                {p.company}
+                {p.company && p.location && " · "}
+                {p.location && (
+                  <span className="inline-flex items-baseline gap-1">
+                    <Icon.MapPin size={10} className="translate-y-[1px]" />
+                    {p.location}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+          {p.inseadShort && <InseadPill>{p.inseadShort}</InseadPill>}
+          {p.tier && <TierBadge tier={p.tier} />}
+          {searchHint && (
+            <span
+              className="inline-flex items-center gap-1.5 px-2 h-[22px] rounded-full text-[11px] font-medium"
+              style={{ background: "#f3e2cd", color: "#7a4a25" }}
+            >
+              <Icon.Sparkles size={10} />
+              {searchHint.label}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Rationale */}
+      {p.rationale && (
+        <div className="px-6 py-2 flex-1 overflow-hidden">
+          <div className="font-mono-tag text-ink-4 mb-1.5" style={{ fontSize: 9.5 }}>
+            Why I&apos;m pushing them
+          </div>
+          <p className="text-[13px] text-ink-2 leading-relaxed">{p.rationale}</p>
+        </div>
+      )}
+
+      {/* About */}
+      {p.about.length > 0 && (
+        <div className="px-6 pb-3">
+          <div className="font-mono-tag text-ink-4 mb-1.5" style={{ fontSize: 9.5 }}>
+            About
+          </div>
+          <ul className="flex flex-col gap-1">
+            {p.about.map((a, i) => (
+              <li key={i} className="text-[12.5px] text-ink-2 flex items-baseline gap-2.5">
+                <span
+                  className="inline-block w-[5px] h-[5px] rounded-full flex-shrink-0"
+                  style={{ background: c.accent }}
+                />
+                <span>{a}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Footer */}
+      <div
+        className="px-5 py-2.5 border-t flex items-center justify-between gap-2 flex-shrink-0"
+        style={{ borderColor: "#ece2d0", background: "#fcf8ee" }}
+      >
+        {p.linkedinUrl ? (
+          <a
+            href={p.linkedinUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-md text-[12px] font-medium transition-colors"
+            style={{
+              background: "#ffffff",
+              color: "#0A66C2",
+              border: "1px solid #d9cdb4",
+              pointerEvents: interactive ? "auto" : "none",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#f0f6fc";
+              e.currentTarget.style.borderColor = "#0A66C2";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "#ffffff";
+              e.currentTarget.style.borderColor = "#d9cdb4";
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/v2/linkedin-logo.png" alt="" className="h-2.5 w-auto object-contain" />
+            View on LinkedIn
+            <Icon.ArrowRight size={11} />
+          </a>
+        ) : (
+          <span />
+        )}
+
+        <button
+          disabled={!interactive}
+          className="text-[12px] text-ink-3 hover:text-ink inline-flex items-center gap-1 transition-colors"
+        >
+          Full profile
+          <Icon.ChevronRight size={12} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- SwipeBtn ----------
+
+function SwipeBtn({
+  variant,
+  channel,
+  onClick,
+}: {
+  variant: "save" | "skip";
+  channel?: ChannelKey;
+  onClick: () => void;
+}) {
+  const isSave = variant === "save";
+  const c = channel ? CHANNELS[channel] : CHANNELS.cv;
+
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center justify-center gap-2 transition-all hover:scale-[1.04] focus-ring"
+      style={{
+        background: isSave ? c.accent : "#ffffff",
+        color: isSave ? "#ffffff" : "#6b5e4a",
+        border: isSave ? "none" : "1px solid #d9cdb4",
+        width: 168,
+        height: 52,
+        borderRadius: 999,
+        boxShadow: isSave
+          ? `0 8px 22px ${c.tint}`
+          : "0 1px 0 rgba(31,27,22,0.04), 0 2px 8px rgba(31,27,22,0.04)",
+      }}
+    >
+      {isSave ? <Icon.HeartFill size={17} /> : <Icon.X size={17} />}
+      <span className="text-[14px] font-medium">{isSave ? "Save" : "Skip"}</span>
+      <span className="text-[11px] opacity-60 ml-1">{isSave ? "→" : "←"}</span>
+    </button>
+  );
+}
+
+// ---------- EmptyDeck ----------
+
+function EmptyDeck({
+  channel,
+  savedCount,
+  onBack,
+}: {
+  channel: ChannelKey;
+  savedCount: number;
+  onBack: () => void;
+}) {
+  const c = CHANNELS[channel];
+  return (
+    <div className="flex flex-col items-center justify-center text-center py-12 max-w-[440px] relative z-10">
+      <div
+        className="w-16 h-16 rounded-full flex items-center justify-center mb-5"
+        style={{ background: c.soft, color: c.accent }}
+      >
+        <Icon.Check size={28} />
+      </div>
+      <div
+        className="font-display text-[24px] text-ink mb-2"
+        style={{ fontStyle: "italic" }}
+      >
+        You&apos;ve seen the queue.
+      </div>
+      <p className="text-[14px] text-ink-3 mb-7 leading-relaxed">
+        {savedCount > 0
+          ? `${savedCount} new contact${savedCount > 1 ? "s" : ""} saved. Ask the coach in chat to push more profiles tailored to a specific angle, or head back to the doors.`
+          : "No saves this round. Tell the coach in chat to refine, try \"find someone with go-to-market experience\" or \"anyone hiring sponsorship-friendly PMs.\""}
+      </p>
+      <Btn onClick={onBack} icon={Icon.ArrowLeft} variant="secondary">
+        Back to doors
+      </Btn>
+    </div>
+  );
+}
+
+// ---------- ChatSidebar ----------
+
+function ChatSidebar({
+  channel,
+  messages,
+  typing,
+  onSend,
+}: {
+  channel: ChannelKey;
+  messages: ChatMsg[];
+  typing: boolean;
+  onSend: (text: string) => void;
+}) {
+  const c = CHANNELS[channel];
+  const [val, setVal] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, typing]);
+
+  const submit = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!val.trim()) return;
+    onSend(val);
+    setVal("");
+  };
+
+  const suggestions =
+    channel === "cv"
+      ? ["Find PMs with GTM experience", "Anyone hiring sponsorship-friendly", "Only Paris, drop Berlin"]
+      : ["Show me VC connections only", "Filter to Paris-based", "Anyone with hiring authority"];
+
+  return (
+    <aside
+      className="border-l flex flex-col min-h-0 flex-shrink-0"
+      style={{ borderColor: "#e5d8be", background: "#fdfaf3", width: 380 }}
+    >
+      {/* Header */}
+      <div
+        className="px-4 border-b flex items-center gap-2.5 flex-shrink-0"
+        style={{ borderColor: "#ece2d0", height: 84 }}
+      >
+        <div
+          className="w-8 h-8 rounded-full flex items-center justify-center"
+          style={{ background: c.soft, color: c.accent }}
+        >
+          <Icon.Sparkles size={14} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[13px] font-semibold text-ink leading-tight">
+            Refine with your coach
+          </div>
+          <div className="text-[10.5px] text-ink-4 flex items-center gap-1.5 mt-0.5">
+            <span
+              className="inline-block w-[6px] h-[6px] rounded-full pulse-dot"
+              style={{ background: "#5e8d6a" }}
+            />
+            Searching {channel === "cv" ? "INSEAD directory" : "peer networks"} live
+          </div>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3 min-h-0"
+      >
+        {messages.map((m, i) => (
+          <ChatMessage key={i} msg={m} channel={channel} />
+        ))}
+        {typing && <ChatTyping channel={channel} />}
+      </div>
+
+      {/* Suggestion chips */}
+      {messages.length <= 2 && !typing && (
+        <div className="px-4 pb-3 flex flex-col gap-1.5 flex-shrink-0">
+          <div className="font-mono-tag text-ink-4" style={{ fontSize: 9 }}>
+            Try
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions.map((s) => (
+              <button
+                key={s}
+                onClick={() => onSend(s)}
+                className="text-[11.5px] px-2.5 h-7 rounded-full border text-ink-2 hover:bg-white transition-colors text-left"
+                style={{ borderColor: "#d9cdb4", background: "#ffffff" }}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Composer */}
+      <form
+        onSubmit={submit}
+        className="border-t p-3 flex-shrink-0"
+        style={{ borderColor: "#ece2d0" }}
+      >
+        <div
+          className="flex items-center gap-2 bg-white rounded-xl border px-3 py-2"
+          style={{ borderColor: "#d9cdb4" }}
+        >
+          <input
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            placeholder="e.g. find someone with GTM experience"
+            className="flex-1 text-[12.5px] text-ink-2 placeholder:text-ink-4 outline-none bg-transparent"
+          />
+          <button
+            type="submit"
+            disabled={!val.trim()}
+            className="w-7 h-7 rounded-full flex items-center justify-center transition-colors"
+            style={{
+              background: val.trim() ? c.accent : "#ece2d0",
+              color: val.trim() ? "#ffffff" : "#8e8170",
+            }}
+          >
+            <Icon.Send size={12} />
+          </button>
+        </div>
+      </form>
+    </aside>
+  );
+}
+
+function ChatMessage({ msg, channel }: { msg: ChatMsg; channel: ChannelKey }) {
+  const c = CHANNELS[channel];
+  if (msg.role === "user") {
+    return (
+      <div
+        className="self-end max-w-[88%] px-3.5 py-2.5 rounded-2xl text-[13px] leading-snug"
+        style={{ background: "#1f1b16", color: "#f4ede0", borderBottomRightRadius: 4 }}
+      >
+        {msg.text}
+      </div>
+    );
+  }
+  return (
+    <div className="self-start max-w-[92%] flex items-start gap-2">
+      <div
+        className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
+        style={{ background: c.soft, color: c.accent }}
+      >
+        <Icon.Sparkles size={12} />
+      </div>
+      <div
+        className="px-3.5 py-2.5 rounded-2xl text-[13px] leading-relaxed text-ink-2"
+        style={{
+          background: "#ffffff",
+          borderBottomLeftRadius: 4,
+          whiteSpace: "pre-wrap",
+          border: "1px solid #ece2d0",
+        }}
+      >
+        {msg.text}
+      </div>
+    </div>
+  );
+}
+
+function ChatTyping({ channel }: { channel: ChannelKey }) {
+  const c = CHANNELS[channel];
+  return (
+    <div className="self-start flex items-start gap-2">
+      <div
+        className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
+        style={{ background: c.soft, color: c.accent }}
+      >
+        <Icon.Sparkles size={12} />
+      </div>
+      <div
+        className="px-3.5 py-3 rounded-2xl"
+        style={{
+          background: "#ffffff",
+          borderBottomLeftRadius: 4,
+          border: "1px solid #ece2d0",
+        }}
+      >
+        <div className="flex items-center gap-1">
+          {[0, 160, 320].map((delay) => (
+            <span
+              key={delay}
+              className="inline-block w-[6px] h-[6px] rounded-full pulse-dot"
+              style={{ background: c.accent, animationDelay: `${delay}ms` }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
