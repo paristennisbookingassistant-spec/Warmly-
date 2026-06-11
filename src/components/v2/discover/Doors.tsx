@@ -8,7 +8,7 @@
 
 import { CHANNELS, type ChannelKey } from "../palette";
 import { Icon } from "../icons";
-import { CV_DECK, SYNCED_PEERS, type SyncedPeer } from "./seed";
+import { SYNCED_PEERS, type SyncedPeer } from "./seed";
 
 // ---------- User scope (seed values) ----------
 const USER_SCOPE = {
@@ -22,6 +22,7 @@ const USER_SCOPE = {
 interface DoorsViewProps {
   linkedInConnected: boolean;
   linkedInPendingCount: number;
+  cvQueueCount: number;
   onOpenCV: () => void;
   onOpenLinkedIn: () => void;
 }
@@ -29,6 +30,7 @@ interface DoorsViewProps {
 export function DoorsView({
   linkedInConnected,
   linkedInPendingCount,
+  cvQueueCount,
   onOpenCV,
   onOpenLinkedIn,
 }: DoorsViewProps) {
@@ -66,7 +68,7 @@ export function DoorsView({
       </div>
 
       <div className="flex-1 grid grid-cols-2 gap-5 min-h-0">
-        <CVDoor queueCount={CV_DECK.length} onClick={onOpenCV} />
+        <CVDoor queueCount={cvQueueCount} onClick={onOpenCV} />
         <LinkedInDoor
           queueCount={linkedInConnected ? linkedInPendingCount : SYNCED_PEERS.length}
           connected={linkedInConnected}

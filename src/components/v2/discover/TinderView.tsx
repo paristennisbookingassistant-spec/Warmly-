@@ -12,80 +12,31 @@ import { Icon } from "../icons";
 import { Avatar, Btn, InseadPill, TierBadge } from "../primitives";
 import type { DeckCard, ChatMsg, SearchHint } from "./types";
 
-// ---------- Chat helpers (canned, local-only) ----------
+// ---------- Chat seed messages ----------
 
 function seedChat(channel: ChannelKey): ChatMsg[] {
   if (channel === "cv") {
     return [
       {
         role: "agent",
-        text: "I'm pushing INSEAD alumni who match your target — Product Manager roles in Paris / Berlin, focused on AI / Tech.",
+        text: "I'm pushing real INSEAD alumni scored against your profile — PM roles in Paris / Berlin, AI & Tech focus.",
       },
       {
         role: "agent",
-        text: "Save the ones worth a warm intro and skip the rest. Tell me anytime to narrow or widen, e.g. \"find someone with GTM experience\" or \"drop Berlin\".",
+        text: "Save the ones worth a warm intro and skip the rest. Tell me to narrow or widen, e.g. \"consulting backgrounds\", \"Paris only\", or \"MBA26J cohort\".",
       },
     ];
   }
   return [
     {
       role: "agent",
-      text: "Reading your synced LinkedIn connections. I'm prioritising 1st-degree contacts where relevance to your goals is high.",
+      text: "Reading your synced LinkedIn connections and ranking them against your goals.",
     },
     {
       role: "agent",
-      text: "Save or skip, same as the directory. Or ask me to narrow: \"show only Paris\", \"VC connections\", \"anyone hiring\".",
+      text: "Save or skip. Ask me to narrow: \"show only Paris\", \"VC connections\", \"product roles\".",
     },
   ];
-}
-
-interface AgentReply {
-  reply: string;
-  hint: { label: string } | null;
-}
-
-function generateAgentReply(text: string): AgentReply {
-  const t = text.toLowerCase();
-  if (/(gtm|go-?to-?market|commercial)/i.test(t)) {
-    return {
-      reply: "Got it. Re-ranking the queue to prioritise GTM / commercial backgrounds. Pushing 2 fresh matches with strong GTM signal.",
-      hint: { label: "GTM signal" },
-    };
-  }
-  if (/(paris)/i.test(t)) {
-    return {
-      reply: "Narrowing to Paris-based only. 3 alumni in the queue match; Berlin and London cards are dropped.",
-      hint: { label: "Paris match" },
-    };
-  }
-  if (/(berlin)/i.test(t)) {
-    return {
-      reply: "Narrowing to Berlin-based only. 2 alumni in the queue match.",
-      hint: { label: "Berlin match" },
-    };
-  }
-  if (/(vc|venture|investor)/i.test(t)) {
-    return {
-      reply: "Filtering to VC / investor profiles. Re-ordering the queue, the next card is a Partner-level match.",
-      hint: { label: "VC profile" },
-    };
-  }
-  if (/(sponsor|visa|non-?eu)/i.test(t)) {
-    return {
-      reply: "Prioritising contacts whose teams have hired sponsorship-eligible candidates in the past 12 months. 2 strong matches surfaced.",
-      hint: { label: "Sponsorship-friendly" },
-    };
-  }
-  if (/(hiring|hire|opening)/i.test(t)) {
-    return {
-      reply: "Looking for contacts with hiring authority who have active openings on their team. 2 matches.",
-      hint: { label: "Hiring authority" },
-    };
-  }
-  if (/(drop|remove|exclude)/i.test(t)) {
-    return { reply: "Applied. Removing matching cards from the queue.", hint: null };
-  }
-  return { reply: "Got it, refining the queue based on that signal. Next card is a stronger match.", hint: { label: "Refined" } };
 }
 
 // ---------- TinderView ----------
@@ -93,12 +44,22 @@ function generateAgentReply(text: string): AgentReply {
 interface TinderViewProps {
   channel: ChannelKey;
   deck: DeckCard[];
+  /** Show a subtle "scoring…" indicator when true */
+  scoring?: boolean;
+  /** Total count from the backend (for the door footer) */
+  totalCount?: number;
   onBack: () => void;
   onSave: (card: DeckCard) => void;
   onSkip: (card: DeckCard) => void;
+  /**
+   * Called when the user sends a refine instruction.
+   * Parent fetches/filters/re-ranks and updates deck via prop.
+   * Returns the agent reply text to show in chat.
+   */
+  onRefine?: (text: string) => Promise<string>;
 }
 
-export function TinderView({ channel, deck, onBack, onSave, onSkip }: TinderViewProps) {
+export function TinderView({ channel, deck, scoring = false, onBack, onSave, onSkip, onRefine }: TinderViewProps) {
   const [idx, setIdx] = useState(0);
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [skippedIds, setSkippedIds] = useState<string[]>([]);
@@ -106,6 +67,18 @@ export function TinderView({ channel, deck, onBack, onSave, onSkip }: TinderView
   const [chat, setChat] = useState<ChatMsg[]>(() => seedChat(channel));
   const [chatTyping, setChatTyping] = useState(false);
   const [searchHint, setSearchHint] = useState<SearchHint | null>(null);
+
+  // Reset idx when deck changes (after a refine)
+  const prevDeckRef = useRef<DeckCard[]>(deck);
+  useEffect(() => {
+    if (prevDeckRef.current !== deck) {
+      setIdx(0);
+      setSavedIds([]);
+      setSkippedIds([]);
+      setSwipe(null);
+      prevDeckRef.current = deck;
+    }
+  }, [deck]);
 
   const current = deck[idx];
   const done = idx >= deck.length;
@@ -131,21 +104,29 @@ export function TinderView({ channel, deck, onBack, onSave, onSkip }: TinderView
     setTimeout(advance, 280);
   };
 
-  const handleSendChat = (text: string) => {
+  const handleSendChat = async (text: string) => {
     if (!text.trim()) return;
     setChat((prev) => [...prev, { role: "user", text }]);
     setChatTyping(true);
-    setTimeout(() => {
-      const { reply, hint } = generateAgentReply(text);
+    try {
+      let reply: string;
+      if (onRefine) {
+        reply = await onRefine(text);
+      } else {
+        reply = "Got it — refining the queue.";
+      }
       setChat((prev) => [...prev, { role: "agent", text: reply }]);
+      setSearchHint({ label: "Refined", idx: 0 });
+    } catch {
+      setChat((prev) => [...prev, { role: "agent", text: "Something went wrong while refining. Please try again." }]);
+    } finally {
       setChatTyping(false);
-      if (hint) setSearchHint({ ...hint, idx });
-    }, 900);
+    }
   };
 
   return (
     <div className="flex flex-col flex-1 min-h-0 px-8 pt-6 pb-6 max-w-[1320px] mx-auto w-full">
-      <TopStrip channel={channel} onBack={onBack} />
+      <TopStrip channel={channel} scoring={scoring} onBack={onBack} />
 
       <div
         className="flex-1 mt-4 bg-white border rounded-3xl overflow-hidden flex min-h-0"
@@ -218,7 +199,7 @@ export function TinderView({ channel, deck, onBack, onSave, onSkip }: TinderView
 
 // ---------- TopStrip ----------
 
-function TopStrip({ channel, onBack }: { channel: ChannelKey; onBack: () => void }) {
+function TopStrip({ channel, scoring, onBack }: { channel: ChannelKey; scoring: boolean; onBack: () => void }) {
   return (
     <div className="flex items-center gap-4 flex-shrink-0">
       <button
@@ -231,9 +212,17 @@ function TopStrip({ channel, onBack }: { channel: ChannelKey; onBack: () => void
       <div className="w-px h-6" style={{ background: "#d9cdb4" }} />
       <ChannelChip channel={channel} />
       <div className="flex-1" />
-      <div className="text-[11.5px] text-ink-4 hidden md:block">
-        Tip: chat with your coach on the right to refine the queue.
-      </div>
+      {scoring && (
+        <div className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-3 hidden md:flex">
+          <span className="inline-block w-[6px] h-[6px] rounded-full pulse-dot" style={{ background: "#b87a4a" }} />
+          Scoring profiles…
+        </div>
+      )}
+      {!scoring && (
+        <div className="text-[11.5px] text-ink-4 hidden md:block">
+          Tip: chat with your coach on the right to refine the queue.
+        </div>
+      )}
     </div>
   );
 }
@@ -747,7 +736,7 @@ function ChatSidebar({
   channel: ChannelKey;
   messages: ChatMsg[];
   typing: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string) => void | Promise<void>;
 }) {
   const c = CHANNELS[channel];
   const [val, setVal] = useState("");
@@ -762,14 +751,14 @@ function ChatSidebar({
   const submit = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!val.trim()) return;
-    onSend(val);
+    void onSend(val);
     setVal("");
   };
 
   const suggestions =
     channel === "cv"
-      ? ["Find PMs with GTM experience", "Anyone hiring sponsorship-friendly", "Only Paris, drop Berlin"]
-      : ["Show me VC connections only", "Filter to Paris-based", "Anyone with hiring authority"];
+      ? ["Consulting backgrounds", "VC / investing", "Paris only", "MBA26J cohort"]
+      : ["Paris only", "In VC / investing", "Product roles", "Consulting backgrounds"];
 
   return (
     <aside
