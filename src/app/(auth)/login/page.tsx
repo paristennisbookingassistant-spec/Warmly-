@@ -24,7 +24,14 @@ export default function LoginPage() {
       if (error) {
         setError(error.message);
       } else {
-        window.location.href = "/chat";
+        // Honor ?redirect_to=… (set by the auth middleware when an
+        // unauthenticated user hits a gated route like /v2). Only allow
+        // internal absolute paths to avoid an open-redirect.
+        const params = new URLSearchParams(window.location.search);
+        const raw = params.get("redirect_to");
+        const dest =
+          raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : "/chat";
+        window.location.href = dest;
       }
     } finally {
       setLoading(false);

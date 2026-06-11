@@ -55,6 +55,11 @@ export function ContactDetailSidebar({
               Draft outreach
             </Btn>
           </Link>
+          <Link href={`/v2/contacts/${c.id}/prep`} className="block">
+            <Btn variant="secondary" icon={Icon.Calendar} className="w-full justify-start">
+              Prep meeting
+            </Btn>
+          </Link>
           {status !== "met" && status !== "ongoing" && (
             <Btn
               variant="secondary"

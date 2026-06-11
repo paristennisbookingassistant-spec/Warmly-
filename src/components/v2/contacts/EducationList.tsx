@@ -11,8 +11,15 @@ interface EducationListProps {
   education: LinkedInEducationEntry[];
 }
 
+// Extract a 4-digit year from a LinkedIn date string ("2024", "2024-06",
+// "Present", ...). Avoid `new Date`, which yields NaN on values like "Present".
+function year(d: string | null): string | null {
+  if (!d) return null;
+  const m = /(\d{4})/.exec(d);
+  return m ? m[1] : null;
+}
+
 function formatDateRange(start: string | null, end: string | null): string {
-  const year = (d: string | null) => (d ? new Date(d).getFullYear().toString() : null);
   const s = year(start);
   const e = year(end);
   if (s && e) return `${s} – ${e}`;
