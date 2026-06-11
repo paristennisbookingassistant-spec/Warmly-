@@ -63,7 +63,7 @@ function withJitter(baseMs: number): number {
 /**
  * Returns the base delay ±30% jitter, used for per-profile RSC fetches
  * (Phase 2) where the spec requires ±30% randomization.
- * Minimum effective delay: 10,500 ms (15,000 * 0.70).
+ * At the current 700 ms base, effective range: 490 ms – 910 ms.
  */
 function withJitter30(baseMs: number): number {
   const jitter = baseMs * 0.30;
@@ -288,24 +288,80 @@ async function runPhase1(
       break;
     }
 
+    // Fetch with retry — up to 3 attempts for network/empty-page failures.
+    // RateLimitedError is handled separately (pause + backoff, then retry same page).
     let result;
-    try {
-      result = await fetchConnectionsPage(start, csrfToken);
-    } catch (err) {
-      if (err instanceof RateLimitedError) {
-        await handleRateLimited(job, signal);
-        if (signal.aborted) return;
-        // Retry this page after the pause (don't increment p)
-        p--;
-        continue;
+    const MAX_PAGE_RETRIES = 3;
+    const PAGE_RETRY_DELAYS_MS = [10_000, 30_000, 60_000];
+    let fetchAttempt = 0;
+    while (true) {
+      try {
+        result = await fetchConnectionsPage(start, csrfToken);
+      } catch (err) {
+        if (err instanceof RateLimitedError) {
+          await handleRateLimited(job, signal);
+          if (signal.aborted) return;
+          // Retry this page after the pause (don't increment p).
+          // Reset fetchAttempt so rate-limit recovery doesn't eat into
+          // the network-failure retry budget.
+          fetchAttempt = 0;
+          continue;
+        }
+        throw err;
       }
-      throw err;
-    }
 
-    if (!result) {
-      console.error(`[ConnectionsSync] Phase 1: failed to fetch page ${p} (start=${start})`);
+      // null result = HTTP/network failure; retry up to MAX_PAGE_RETRIES times.
+      if (result === null) {
+        fetchAttempt++;
+        if (fetchAttempt < MAX_PAGE_RETRIES) {
+          const retryDelayMs = PAGE_RETRY_DELAYS_MS[fetchAttempt - 1] ?? 60_000;
+          console.warn(
+            `[ConnectionsSync] Phase 1: page ${p} (start=${start}) failed (attempt ${fetchAttempt}/${MAX_PAGE_RETRIES}). ` +
+            `Retrying in ${retryDelayMs / 1000}s…`
+          );
+          await sleep(retryDelayMs);
+          if (signal.aborted) return;
+          continue;
+        }
+        // All retries exhausted — stop Phase 1 (state is persisted; resume still works).
+        console.error(
+          `[ConnectionsSync] Phase 1: page ${p} (start=${start}) failed after ${MAX_PAGE_RETRIES} attempts. ` +
+          `Stopping Phase 1; resume will retry from this page.`
+        );
+        return;
+      }
+
+      // Page has Connection elements (or total says more remain) but ZERO
+      // decoded profiles — a thin decoration / transient anti-bot response.
+      // Same retry treatment as a null result. Uses the orchestrator's cached
+      // totalSeen as a fallback authority for the (theoretical) total path.
+      const knownTotal = result.total ?? totalSeen;
+      const moreRemainByTotal = knownTotal !== null && start + CONNECTIONS_PAGE_SIZE < knownTotal;
+      if (result.profileCount === 0 && (result.elementsCount > 0 || moreRemainByTotal)) {
+        fetchAttempt++;
+        if (fetchAttempt < MAX_PAGE_RETRIES) {
+          const retryDelayMs = PAGE_RETRY_DELAYS_MS[fetchAttempt - 1] ?? 60_000;
+          console.warn(
+            `[ConnectionsSync] Phase 1: page ${p} (start=${start}) returned 0 profiles (elements=${result.elementsCount}, total=${knownTotal}) ` +
+            `(attempt ${fetchAttempt}/${MAX_PAGE_RETRIES}). Retrying in ${retryDelayMs / 1000}s…`
+          );
+          await sleep(retryDelayMs);
+          if (signal.aborted) return;
+          continue;
+        }
+        // Still empty after all retries — log loudly and advance (don't loop forever).
+        console.error(
+          `[ConnectionsSync] Phase 1: page ${p} (start=${start}) returned 0 profiles after ${MAX_PAGE_RETRIES} retries. ` +
+          `Advancing to next page to avoid infinite loop.`
+        );
+        break; // fall through to throttle + next page
+      }
+
+      // Non-null result (may be short but non-empty, or normal): proceed.
       break;
     }
+
+    // result is guaranteed non-null here: the null path exits via `return` above.
 
     // Update total on first successful page
     if (result.total !== null && totalSeen === null) {
@@ -361,7 +417,14 @@ async function runPhase1(
 
     emitProgress(job);
 
-    if (!result.hasMore || job.cap_hit) break;
+    // End-of-list authority: prefer the cached total from page 0 if one was
+    // ever seen (this endpoint usually returns none); otherwise trust the
+    // page's elements-based hasMore from voyager-list-client.
+    const effectiveTotal = result.total ?? totalSeen;
+    const hasMore = effectiveTotal !== null
+      ? start + CONNECTIONS_PAGE_SIZE < effectiveTotal
+      : result.hasMore;
+    if (!hasMore || job.cap_hit) break;
 
     // Throttle with jitter before next page
     await sleep(withJitter(LIST_THROTTLE_MS));
@@ -374,6 +437,19 @@ async function runPhase1(
       phase: 1,
       contacts: basicBuffer,
     });
+  }
+
+  // The connections endpoint returns no paging total, so once pagination is
+  // exhausted the collected count IS the network total. Persist it so the
+  // web app's progress UI has a denominator for Phase 2.
+  if (job.total_connections === null && job.collected_urns.length > 0) {
+    const totalUpdate = {
+      id: job.id,
+      total_connections: job.collected_urns.length,
+      updated_at: new Date().toISOString(),
+    };
+    Object.assign(job, totalUpdate);
+    await updateSyncJob(totalUpdate);
   }
 
   console.info(`[ConnectionsSync] Phase 1 complete. URNs collected: ${job.collected_urns.length}`);
@@ -514,6 +590,31 @@ async function runPhase2(
   // Profiles that returned no data on the first pass — retried once at the end.
   const emptyProfiles: Array<{ urn: string; publicId: string; profileId: string }> = [];
 
+  // Enriched contacts are flushed to the backend in batches rather than one
+  // POST per profile — the awaited per-profile round-trip (~1.5-2s) was
+  // doubling Phase 2 wall time vs the LinkedIn-fetch pace. Resume state
+  // (last_processed_urn_index) is persisted at flush boundaries only; a crash
+  // re-fetches at most ENRICH_BATCH_SIZE profiles, and the backend upsert is
+  // idempotent, so correctness is unchanged.
+  const ENRICH_BATCH_SIZE = 10;
+  let enrichBuffer: BulkImportContact[] = [];
+
+  async function flushEnrichBuffer(nextIndex: number): Promise<void> {
+    if (enrichBuffer.length > 0) {
+      const contacts = enrichBuffer;
+      enrichBuffer = [];
+      await bulkImport({ sync_job_id: job.id, phase: 2, contacts });
+    }
+    const idxUpdate = {
+      id: job.id,
+      last_processed_urn_index: nextIndex,
+      profiles_enriched: job.profiles_enriched,
+      updated_at: new Date().toISOString(),
+    };
+    Object.assign(job, idxUpdate);
+    await updateSyncJob(idxUpdate);
+  }
+
   for (let i = startIdx; i < limit; i++) {
     if (signal.aborted) return;
 
@@ -524,14 +625,8 @@ async function runPhase2(
     if (!publicId) {
       console.debug(`[ConnectionsSync] Phase 2: skipping URN ${urn} — no publicId`);
       skipped++;
-      // Still advance the index so resume is correct
-      const skipUpdate = {
-        id: job.id,
-        last_processed_urn_index: i + 1,
-        updated_at: new Date().toISOString(),
-      };
-      Object.assign(job, skipUpdate);
-      await updateSyncJob(skipUpdate);
+      // Flush so resume state advances past the skipped profile.
+      await flushEnrichBuffer(i + 1);
       continue;
     }
 
@@ -564,29 +659,25 @@ async function runPhase2(
     const contact = buildEnrichmentContact(urn, linkedinUrl, name, experience, education);
 
     if (experience !== null || education !== null) {
-      await bulkImport({
-        sync_job_id: job.id,
-        phase: 2,
-        contacts: [contact],
-      });
+      enrichBuffer.push(contact);
       job.profiles_enriched++;
     } else {
       console.debug(`[ConnectionsSync] Phase 2: no data parsed for ${publicId} — skipping import`);
     }
 
-    // Persist progress (resumable)
-    const idxUpdate = {
-      id: job.id,
-      last_processed_urn_index: i + 1,
-      profiles_enriched: job.profiles_enriched,
-      updated_at: new Date().toISOString(),
-    };
-    Object.assign(job, idxUpdate);
-    await updateSyncJob(idxUpdate);
+    // Flush + persist resume state at batch boundaries (and on the last profile).
+    if (enrichBuffer.length >= ENRICH_BATCH_SIZE || i + 1 >= limit) {
+      await flushEnrichBuffer(i + 1);
+    } else {
+      // Keep the in-memory index current so progress events report Phase 2
+      // accurately between flushes. PERSISTED resume state only advances at
+      // flush boundaries (see flushEnrichBuffer).
+      job.last_processed_urn_index = i + 1;
+    }
 
     emitProgress(job);
 
-    // Throttle before the next profile (±30% jitter, hard-coded, not configurable)
+    // Throttle before the next profile (±30% jitter, 700 ms base, ~490–910 ms effective)
     if (i + 1 < profiles.length) {
       const delay = withJitter30(PROFILE_FETCH_THROTTLE_MS);
       console.debug(`[ConnectionsSync] Phase 2: throttle ${delay}ms before next profile`);

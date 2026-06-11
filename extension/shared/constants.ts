@@ -165,10 +165,13 @@ export const BATCH_THROTTLE_MS = 10_000;
 
 /**
  * Base delay between per-profile RSC detail-page fetches (Phase 2, RSC path).
- * Hard-coded at 15 s — NOT user-configurable. See PHASE2_DEEP_ENRICHMENT_RSC.md.
- * Effective range with ±30% jitter: 10,500 ms – 19,500 ms.
+ * NOT user-configurable. Measured latency: ~1.1–1.5 s/profile (May 2026).
+ * Sustained 60-profile and 300-profile runs at 700 ms delay were clean with
+ * no rate-limit signals (see docs/EXTENSION_SPEED_HANDOFF_2026-06-11.md).
+ * Effective pace ~2 s/profile → ~33 min for 1,000 connections.
+ * Effective range with ±30% jitter: 490 ms – 910 ms.
  */
-export const PROFILE_FETCH_THROTTLE_MS = 15_000;
+export const PROFILE_FETCH_THROTTLE_MS = 700;
 
 /**
  * Maximum number of connections to sync per plan tier (v1 cap).

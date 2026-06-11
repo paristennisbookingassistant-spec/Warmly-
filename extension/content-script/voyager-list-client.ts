@@ -281,6 +281,21 @@ export interface ConnectionsPage {
   total: number | null;
   /** Whether there are more pages after this one */
   hasMore: boolean;
+  /**
+   * Number of profile entities parsed from this page's included[] array.
+   * May be less than CONNECTIONS_PAGE_SIZE even on FULL pages — the
+   * ConnectionListWithProfile decoration routinely omits a few Profile
+   * entities (verified live 2026-06-11: 40 elements, 39 profiles). NEVER
+   * use this as an end-of-list signal.
+   */
+  profileCount: number;
+  /**
+   * Number of Connection elements in data["*elements"]. This is the reliable
+   * pagination signal: LinkedIn returns CONNECTIONS_PAGE_SIZE elements per
+   * page until the list is exhausted; the final page has fewer (or zero).
+   * Unlike profileCount it is independent of decoration variance.
+   */
+  elementsCount: number;
 }
 
 /**
@@ -434,7 +449,12 @@ function parseConnectionsResponse(body: unknown, start: number): ConnectionsPage
     // (Verified empirically against the live API, May 2026.)
     const data = root["data"] as Record<string, unknown> | null;
 
-    // Total count from paging metadata (data.paging.total)
+    // Total count from paging metadata (data.paging.total).
+    // NOTE (verified live 2026-06-11): the dash connections finder's paging
+    // object is `{count, start, links}` — NO total. So `total` is expected to
+    // stay null on this endpoint; the elements-count heuristic below is the
+    // real pagination signal. The total path is kept in case LinkedIn
+    // reintroduces it.
     let total: number | null = null;
     try {
       const paging = (data?.["paging"] ?? root["paging"]) as Record<string, unknown> | null;
@@ -443,10 +463,25 @@ function parseConnectionsResponse(body: unknown, start: number): ConnectionsPage
       // non-fatal
     }
 
+    // Connection elements (URN refs) — the reliable per-page count.
+    let elementsCount = 0;
+    try {
+      const elements = (data?.["*elements"] ?? data?.["elements"]) as unknown[] | null;
+      if (Array.isArray(elements)) elementsCount = elements.length;
+    } catch {
+      // non-fatal
+    }
+
     const included = Array.isArray(root["included"]) ? (root["included"] as unknown[]) : [];
     if (included.length === 0) {
       console.warn("[VoyagerList] No included[] entities in response at start=" + start);
-      return { connections: [], total, hasMore: false };
+      // A page can have Connection elements but an empty/thin decoration —
+      // signal hasMore from elements/total so the caller retries instead of
+      // treating it as end-of-list.
+      const emptyHasMore = total !== null
+        ? (start + CONNECTIONS_PAGE_SIZE) < total
+        : elementsCount >= CONNECTIONS_PAGE_SIZE;
+      return { connections: [], total, hasMore: emptyHasMore, profileCount: 0, elementsCount };
     }
 
     const connections: VoyagerConnection[] = [];
@@ -469,11 +504,26 @@ function parseConnectionsResponse(body: unknown, start: number): ConnectionsPage
       console.warn(`[VoyagerList] ${parseFailures}/${profileCount} profile entities failed to parse at start=${start}`);
     }
 
-    // hasMore: a full page of profiles came back AND we haven't reached total.
-    const pageFull = profileCount >= CONNECTIONS_PAGE_SIZE;
-    const hasMore = pageFull && (total === null || start + profileCount < total);
+    // hasMore logic (root cause of the 438-truncation bug, fixed 2026-06-11):
+    //
+    // 1. When `total` is known it is authoritative (position-based). In
+    //    practice this endpoint does NOT return a total — kept for safety.
+    // 2. Otherwise, use elementsCount: LinkedIn returns CONNECTIONS_PAGE_SIZE
+    //    Connection elements per page until the list is exhausted; only the
+    //    genuine final page has fewer. (Past-the-end pages return 0.)
+    //
+    // NEVER use profileCount here: the decoration routinely omits a few
+    // Profile entities from included[] even on full pages (verified live:
+    // 40 elements / 39 profiles). The old `profileCount >= PAGE_SIZE`
+    // heuristic is what capped the best sync at 438 of 1,347.
+    let hasMore: boolean;
+    if (total !== null) {
+      hasMore = (start + CONNECTIONS_PAGE_SIZE) < total;
+    } else {
+      hasMore = elementsCount >= CONNECTIONS_PAGE_SIZE;
+    }
 
-    return { connections, total, hasMore };
+    return { connections, total, hasMore, profileCount, elementsCount };
   } catch (err) {
     console.error("[VoyagerList] parseConnectionsResponse error:", err);
     return null;
