@@ -97,15 +97,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ilike filters
   if (company) query = query.ilike("company", `%${company}%`);
 
-  // Array-contains filters (PostgREST `cs` = contains)
-  if (industry) query = query.contains("industries", [industry]);
-  if (fn) query = query.contains("functions", [fn]);
-  if (geo) query = query.contains("geography", [geo]);
+  // Array-overlap filters. `industry`/`function`/`geo` accept a comma-separated
+  // list of canonical values (e.g. "Venture Capital,Private Equity"); a row
+  // matches if ANY of its array elements overlap. Values must match the stored
+  // casing — the client maps keywords → canonical DB strings before calling.
+  const csv = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
+  if (industry) query = query.overlaps("industries", csv(industry));
+  if (fn) query = query.overlaps("functions", csv(fn));
+  if (geo) query = query.overlaps("geography", csv(geo));
 
-  // Full-text search across name, company, current_title
+  // Free-text search across name, company, current_title, AND location — so
+  // city/geo terms (e.g. "Paris") match the free-text location field (the
+  // `geography` array is country-level and won't contain cities).
   if (search) {
     query = query.or(
-      `name.ilike.%${search}%,company.ilike.%${search}%,current_title.ilike.%${search}%`
+      `name.ilike.%${search}%,company.ilike.%${search}%,current_title.ilike.%${search}%,location.ilike.%${search}%`
     );
   }
 

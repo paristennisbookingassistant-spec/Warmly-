@@ -20,7 +20,7 @@ import { LinkedInSetup } from "./LinkedInSetup";
 import { LINKEDIN_DEMO_DECK } from "./seed";
 import type { DeckCard } from "./types";
 import type { Contact, LinkedInExperienceEntry, LinkedInEducationEntry } from "@/types/database";
-import type { DirectoryProfile, ListDirectoryResponse, SaveDirectoryResponse, RankDirectoryResponse } from "@/types/directory";
+import type { DirectoryProfile, ListDirectoryResponse, SaveDirectoryResponse } from "@/types/directory";
 
 // ---------- API response shapes ----------
 
@@ -32,19 +32,6 @@ interface ContactsApiResponse {
   };
 }
 
-interface RankBatchResponse {
-  data: {
-    rankings: Array<{
-      contact_id: string;
-      score: number;
-      tier: number;
-      reasoning: string;
-      hook: string;
-      rank: number;
-    }>;
-  } | null;
-  error: { code: string; message: string } | null;
-}
 
 // ---------- Directory query params for refine ----------
 
@@ -60,36 +47,50 @@ interface DirectoryParams {
 
 // ---------- Phrase → DirectoryParams parser ----------
 
+// Keyword → CANONICAL directory `industries` values (must match the stored
+// Title-Case strings; the backend does case-sensitive array overlap). Multiple
+// canonical values are comma-joined so the overlap matches any of them.
+const INDUSTRY_KEYWORDS: Array<{ re: RegExp; value: string }> = [
+  { re: /(consult(ing|ant)|strategy)/i, value: "Consulting" },
+  { re: /(venture|vc\b|\bpe\b|private equity|investing|investor)/i, value: "Venture Capital,Private Equity" },
+  { re: /(finance|banking|investment bank|asset management)/i, value: "Investment Banking,Banking,Asset Management" },
+  { re: /(pharma|life science|healthcare|biotech)/i, value: "Healthcare/Pharma" },
+  { re: /(\bai\b|tech\b|software|saas|product)/i, value: "Tech,Tech / AI" },
+  { re: /(startup|entrepreneur|founder)/i, value: "Startup/Entrepreneurship" },
+  { re: /(consumer|retail|fmcg|luxury)/i, value: "Consumer/Retail" },
+  { re: /(real estate|property)/i, value: "Real Estate" },
+  { re: /(energy|cleantech|climate)/i, value: "Energy" },
+];
+
+// Cities → routed to free-text `search` (matches the location field), NOT the
+// country-level `geography` array.
+const CITY_RE = /\b(paris|singapore|berlin|london|new york|nyc|hong kong|dubai|amsterdam|munich|zurich|shanghai|tokyo|sydney|geneva|madrid|milan)\b/i;
+
 function parseInseadInstruction(text: string): DirectoryParams {
-  const t = text.toLowerCase();
-
-  // Cohort detection: "mba26j", "26d", "26j", "december", "july"
+  // Cohort: "mba26j", "26d", "december", "july"
   const cohortMatch = text.match(/\b(mba\d{2}[dj]|\d{2}[dj])\b/i);
-  if (cohortMatch) return { cohort: cohortMatch[1].toLowerCase() };
-  if (/\bdecember\b/.test(t)) return { cohort: "mba26d" };
-  if (/\bjuly\b/.test(t)) return { cohort: "mba26j" };
+  if (cohortMatch) {
+    const c = cohortMatch[1].toLowerCase();
+    return { cohort: c.startsWith("mba") ? c : `mba${c}` };
+  }
+  if (/\bdecember\b/i.test(text)) return { cohort: "mba26d" };
+  if (/\bjuly\b/i.test(text)) return { cohort: "mba26j" };
 
-  // Industry keywords
-  if (/(consult(ing|ant))/i.test(t)) return { industry: "consulting" };
-  if (/(venture|vc\b|investing|private equity|\bpe\b)/i.test(t)) return { industry: "venture capital" };
-  if (/(pharma|life science|healthcare)/i.test(t)) return { industry: "pharma" };
-  if (/(tech\b|software|saas)/i.test(t)) return { industry: "technology" };
-  if (/(finance|banking|investment bank)/i.test(t)) return { industry: "finance" };
-  if (/(gtm|go-?to-?market|commercial|sales)/i.test(t)) return { industry: "sales" };
+  // City → location search
+  const city = text.match(CITY_RE);
+  if (city) return { search: city[1] };
 
-  // Geography
-  if (/\bparis\b/.test(t)) return { geo: "paris" };
-  if (/\bsingapore\b/.test(t)) return { geo: "singapore" };
-  if (/\bberlin\b/.test(t)) return { geo: "berlin" };
-  if (/\blondon\b/.test(t)) return { geo: "london" };
-  if (/\bnew york\b|\bnyc\b/.test(t)) return { geo: "new york" };
+  // Industry → canonical values
+  for (const { re, value } of INDUSTRY_KEYWORDS) {
+    if (re.test(text)) return { industry: value };
+  }
 
-  // Company names (catch-all: if a word looks like a proper noun after common prepositions)
-  const companyMatch = text.match(/(?:at|from|in|with)\s+([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)?)/);
+  // "at/from Company"
+  const companyMatch = text.match(/(?:at|from|with)\s+([A-Z][a-zA-Z&]+(?:\s[A-Z][a-zA-Z&]+)?)/);
   if (companyMatch) return { company: companyMatch[1] };
 
-  // Fallback: use the raw text as a full-text search
-  return { search: text };
+  // Fallback: full-text search
+  return { search: text.trim() };
 }
 
 // ---------- buildDirectoryUrl helper ----------
@@ -198,10 +199,17 @@ function contactToDeckCard(c: Contact): DeckCard {
   };
 }
 
-// ---------- Apply ranking to deck ----------
+// ---------- Scoring helper (bounded batch + hard timeout) ----------
 
-interface InseadRankItem {
-  directory_id: string;
+// Only score the front of the deck — the cards the user actually sees before
+// swiping. Ranking the whole 24-25 set in one MiniMax call blows past the
+// serverless timeout (504). 8 is fast and covers the visible window.
+const SCORE_BATCH = 8;
+// Never let the scoring spinner hang: abort the rank call after this and fall
+// back to the unscored deck.
+const RANK_TIMEOUT_MS = 12_000;
+
+interface RankItem {
   score: number;
   tier: number;
   reasoning: string;
@@ -209,43 +217,59 @@ interface InseadRankItem {
   rank: number;
 }
 
-interface LinkedInRankItem {
-  contact_id: string;
-  score: number;
-  tier: number;
-  reasoning: string;
-  hook: string;
-  rank: number;
+/**
+ * POSTs the first SCORE_BATCH card ids to a rank endpoint with a hard timeout.
+ * Returns the rankings array, or null on timeout / non-ok / error (caller keeps
+ * the unscored deck). `idKey` is the id field the endpoint echoes back
+ * ("directory_id" or "contact_id").
+ */
+async function rankWithTimeout(
+  url: string,
+  ids: string[],
+  idField: "directory_ids" | "contact_ids"
+): Promise<Array<RankItem & { id: string }> | null> {
+  const batch = ids.slice(0, SCORE_BATCH);
+  if (batch.length === 0) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RANK_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      signal: controller.signal,
+      body: JSON.stringify({ [idField]: batch, top_n: Math.min(batch.length, 20) }),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      data?: { rankings?: Array<Record<string, unknown>> } | null;
+    };
+    const rankings = json.data?.rankings ?? null;
+    if (!rankings) return null;
+    const echoed = idField === "directory_ids" ? "directory_id" : "contact_id";
+    return rankings.map((r) => ({
+      id: String(r[echoed]),
+      score: Number(r.score ?? 0),
+      tier: Number(r.tier ?? 3),
+      reasoning: String(r.reasoning ?? ""),
+      hook: String(r.hook ?? ""),
+      rank: Number(r.rank ?? 999),
+    }));
+  } catch {
+    return null; // timeout/abort/network — graceful, keep unscored
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-function applyRankingToInsead(deck: DeckCard[], rankings: InseadRankItem[]): DeckCard[] {
-  const map = new Map(rankings.map((r) => [r.directory_id, r]));
+function applyRankByMap(deck: DeckCard[], ranks: Array<RankItem & { id: string }>): DeckCard[] {
+  const map = new Map(ranks.map((r) => [r.id, r]));
   return deck
     .map((card) => {
       const r = map.get(card.id);
-      if (!r) return card;
-      return { ...card, tier: tierLabelFromNumber(r.tier), rationale: r.reasoning };
+      return r ? { ...card, tier: tierLabelFromNumber(r.tier), rationale: r.reasoning } : card;
     })
-    .sort((a, b) => {
-      const ra = map.get(a.id)?.rank ?? 999;
-      const rb = map.get(b.id)?.rank ?? 999;
-      return ra - rb;
-    });
-}
-
-function applyRankingToLinkedIn(deck: DeckCard[], rankings: LinkedInRankItem[]): DeckCard[] {
-  const map = new Map(rankings.map((r) => [r.contact_id, r]));
-  return deck
-    .map((card) => {
-      const r = map.get(card.id);
-      if (!r) return card;
-      return { ...card, tier: tierLabelFromNumber(r.tier), rationale: r.reasoning };
-    })
-    .sort((a, b) => {
-      const ra = map.get(a.id)?.rank ?? 999;
-      const rb = map.get(b.id)?.rank ?? 999;
-      return ra - rb;
-    });
+    .sort((a, b) => (map.get(a.id)?.rank ?? 999) - (map.get(b.id)?.rank ?? 999));
 }
 
 // ---------- DiscoverScreen ----------
@@ -259,7 +283,8 @@ export function DiscoverScreen() {
   // --- INSEAD deck state ---
   const [cvDeck, setCvDeck] = useState<DeckCard[]>([]);
   const [cvTotal, setCvTotal] = useState(0);
-  const [cvLoading, setCvLoading] = useState(false);
+  const [cvLoading, setCvLoading] = useState(false); // full-screen skeleton — INITIAL load only
+  const [cvRefining, setCvRefining] = useState(false); // in-place refine reload (keeps deck+chat mounted)
   const [cvScoring, setCvScoring] = useState(false);
   const [cvError, setCvError] = useState<string | null>(null);
 
@@ -273,50 +298,51 @@ export function DiscoverScreen() {
 
   // ---------- INSEAD: fetch + score ----------
 
-  const fetchAndScoreCvDeck = useCallback(async (params: DirectoryParams = {}) => {
-    setCvLoading(true);
-    setCvError(null);
-    setCvDeck([]);
-    try {
-      const url = buildDirectoryUrl({ per_page: 24, ...params });
-      const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as ListDirectoryResponse;
-      if (json.error) throw new Error(json.error.message);
-      const items = json.data?.items ?? [];
-      setCvTotal(json.data?.total ?? items.length);
-      const cards = items.map(directoryToDeckCard);
-      setCvDeck(cards);
-      setCvLoading(false);
+  // Returns the number of results (so a refine can detect 0-match and not empty the deck).
+  const fetchAndScoreCvDeck = useCallback(
+    async (params: DirectoryParams = {}, opts: { refine?: boolean } = {}): Promise<number> => {
+      // Refine reloads update IN PLACE (keep the deck + chat mounted); only the
+      // very first load shows the full-screen skeleton.
+      if (opts.refine) setCvRefining(true);
+      else { setCvLoading(true); setCvDeck([]); }
+      setCvError(null);
+      try {
+        const url = buildDirectoryUrl({ per_page: 24, ...params });
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = (await res.json()) as ListDirectoryResponse;
+        if (json.error) throw new Error(json.error.message);
+        const items = json.data?.items ?? [];
+        const cards = items.map(directoryToDeckCard);
 
-      // Score in background
-      if (cards.length > 0) {
-        setCvScoring(true);
-        try {
-          const rankRes = await fetch("/api/directory/rank", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ directory_ids: cards.map((c) => c.id), top_n: cards.length }),
-          });
-          if (rankRes.ok) {
-            const rankJson = (await rankRes.json()) as RankDirectoryResponse;
-            if (rankJson.data?.rankings) {
-              setCvDeck((prev) => applyRankingToInsead(prev, rankJson.data!.rankings));
-            }
-          }
-        } catch {
-          // Graceful: keep unscored order
-        } finally {
+        // On a refine that matched nothing, KEEP the current deck (don't empty it).
+        if (opts.refine && cards.length === 0) {
+          setCvRefining(false);
+          return 0;
+        }
+        setCvTotal(json.data?.total ?? items.length);
+        setCvDeck(cards);
+        setCvLoading(false);
+        setCvRefining(false);
+
+        // Score the visible front of the deck (bounded + hard timeout — never hangs).
+        if (cards.length > 0) {
+          setCvScoring(true);
+          const ranks = await rankWithTimeout("/api/directory/rank", cards.map((c) => c.id), "directory_ids");
+          if (ranks) setCvDeck((prev) => applyRankByMap(prev, ranks));
           setCvScoring(false);
         }
+        return cards.length;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to load INSEAD directory";
+        if (opts.refine) { setCvRefining(false); return -1; } // keep current deck on refine error
+        setCvError(msg);
+        setCvLoading(false);
+        return -1;
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to load INSEAD directory";
-      setCvError(msg);
-      setCvLoading(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   // ---------- LinkedIn: fetch + score ----------
 
@@ -337,27 +363,12 @@ export function DiscoverScreen() {
       setLiveDeck(cards);
       setLiveLoading(false);
 
-      // Score in background
+      // Score the visible front of the deck (bounded + hard timeout).
       if (cards.length > 0) {
         setLiveScoring(true);
-        try {
-          const rankRes = await fetch("/api/ai/rank-batch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ contact_ids: cards.map((c) => c.id), top_n: cards.length }),
-          });
-          if (rankRes.ok) {
-            const rankJson = (await rankRes.json()) as RankBatchResponse;
-            if (rankJson.data?.rankings) {
-              setLiveDeck((prev) => applyRankingToLinkedIn(prev, rankJson.data!.rankings));
-            }
-          }
-        } catch {
-          // Graceful: keep unscored order
-        } finally {
-          setLiveScoring(false);
-        }
+        const ranks = await rankWithTimeout("/api/ai/rank-batch", cards.map((c) => c.id), "contact_ids");
+        if (ranks) setLiveDeck((prev) => applyRankByMap(prev, ranks));
+        setLiveScoring(false);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load contacts";
@@ -415,20 +426,18 @@ export function DiscoverScreen() {
 
   const handleCvRefine = useCallback(async (text: string): Promise<string> => {
     const params = parseInseadInstruction(text);
-    // Build a human-readable description of what we're doing
-    let replyText = "Refining the queue…";
-    if (params.cohort) replyText = `Filtering to cohort ${params.cohort.toUpperCase()}.`;
-    else if (params.industry) replyText = `Filtering by industry: ${params.industry}.`;
-    else if (params.geo) replyText = `Narrowing to ${params.geo}-based alumni only.`;
-    else if (params.company) replyText = `Filtering by company: ${params.company}.`;
-    else if (params.search) replyText = `Searching the directory for "${params.search}".`;
+    const what = params.cohort
+      ? `cohort ${params.cohort.toUpperCase()}`
+      : params.industry
+        ? params.industry.split(",")[0]
+        : params.company
+          ? params.company
+          : params.search ?? "that";
 
-    try {
-      await fetchAndScoreCvDeck(params);
-      return `${replyText} Deck updated — swipe through the new results.`;
-    } catch {
-      return `${replyText} Something went wrong fetching results — the deck may be unchanged.`;
-    }
+    const n = await fetchAndScoreCvDeck(params, { refine: true });
+    if (n === 0) return `No INSEAD alumni matched ${what}. Keeping the current queue — try another angle (e.g. "consulting", "VC", "Paris").`;
+    if (n < 0) return `Couldn't reach the directory just now — the queue is unchanged. Try again in a moment.`;
+    return `Filtered to ${what} — ${n} alumni in the queue, strongest matches first.`;
   }, [fetchAndScoreCvDeck]);
 
   // ---------- LinkedIn: save / skip ----------
@@ -502,36 +511,20 @@ export function DiscoverScreen() {
       filterLabel = "Product Manager roles";
     }
 
-    // If filter narrows things, use filtered; otherwise fall back to full deck
-    const base = filtered.length > 0 ? filtered : allCards;
-
-    // Re-rank the filtered set
-    if (base.length > 0) {
-      try {
-        const rankRes = await fetch("/api/ai/rank-batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ contact_ids: base.map((c) => c.id), top_n: base.length }),
-        });
-        if (rankRes.ok) {
-          const rankJson = (await rankRes.json()) as RankBatchResponse;
-          if (rankJson.data?.rankings) {
-            const reranked = applyRankingToLinkedIn(base, rankJson.data.rankings);
-            setLiveDeck(reranked);
-            const label = filterLabel ? `${filterLabel} (${reranked.length} leads)` : `Re-ranked ${reranked.length} leads`;
-            return `${label} — deck updated, strongest matches are at the top.`;
-          }
-        }
-      } catch {
-        // Graceful: just apply client filter without re-rank
-      }
-      setLiveDeck(base);
-      const label = filterLabel ? `${filterLabel} (${base.length} leads)` : `Refined to ${base.length} leads`;
-      return `${label} — deck updated.`;
+    // Honesty: if a filter was applied but matched nothing, say so and keep the
+    // current deck (don't silently fall back to the full set with a fake count).
+    if (filterLabel && filtered.length === 0) {
+      return `No connections matched "${filterLabel}". Keeping the current deck — try another keyword.`;
     }
 
-    return "No matching contacts found for that filter. Try a different keyword or clear the filter.";
+    const base = filtered;
+    setLiveScoring(true);
+    const ranks = await rankWithTimeout("/api/ai/rank-batch", base.map((c) => c.id), "contact_ids");
+    setLiveScoring(false);
+    const reranked = ranks ? applyRankByMap(base, ranks) : base;
+    setLiveDeck(reranked);
+    const label = filterLabel ? `${filterLabel} (${reranked.length} leads)` : `Re-ranked ${reranked.length} leads`;
+    return `${label} — deck updated, strongest matches first.`;
   }, [liveDeck]);
 
   // ---------- Render: INSEAD tinder ----------
@@ -543,7 +536,7 @@ export function DiscoverScreen() {
       <TinderView
         channel="cv"
         deck={cvDeck}
-        scoring={cvScoring}
+        scoring={cvScoring || cvRefining}
         totalCount={cvTotal}
         onBack={backToDoors}
         onSave={handleCvSave}

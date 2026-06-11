@@ -181,11 +181,13 @@ function buildBatchRankPrompt(input: BatchRankInput): string {
       `Current role: ${p.current_title ?? "Unknown"} at ${p.company ?? "Unknown"}`,
       `Location: ${p.location ?? "Unknown"}`,
     ];
+    // Trim to the most-recent few entries — full histories blow up the prompt
+    // + output and push the call past the serverless timeout on larger batches.
     if (p.career_history?.length) {
-      lines.push(`Career: ${JSON.stringify(p.career_history)}`);
+      lines.push(`Career: ${JSON.stringify(p.career_history.slice(0, 3))}`);
     }
     if (p.education?.length) {
-      lines.push(`Education: ${JSON.stringify(p.education)}`);
+      lines.push(`Education: ${JSON.stringify(p.education.slice(0, 2))}`);
     }
     return lines.join("\n");
   });
