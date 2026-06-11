@@ -2,51 +2,81 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+// ---------------------------------------------------------------------------
+// Payload types — match exactly what the extension emits via auth-bridge.ts
+// ---------------------------------------------------------------------------
+
+/**
+ * Emitted repeatedly as the sync progresses.
+ * phase 1 = finding connections (connections_imported / total_connections)
+ * phase 2 = enriching profiles  (profiles_enriched   / total_connections)
+ */
 export interface SyncProgressPayload {
-  jobId: string;
-  phase: "list" | "batch" | "done";
-  processedContacts: number;
-  totalContacts: number;
-  lastCompletedPage: number;
+  sync_job_id: string;
+  status: string;
+  phase: 1 | 2;
+  connections_imported: number;
+  profiles_enriched: number;
+  /** null until Phase 1 finishes and we know the full list size */
+  total_connections: number | null;
+  cap_hit: boolean;
 }
 
+/** Emitted once when both phases are done. */
 export interface SyncCompletePayload {
-  jobId: string;
-  total: number;
-  capHit: boolean;
+  sync_job_id: string;
+  connections_imported: number;
+  profiles_enriched: number;
+  total_connections: number | null;
+  cap_hit: boolean;
 }
 
+/** Emitted if the extension encounters a fatal error. */
 export interface SyncFailedPayload {
-  jobId: string;
-  error: string;
+  sync_job_id: string | null;
+  reason: string;
 }
 
-export interface SyncPausedPayload {
-  jobId: string;
-  reason: "rate_limit" | "user_aborted";
-  resumeAt?: string;
-}
+// ---------------------------------------------------------------------------
+// Internal union — all inbound message shapes
+// ---------------------------------------------------------------------------
 
 type ExtensionMessage =
-  | { source: "WARMLY_EXTENSION"; type: "SYNC_STATUS_RESPONSE"; payload: { installed: true; linkedinLoggedIn: boolean; currentJobId?: string } }
+  | {
+      source: "WARMLY_EXTENSION";
+      type: "SYNC_STATUS_RESPONSE";
+      payload: { installed: true; linkedinLoggedIn: boolean; currentJobId?: string };
+    }
   | { source: "WARMLY_EXTENSION"; type: "SYNC_PROGRESS"; payload: SyncProgressPayload }
   | { source: "WARMLY_EXTENSION"; type: "SYNC_COMPLETE"; payload: SyncCompletePayload }
-  | { source: "WARMLY_EXTENSION"; type: "SYNC_FAILED"; payload: SyncFailedPayload }
-  | { source: "WARMLY_EXTENSION"; type: "SYNC_PAUSED"; payload: SyncPausedPayload };
+  | { source: "WARMLY_EXTENSION"; type: "SYNC_FAILED"; payload: SyncFailedPayload };
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export interface StartSyncArgs {
+  user_id: string;
+  sync_job_id: string;
+}
 
 export interface ExtensionBridgeState {
   installed: boolean | null;
   linkedinLoggedIn: boolean | null;
   currentJobId: string | null;
-  startSync: () => void;
+  /** Posts START_NETWORK_SYNC with the required user_id + sync_job_id. */
+  startSync: (args: StartSyncArgs) => void;
   recheck: () => void;
   lastProgress: SyncProgressPayload | null;
   syncComplete: SyncCompletePayload | null;
   syncFailed: SyncFailedPayload | null;
-  syncPaused: SyncPausedPayload | null;
 }
 
 const DETECTION_TIMEOUT_MS = 2000;
+
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
 
 export function useExtensionBridge(): ExtensionBridgeState {
   const [installed, setInstalled] = useState<boolean | null>(null);
@@ -55,23 +85,22 @@ export function useExtensionBridge(): ExtensionBridgeState {
   const [lastProgress, setLastProgress] = useState<SyncProgressPayload | null>(null);
   const [syncComplete, setSyncComplete] = useState<SyncCompletePayload | null>(null);
   const [syncFailed, setSyncFailed] = useState<SyncFailedPayload | null>(null);
-  const [syncPaused, setSyncPaused] = useState<SyncPausedPayload | null>(null);
   const detectedRef = useRef(false);
 
-  const sendToExtension = useCallback((type: string) => {
-    window.postMessage({ source: "WARMLY_WEBAPP", type }, "*");
-  }, []);
+  // ---- Detection -----------------------------------------------------------
 
   const fireDetection = useCallback(() => {
     detectedRef.current = false;
-    sendToExtension("SYNC_STATUS_REQUEST");
+    window.postMessage({ source: "WARMLY_WEBAPP", type: "SYNC_STATUS_REQUEST" }, "*");
     return window.setTimeout(() => {
       if (!detectedRef.current) {
         setInstalled(false);
         setLinkedinLoggedIn(null);
       }
     }, DETECTION_TIMEOUT_MS);
-  }, [sendToExtension]);
+  }, []);
+
+  // ---- Inbound listener ----------------------------------------------------
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -86,17 +115,14 @@ export function useExtensionBridge(): ExtensionBridgeState {
           break;
         case "SYNC_PROGRESS":
           setLastProgress(msg.payload);
-          setCurrentJobId(msg.payload.jobId);
+          setCurrentJobId(msg.payload.sync_job_id);
           break;
         case "SYNC_COMPLETE":
           setSyncComplete(msg.payload);
-          setCurrentJobId(msg.payload.jobId);
+          setCurrentJobId(msg.payload.sync_job_id);
           break;
         case "SYNC_FAILED":
           setSyncFailed(msg.payload);
-          break;
-        case "SYNC_PAUSED":
-          setSyncPaused(msg.payload);
           break;
       }
     }
@@ -104,12 +130,26 @@ export function useExtensionBridge(): ExtensionBridgeState {
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
+  // ---- Initial detection on mount ------------------------------------------
+
   useEffect(() => {
     const timer = fireDetection();
     return () => window.clearTimeout(timer);
   }, [fireDetection]);
 
-  const startSync = useCallback(() => sendToExtension("START_NETWORK_SYNC"), [sendToExtension]);
+  // ---- Outbound actions ----------------------------------------------------
+
+  /**
+   * Posts START_NETWORK_SYNC with the required payload.
+   * The auth-bridge requires payload.user_id; the service worker also needs
+   * payload.sync_job_id to resume correctly.
+   */
+  const startSync = useCallback((args: StartSyncArgs) => {
+    window.postMessage(
+      { source: "WARMLY_WEBAPP", type: "START_NETWORK_SYNC", payload: args },
+      "*"
+    );
+  }, []);
 
   const recheck = useCallback(() => {
     setInstalled(null);
@@ -117,5 +157,14 @@ export function useExtensionBridge(): ExtensionBridgeState {
     fireDetection();
   }, [fireDetection]);
 
-  return { installed, linkedinLoggedIn, currentJobId, startSync, recheck, lastProgress, syncComplete, syncFailed, syncPaused };
+  return {
+    installed,
+    linkedinLoggedIn,
+    currentJobId,
+    startSync,
+    recheck,
+    lastProgress,
+    syncComplete,
+    syncFailed,
+  };
 }
