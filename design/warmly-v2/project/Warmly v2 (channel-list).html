@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Warmly</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cream: '#f4ede0',
+            sunk: '#ece2d0',
+            ink: '#1f1b16',
+            'ink-2': '#3d352c',
+            'ink-3': '#6b5e4a',
+            'ink-4': '#8e8170',
+            sienna: '#b87a4a',
+            'sienna-soft': '#f3e2cd',
+            'sienna-ink': '#7a4a25',
+            success: '#5e8d6a',
+            'success-soft': '#dcebd9',
+            'success-ink': '#34553e',
+            warning: '#c8923a',
+            'warning-soft': '#f6e7c5',
+            'warning-ink': '#7a521a',
+            danger: '#c25c4a',
+            line: '#cdbf9f',
+            'line-soft': '#d9cdb4',
+            sidebar: '#1f1b16',
+          },
+          fontFamily: {
+            serif: ['"Instrument Serif"', 'serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+          },
+          boxShadow: {
+            card: '0 1px 0 rgba(31,27,22,0.04), 0 2px 8px rgba(31,27,22,0.04)',
+            cardHover: '0 1px 0 rgba(31,27,22,0.04), 0 6px 20px rgba(31,27,22,0.08)',
+            pop: '0 8px 28px rgba(31,27,22,0.12)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    html, body, #root { height: 100%; }
+    body {
+      font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      background: #f4ede0;
+      color: #1f1b16;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    .font-serif-i { font-family: 'Instrument Serif', serif; font-style: italic; }
+    .font-mono-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    /* shimmer for draft generation */
+    @keyframes shimmer {
+      0% { background-position: -400px 0; }
+      100% { background-position: 400px 0; }
+    }
+    .shimmering {
+      background: linear-gradient(90deg, rgba(184,122,74,0.06) 0%, rgba(184,122,74,0.18) 40%, rgba(184,122,74,0.06) 80%);
+      background-size: 800px 100%;
+      animation: shimmer 1.1s linear infinite;
+    }
+    @keyframes pulseDot {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.25); opacity: 0.65; }
+    }
+    .pulse-dot { animation: pulseDot 1.6s ease-in-out infinite; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeIn 200ms ease-out both; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-up { animation: fadeUp 280ms ease-out both; }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .toast-in { animation: toastIn 200ms ease-out both; }
+    /* card hover */
+    .card-hover { transition: transform 240ms ease, box-shadow 240ms ease; }
+    .card-hover:hover { transform: scale(1.02); }
+    /* native scrollbar styling */
+    .scroll-area::-webkit-scrollbar { width: 10px; }
+    .scroll-area::-webkit-scrollbar-thumb { background: #d9cdb4; border-radius: 999px; }
+    .scroll-area::-webkit-scrollbar-track { background: transparent; }
+    /* range placeholder */
+    .placeholder-stripes {
+      background-image: repeating-linear-gradient(45deg, rgba(184,122,74,0.08) 0 8px, rgba(184,122,74,0.02) 8px 16px);
+    }
+    /* status dots */
+    .dot { width: 7px; height: 7px; border-radius: 999px; display: inline-block; }
+    /* focus ring */
+    .focus-ring:focus { outline: none; box-shadow: 0 0 0 3px rgba(184,122,74,0.25); }
+    /* checkbox marks */
+    .radio-outer {
+      width: 16px; height: 16px; border-radius: 999px; border: 1.5px solid #cdbf9f;
+      display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0; transition: border-color 150ms ease, background 150ms ease;
+    }
+    .radio-outer.checked { border-color: #b87a4a; }
+    .radio-outer.checked::after { content: ''; width: 8px; height: 8px; border-radius: 999px; background: #b87a4a; }
+    /* line clamp */
+    .clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    /* draft-textarea swap */
+    .draft-swap-out { opacity: 0; transition: opacity 220ms ease; }
+    .draft-swap-in { opacity: 1; transition: opacity 320ms ease; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="js/icons.jsx"></script>
+  <script type="text/babel" src="js/data.jsx"></script>
+  <script type="text/babel" src="js/shared.jsx"></script>
+  <script type="text/babel" src="js/tweaks-panel.jsx"></script>
+  <script type="text/babel" src="js/screens/auth.jsx"></script>
+  <script type="text/babel" src="js/screens/onboarding.jsx"></script>
+  <script type="text/babel" src="js/screens/home.jsx"></script>
+  <script type="text/babel" src="js/screens/discover.jsx"></script>
+  <script type="text/babel" src="js/screens/contact-detail.jsx"></script>
+  <script type="text/babel" src="js/screens/draft-editor.jsx"></script>
+  <script type="text/babel" src="js/screens/contacts.jsx"></script>
+  <script type="text/babel" src="js/screens/settings.jsx"></script>
+  <script type="text/babel" src="js/app.jsx"></script>
+</body>
+</html>

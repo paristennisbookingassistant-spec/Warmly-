@@ -1,0 +1,512 @@
+// Discover screen, two-channel sourcing: INSEAD CV books + Peer LinkedIn networks
+
+// ---------- Channel attribution ----------
+// In production this would live on each contact record. Mocked here so the
+// page can clearly demonstrate the two discovery channels.
+const SOURCE_MAP = {
+  anna:    { source: 'cv-book' },
+  mathieu: { source: 'cv-book' },
+  yuxuan:  { source: 'cv-book' },
+  sofia:   { source: 'cv-book' },
+  paul:    { source: 'linkedin', via: { id: 'mathieu', name: 'Mathieu Lefèvre', short: 'Mathieu', avatar: 'https://i.pravatar.cc/200?u=warmly-seed-2', degree: '2nd' } },
+  ugo:     { source: 'linkedin', via: { id: 'yuxuan',  name: 'Yuxuan Chen',     short: 'Yuxuan',  avatar: 'https://i.pravatar.cc/200?u=warmly-seed-3', degree: '2nd' } },
+  karim:   { source: 'linkedin', via: { id: 'anna',    name: 'Anna Schmidt',    short: 'Anna',    avatar: 'https://i.pravatar.cc/200?u=warmly-seed-1', degree: '2nd' } },
+  elena:   { source: 'linkedin', via: { id: 'anna',    name: 'Anna Schmidt',    short: 'Anna',    avatar: 'https://i.pravatar.cc/200?u=warmly-seed-1', degree: '2nd' } },
+};
+
+// Channel palette, kept inside the warm system, with a cool steel for the
+// LinkedIn channel so the two are instantly distinguishable.
+const CH = {
+  cv: {
+    label: 'INSEAD CV books',
+    accent: '#b87a4a',
+    soft: '#f3e2cd',
+    ink: '#7a4a25',
+    tint: 'rgba(184,122,74,0.10)',
+  },
+  linkedin: {
+    label: 'Peer LinkedIn networks',
+    accent: '#4a6f87',
+    soft: '#dde6ee',
+    ink: '#2f4d63',
+    tint: 'rgba(74,111,135,0.10)',
+  },
+};
+
+function DiscoverScreen({ contacts, onOpenContact, onSearch, showInviteBanner = true }) {
+  const { Chip, Btn, TextInput } = Shared;
+  const [filters, setFilters] = useState(['Parloa', 'Paris', 'Strategy']);
+  const [search, setSearch] = useState('');
+  const [channel, setChannel] = useState('all'); // 'all' | 'cv' | 'linkedin'
+
+  const tierOrder = { Strong: 0, Good: 1, Adjacent: 2 };
+  const enriched = contacts
+    .filter(c => c.status !== 'Archived')
+    .map(c => ({ ...c, ...(SOURCE_MAP[c.id] || { source: 'cv-book' }) }))
+    .sort((a, b) => tierOrder[a.tier] - tierOrder[b.tier]);
+
+  const cvList = enriched.filter(c => c.source === 'cv-book');
+  const liList = enriched.filter(c => c.source === 'linkedin');
+
+  // Distinct peers whose network surfaced LinkedIn matches
+  const peerMap = {};
+  liList.forEach(c => { if (c.via) peerMap[c.via.id] = c.via; });
+  const syncedPeers = Object.values(peerMap);
+
+  return (
+    <div className="px-12 pt-12 pb-16 max-w-[1200px] mx-auto">
+      {/* ----- Header ----- */}
+      <div className="mb-8 fade-up">
+        <h1 className="text-[36px] leading-[1.05] font-serif-i text-ink mb-2">Discover</h1>
+        <p className="text-[15px] text-ink-3 max-w-[640px]">
+          Your coach surfaces leads from two channels, the official INSEAD CV books, and the LinkedIn networks of peers who&apos;ve synced their connections.
+        </p>
+      </div>
+
+      {/* ----- Channel summary tiles ----- */}
+      <div className="grid grid-cols-2 gap-5 mb-7 fade-up" style={{ animationDelay: '40ms' }}>
+        <ChannelTile
+          channel="cv"
+          icon={Icon.Book}
+          count={cvList.length}
+          headline="Indexed straight from the INSEAD CV books, vetted alumni, verified class & employer."
+          meta={[
+            { label: 'Source', value: 'INSEAD alumni CV book · MBA + MIM' },
+            { label: 'Refreshed', value: '2 hours ago' },
+          ]}
+          status="Connected"
+          active={channel === 'cv'}
+          dim={channel === 'linkedin'}
+          onClick={() => setChannel(channel === 'cv' ? 'all' : 'cv')}
+        />
+        <ChannelTile
+          channel="linkedin"
+          icon={Icon.Network}
+          count={liList.length}
+          countSuffix={syncedPeers.length > 0 ? `via ${syncedPeers.length} peers` : null}
+          headline="2nd-degree intros discovered in the LinkedIn networks of classmates who&apos;ve synced."
+          meta={[
+            { label: 'Peers synced', value: `${syncedPeers.length} of your INSEAD class` },
+            { label: 'How', value: 'Warmly Chrome extension' },
+          ]}
+          status={syncedPeers.length > 0 ? `${syncedPeers.length} peers contributing` : 'No peers yet'}
+          peers={syncedPeers}
+          active={channel === 'linkedin'}
+          dim={channel === 'cv'}
+          onClick={() => setChannel(channel === 'linkedin' ? 'all' : 'linkedin')}
+        />
+      </div>
+
+      {/* ----- Segmented filter ----- */}
+      <div className="flex items-center justify-between mb-7">
+        <SegBar
+          value={channel}
+          onChange={setChannel}
+          options={[
+            { value: 'all',      label: 'All sources', count: enriched.length },
+            { value: 'cv',       label: 'CV books',    count: cvList.length,   dot: CH.cv.accent },
+            { value: 'linkedin', label: 'Peer network', count: liList.length,  dot: CH.linkedin.accent },
+          ]}
+        />
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <span className="font-mono-tag text-ink-4 mr-1">Filter</span>
+          {filters.map(f => (
+            <Chip key={f} variant="selected" removable onRemove={() => setFilters(filters.filter(x => x !== f))}>{f}</Chip>
+          ))}
+          <Chip variant="add">+ Add</Chip>
+        </div>
+      </div>
+
+      {/* ----- Results ----- */}
+      {(channel === 'all' || channel === 'cv') && (
+        <ChannelSection
+          channel="cv"
+          icon={Icon.Book}
+          title="INSEAD CV books"
+          subtitle="Vetted alumni indexed from the official MBA & MIM CV books."
+          list={cvList}
+          onOpenContact={onOpenContact}
+          collapsed={channel === 'all'}
+        />
+      )}
+
+      {(channel === 'all' || channel === 'linkedin') && (
+        <ChannelSection
+          channel="linkedin"
+          icon={Icon.Network}
+          title="Peer LinkedIn networks"
+          subtitle={syncedPeers.length > 0
+            ? `Second-degree intros surfaced from ${syncedPeers.map(p => p.short).join(' · ')}.`
+            : `Invite peers to sync their LinkedIn, second-degree intros will start showing up here.`}
+          list={liList}
+          onOpenContact={onOpenContact}
+          collapsed={channel === 'all'}
+          emptyHint={liList.length === 0}
+        />
+      )}
+
+      {/* ----- Ad-hoc search ----- */}
+      <div className="mt-2 mb-8">
+        <div className="font-mono-tag text-ink-3 mb-3">Or search a new target across both channels</div>
+        <div className="flex items-stretch gap-2 max-w-[520px]">
+          <TextInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Company, role, city, or keyword"
+            icon={Icon.Search}
+            className="flex-1"
+          />
+          <Btn onClick={() => onSearch && onSearch(search)}>Search</Btn>
+        </div>
+      </div>
+
+      {/* ----- Invite peers, network compounding ----- */}
+      {showInviteBanner && (
+        <InvitePeersBanner peers={syncedPeers} />
+      )}
+    </div>
+  );
+}
+
+// ---------- Channel summary tile ----------
+function ChannelTile({ channel, icon: I, count, countSuffix, headline, meta, status, peers, active, dim, onClick }) {
+  const c = CH[channel];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-left rounded-2xl p-5 transition-all duration-200 relative overflow-hidden"
+      style={{
+        background: '#ffffff',
+        border: `1px solid ${active ? c.accent : '#e5d8be'}`,
+        boxShadow: active
+          ? `0 0 0 1px ${c.accent} inset, 0 8px 22px ${c.tint}`
+          : '0 1px 0 rgba(31,27,22,0.04), 0 2px 8px rgba(31,27,22,0.03)',
+        opacity: dim ? 0.62 : 1,
+      }}
+    >
+      {/* Top accent stripe */}
+      <div
+        className="absolute top-0 left-0 right-0"
+        style={{ height: 3, background: c.accent, opacity: active ? 1 : 0.85 }}
+      />
+
+      <div className="flex items-start gap-3 mb-4 pt-1">
+        <div
+          className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: c.soft, color: c.accent }}
+        >
+          <I size={18} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <div
+              className="font-mono-tag"
+              style={{ color: c.accent }}
+            >
+              {channel === 'cv' ? 'Channel · primary' : 'Channel · network'}
+            </div>
+            <span
+              className="dot"
+              style={{ background: active || !dim ? '#5e8d6a' : '#cdbf9f' }}
+            />
+            <span className="text-[11px] text-ink-3">{status}</span>
+          </div>
+          <div className="text-[16px] font-semibold text-ink mt-1 leading-tight">
+            {c.label}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-baseline gap-2 mb-3">
+        <div
+          className="font-serif-i leading-none"
+          style={{ fontSize: 44, color: c.ink }}
+        >
+          {count}
+        </div>
+        <div className="text-[13px] text-ink-3 pb-1">
+          {count === 1 ? 'match' : 'matches'}
+          {countSuffix ? <span className="text-ink-4"> · {countSuffix}</span> : null}
+        </div>
+      </div>
+
+      <p className="text-[13px] text-ink-2 leading-relaxed mb-4" dangerouslySetInnerHTML={{ __html: headline }} />
+
+      {/* Peers row for LinkedIn tile */}
+      {channel === 'linkedin' && peers && peers.length > 0 && (
+        <div className="flex items-center gap-2 mb-4">
+          <div className="flex -space-x-2">
+            {peers.slice(0, 5).map(p => (
+              <img
+                key={p.id}
+                src={p.avatar}
+                alt=""
+                className="w-7 h-7 rounded-full border-2 object-cover"
+                style={{ borderColor: '#ffffff' }}
+                title={p.name}
+              />
+            ))}
+          </div>
+          <span className="text-[12px] text-ink-3">
+            {peers.map(p => p.short).join(', ')} synced their LinkedIn
+          </span>
+        </div>
+      )}
+
+      <div
+        className="flex items-center justify-between pt-3 border-t text-[11.5px] text-ink-4"
+        style={{ borderColor: '#ece2d0' }}
+      >
+        <div className="flex flex-col gap-0.5">
+          {meta.map(m => (
+            <div key={m.label} className="flex items-center gap-2">
+              <span className="font-mono-tag" style={{ fontSize: 9.5 }}>{m.label}</span>
+              <span className="text-ink-3">{m.value}</span>
+            </div>
+          ))}
+        </div>
+        <span
+          className="inline-flex items-center gap-1 text-[12px] font-medium"
+          style={{ color: c.ink }}
+        >
+          {active ? 'Showing this' : 'Focus this'}
+          <Icon.ArrowRight size={13} />
+        </span>
+      </div>
+    </button>
+  );
+}
+
+// ---------- Segmented bar ----------
+function SegBar({ value, onChange, options }) {
+  return (
+    <div
+      className="inline-flex p-1 rounded-lg border"
+      style={{ borderColor: '#d9cdb4', background: '#ffffff' }}
+    >
+      {options.map(o => {
+        const active = value === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onChange(o.value)}
+            className="px-3 h-8 rounded-md inline-flex items-center gap-2 text-[12.5px] font-medium transition-colors"
+            style={{
+              background: active ? '#1f1b16' : 'transparent',
+              color: active ? '#f4ede0' : '#3d352c',
+            }}
+          >
+            {o.dot && (
+              <span
+                className="dot"
+                style={{ background: active ? '#f4ede0' : o.dot, opacity: active ? 0.9 : 1 }}
+              />
+            )}
+            <span>{o.label}</span>
+            <span
+              className="text-[11px]"
+              style={{ color: active ? 'rgba(244,237,224,0.65)' : '#8e8170' }}
+            >
+              {o.count}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------- Channel section ----------
+function ChannelSection({ channel, icon: I, title, subtitle, list, onOpenContact, collapsed, emptyHint }) {
+  const c = CH[channel];
+  return (
+    <section className="mb-10">
+      <div className="flex items-center gap-3 mb-4">
+        <div
+          className="w-7 h-7 rounded-md flex items-center justify-center"
+          style={{ background: c.soft, color: c.accent }}
+        >
+          <I size={14} />
+        </div>
+        <h2 className="text-[15px] font-semibold text-ink leading-none">{title}</h2>
+        <span
+          className="inline-flex items-center px-2 h-[20px] rounded-full text-[10.5px] font-medium"
+          style={{ background: c.soft, color: c.ink, fontFamily: '"JetBrains Mono", monospace', letterSpacing: '0.06em' }}
+        >
+          {list.length} {list.length === 1 ? 'MATCH' : 'MATCHES'}
+        </span>
+        <div className="flex-1 h-px ml-2" style={{ background: '#e5d8be' }} />
+      </div>
+      <p className="text-[13px] text-ink-3 mb-5 max-w-[640px]">{subtitle}</p>
+
+      {list.length === 0 ? (
+        <EmptyChannel channel={channel} />
+      ) : (
+        <div className="grid grid-cols-3 gap-5">
+          {list.map((c, idx) => (
+            <ContactCard key={c.id} contact={c} onClick={() => onOpenContact(c.id)} idx={idx} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function EmptyChannel({ channel }) {
+  if (channel === 'linkedin') {
+    return (
+      <div
+        className="rounded-2xl border placeholder-stripes px-6 py-10 text-center"
+        style={{ borderColor: '#d9cdb4' }}
+      >
+        <div
+          className="w-12 h-12 rounded-full mx-auto mb-3 flex items-center justify-center"
+          style={{ background: CH.linkedin.soft, color: CH.linkedin.accent }}
+        >
+          <Icon.Network size={20} />
+        </div>
+        <div className="text-[14px] font-semibold text-ink mb-1">No peers synced yet</div>
+        <div className="text-[12.5px] text-ink-3 max-w-[420px] mx-auto">
+          Install the Warmly Chrome extension on a classmate&apos;s LinkedIn to surface 2nd-degree intros into their network.
+        </div>
+      </div>
+    );
+  }
+  return null;
+}
+
+// ---------- Contact card with source attribution ----------
+function ContactCard({ contact: c, onClick, idx }) {
+  const { Avatar, TierBadge, InseadPill } = Shared;
+  const isLinkedIn = c.source === 'linkedin';
+  const palette = isLinkedIn ? CH.linkedin : CH.cv;
+
+  return (
+    <div
+      onClick={onClick}
+      className="bg-white border rounded-2xl card-hover cursor-pointer fade-up overflow-hidden"
+      style={{
+        borderColor: '#e5d8be',
+        boxShadow: '0 1px 0 rgba(31,27,22,0.04), 0 2px 8px rgba(31,27,22,0.03)',
+        animationDelay: `${idx * 30}ms`,
+      }}
+    >
+      {/* Source ribbon */}
+      <div
+        className="flex items-center gap-2 px-4 py-2 border-b"
+        style={{ background: palette.soft, borderColor: `${palette.accent}33` }}
+      >
+        {isLinkedIn ? (
+          <>
+            <img
+              src={c.via.avatar}
+              alt=""
+              className="w-5 h-5 rounded-full object-cover flex-shrink-0"
+            />
+            <div
+              className="text-[11.5px] leading-tight min-w-0 flex-1 truncate"
+              style={{ color: palette.ink }}
+            >
+              via <span className="font-semibold">{c.via.name}</span>
+            </div>
+            <span
+              className="text-[10px] font-medium px-1.5 h-[16px] inline-flex items-center rounded-sm"
+              style={{ background: '#ffffff', color: palette.ink, fontFamily: '"JetBrains Mono", monospace' }}
+              title="Second-degree connection"
+            >
+              {c.via.degree}
+            </span>
+          </>
+        ) : (
+          <>
+            <Icon.Book size={12} className="flex-shrink-0" style={{ color: palette.accent }} />
+            <div
+              className="text-[11.5px] leading-tight"
+              style={{ color: palette.ink }}
+            >
+              From <span className="font-semibold">INSEAD CV book</span>
+            </div>
+            <span
+              className="ml-auto text-[10px] font-medium px-1.5 h-[16px] inline-flex items-center rounded-sm"
+              style={{ background: '#ffffff', color: palette.ink, fontFamily: '"JetBrains Mono", monospace' }}
+            >
+              1st
+            </span>
+          </>
+        )}
+      </div>
+
+      {/* Body */}
+      <div className="p-5">
+        <div className="flex items-start gap-3 mb-3">
+          <Avatar src={c.avatar} size={44} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[14.5px] font-semibold text-ink leading-tight truncate">{c.name}</div>
+            <div className="text-[12.5px] text-ink-3 mt-0.5 truncate">{c.role} · {c.company}</div>
+            <div className="text-[11.5px] text-ink-4 mt-0.5">{c.location}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 mb-3">
+          <InseadPill>{c.inseadShort}</InseadPill>
+          <TierBadge tier={c.tier} />
+        </div>
+        <p className="text-[12.5px] text-ink-2 leading-relaxed italic clamp-3" style={{ minHeight: 54 }}>
+          &ldquo;{c.short}&rdquo;
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Invite peers banner ----------
+function InvitePeersBanner({ peers }) {
+  const total = 87; // mocked: total INSEAD peers in user's class
+  const synced = peers.length;
+  const pct = Math.round((synced / total) * 100);
+  return (
+    <div
+      className="rounded-2xl border p-5"
+      style={{ borderColor: CH.linkedin.accent + '40', background: '#ffffff' }}
+    >
+      <div className="flex items-start gap-4">
+        <div
+          className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: CH.linkedin.soft, color: CH.linkedin.accent }}
+        >
+          <Icon.Sparkles size={18} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="font-mono-tag" style={{ color: CH.linkedin.accent }}>Network compounding</div>
+          </div>
+          <div className="text-[14px] font-semibold text-ink mb-1">
+            {synced} of {total} INSEAD 26D peers have synced their LinkedIn.
+          </div>
+          <div className="text-[12.5px] text-ink-3 max-w-[540px]">
+            Every peer who syncs adds their entire 2nd-degree network to your discovery pool. The more peers join, the warmer your intros become.
+          </div>
+
+          {/* Progress bar */}
+          <div className="mt-3 mb-1 h-1.5 rounded-full overflow-hidden" style={{ background: '#ece2d0' }}>
+            <div className="h-full" style={{ width: `${Math.max(pct, 2)}%`, background: CH.linkedin.accent }} />
+          </div>
+          <div className="flex items-center justify-between text-[11px] text-ink-4">
+            <span>{pct}% of class synced</span>
+            <span>{total - synced} peers to invite</span>
+          </div>
+        </div>
+        <button
+          className="inline-flex items-center gap-1.5 px-4 h-10 rounded-lg text-[13px] font-medium flex-shrink-0 transition-colors"
+          style={{ background: CH.linkedin.accent, color: '#ffffff' }}
+        >
+          Invite peers
+          <Icon.ArrowRight size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+window.DiscoverScreen = DiscoverScreen;
