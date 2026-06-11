@@ -92,10 +92,11 @@ short design/schema spike first. Consent is **explicit opt-in** (decided).
 **Phase 5, Meeting synthesis + CRM.** (a) Wire meeting synthesis: a "Save & synthesize"
 action POSTing raw notes to `/api/ai/generate {artifact_type:"meeting_notes"}` → a
 structured artifact on the contact's timeline (type already exists). (b) CRM/relationship
-maintenance, **research-first**: a dedicated proposal (category taxonomy, per-category
-cadence, schema additions like `contacts.relationship_category` + `cadence_days` +
-`next_touch_at`, a low-friction classification UX reusing the swipe deck + Today view,
-AI auto-categorize + due-message drafting). Build only after the proposal is approved.
+maintenance, **research-first**: the proposal is written, see `docs/CRM_PROPOSAL.md`
+(6 job-search categories; cadence inherits from category, overridable; 3 schema columns
+`relationship_category`/`cadence_days`/`next_touch_at`; **AI-suggest + one-tap-confirm**
+classification, swipe-deck only as bulk-triage; reuse the Today/contacts surfaces + the
+`follow_up_draft` engine; capped daily "due" list). Build only after Liyang approves it.
 
 **Cross-cutting (low effort):** domain wiring for `thewarmly.com`, env
 `NEXT_PUBLIC_APP_URL`, Supabase redirect URLs, extension manifest + `auth-bridge`
