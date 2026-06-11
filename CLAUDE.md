@@ -1,9 +1,14 @@
-# AI Networking Coach — Project Instructions
+# AI Networking Coach, Project Instructions
+
+> ⭐ **READ `docs/VISION.md` FIRST, before any Warmly work.** It is the durable product
+> spec: the intended end-to-end user journey, the Built/Partial/Missing gap assessment,
+> and the phased roadmap (current: Phase 1, stabilize discovery). Locked decisions:
+> stabilize discovery first; cross-user warm-intros are explicit opt-in.
 
 ## What We're Building
 An AI-powered networking coach that guides professionals through the full networking lifecycle: Discover → Strategize → Prepare → Maintain. Chat-first interface where users talk to an AI agent that accumulates context over time.
 
-**Full PRD:** `docs/PRD_AI_Networking_Coach_v1.md` — READ THIS before making architectural decisions.
+**Product vision + roadmap:** `docs/VISION.md` (read first). **Full PRD:** `docs/PRD_AI_Networking_Coach_v1.md`, READ before architectural decisions.
 
 ## Tech Stack (Non-Negotiable)
 - **Frontend:** Next.js 14+ (App Router), React 18+, TypeScript, Tailwind CSS
@@ -102,7 +107,7 @@ ai-networking-coach/
 
 ### React / Next.js
 - Use Server Components by default. Add `"use client"` only when needed (interactivity, hooks, browser APIs).
-- Keep components small — under 150 lines. Extract sub-components when a component grows.
+- Keep components small, under 150 lines. Extract sub-components when a component grows.
 - Use Tailwind for all styling. No CSS modules, no styled-components.
 - Every component that fetches data must handle loading and error states.
 
@@ -146,8 +151,8 @@ ai-networking-coach/
 - Never commit API keys, .env files, or user data.
 
 ## Key Architectural Decisions (Do Not Override)
-1. Chat-first interface — everything happens through conversation, not forms/dashboards
-2. Session-per-contact — each contact gets a dedicated conversation thread
+1. Chat-first interface, everything happens through conversation, not forms/dashboards
+2. Session-per-contact, each contact gets a dedicated conversation thread
 3. 6 artifact types: connection_note, outreach_draft, meeting_prep, meeting_notes, action_plan, follow_up_draft
 4. Agent learning via user_memory JSON field on Users table (see PRD Section 5.9)
 5. Manual contact entry via 3 methods: chat, URL paste, extension bookmark (PRD DIS-11)
@@ -156,19 +161,19 @@ ai-networking-coach/
 After completing ANY task, run these checks. If any fail, fix the issue and re-check. Do NOT report completion until all relevant checks pass.
 
 ### Always Run (every task)
-1. `npx tsc --noEmit` — Zero TypeScript errors. No exceptions.
-2. `npm run build` — Full Next.js build must succeed.
+1. `npx tsc --noEmit`, Zero TypeScript errors. No exceptions.
+2. `npm run build`, Full Next.js build must succeed.
 
 ### After Backend Changes (API routes, lib/, supabase/)
-3. `npx vitest run` — All tests must pass.
+3. `npx vitest run`, All tests must pass.
 4. Verify every API route has Zod input validation (grep for `z.object` in each route file).
 5. Verify every API route returns typed responses matching `src/types/api.ts`.
-6. Verify no raw SQL — all queries go through Supabase client.
+6. Verify no raw SQL, all queries go through Supabase client.
 
 ### After Frontend Changes (components/, app/(views)/, hooks/)
 7. Every component that fetches data must have a loading skeleton and error state.
-8. No inline colors or font sizes — everything uses Tailwind classes from the design system.
-9. No `any` types — grep for `: any` and fix.
+8. No inline colors or font sizes, everything uses Tailwind classes from the design system.
+9. No `any` types, grep for `: any` and fix.
 
 ### After Extension Changes (extension/)
 10. `manifest.json` is valid Manifest V3 (`"manifest_version": 3`).
@@ -207,6 +212,6 @@ Read `docs/LINKEDIN_GUARDRAILS.md` before invoking any tool that touches LinkedI
 - Change account settings (privacy, notifications, subscription)
 - Click "Send" on any compose form, even pre-filled
 
-**Allowed:** view profiles / messages / companies / jobs / connections, search, screenshot, navigate. Pre-fill drafts (text into compose box) is OK — submit is NOT.
+**Allowed:** view profiles / messages / companies / jobs / connections, search, screenshot, navigate. Pre-fill drafts (text into compose box) is OK, submit is NOT.
 
 The tester agent is NEVER authorized to perform hard-rule actions. The orchestrator proposes; the user approves; only then execute.
