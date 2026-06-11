@@ -312,17 +312,116 @@ export async function createSyncJobRecord(userId: string): Promise<SyncJob | nul
 }
 
 /**
+ * Backend PATCH payload shape for /api/sync-jobs.
+ * Matches PatchSyncJobSchema in src/app/api/sync-jobs/route.ts exactly.
+ */
+interface BackendSyncJobPatch {
+  id: string;
+  status?: "pending" | "in_progress" | "paused" | "completed" | "failed";
+  phase?: "list" | "batch" | "done";
+  total_contacts?: number;
+  processed_contacts?: number;
+  last_completed_page?: number;
+  last_processed_urn_index?: number;
+  error?: string | null;
+  completed_at?: string | null;
+}
+
+/**
  * Updates a sync_job record on the backend.
+ *
+ * The backend route is PATCH /api/sync-jobs with the job id IN THE BODY
+ * (not in the URL path).  The extension's internal SyncJob uses different
+ * field names and status values, so we map here:
+ *
+ *   status:  "running" → "in_progress"; others pass through unchanged.
+ *   phase:   derived from merged job state (not directly stored on SyncJob).
+ *   total_contacts:  ← merged.total_connections (omit when null).
+ *   processed_contacts: phase "batch"/"done" → merged.profiles_enriched,
+ *                       else merged.connections_imported.
+ *   last_completed_page: pass through (omit when < 0).
+ *   last_processed_urn_index: pass through.
+ *   completed_at: set to now ISO when status resolves to "completed".
+ *
  * Best-effort — failures are logged but not thrown.
  */
 export async function updateSyncJobRecord(
-  jobId: string,
-  update: Partial<SyncJob>
+  _jobId: string,
+  mergedJob: Partial<SyncJob> & { id: string }
 ): Promise<void> {
-  await apiFetch(`/api/sync-jobs/${jobId}`, {
-    method: "PATCH",
-    body: JSON.stringify(update),
-  });
+  try {
+    // --- Status mapping ---
+    let backendStatus: BackendSyncJobPatch["status"] | undefined;
+    if (mergedJob.status !== undefined) {
+      if (mergedJob.status === "running") {
+        backendStatus = "in_progress";
+      } else if (
+        mergedJob.status === "pending" ||
+        mergedJob.status === "paused" ||
+        mergedJob.status === "completed" ||
+        mergedJob.status === "failed"
+      ) {
+        backendStatus = mergedJob.status;
+      }
+      // "running" is the only value that needs remapping; others match exactly.
+    }
+
+    // --- Phase mapping ---
+    // "done" if completed, "batch" if Phase 2 has started (index > 0), else "list".
+    let backendPhase: BackendSyncJobPatch["phase"] | undefined;
+    if (mergedJob.status === "completed") {
+      backendPhase = "done";
+    } else if (
+      typeof mergedJob.last_processed_urn_index === "number" &&
+      mergedJob.last_processed_urn_index > 0
+    ) {
+      backendPhase = "batch";
+    } else if (mergedJob.status !== undefined || mergedJob.last_completed_page !== undefined) {
+      // Only set phase explicitly when we know the job has started.
+      backendPhase = "list";
+    }
+
+    // --- Processed contacts ---
+    let processedContacts: number | undefined;
+    if (backendPhase === "batch" || backendPhase === "done") {
+      if (typeof mergedJob.profiles_enriched === "number") {
+        processedContacts = mergedJob.profiles_enriched;
+      }
+    } else {
+      if (typeof mergedJob.connections_imported === "number") {
+        processedContacts = mergedJob.connections_imported;
+      }
+    }
+
+    // --- Build patch — omit all undefined fields ---
+    const patch: BackendSyncJobPatch = { id: mergedJob.id };
+    if (backendStatus !== undefined) patch.status = backendStatus;
+    if (backendPhase !== undefined) patch.phase = backendPhase;
+    if (mergedJob.total_connections !== null && mergedJob.total_connections !== undefined) {
+      patch.total_contacts = mergedJob.total_connections;
+    }
+    if (processedContacts !== undefined) patch.processed_contacts = processedContacts;
+    if (
+      typeof mergedJob.last_completed_page === "number" &&
+      mergedJob.last_completed_page >= 0
+    ) {
+      patch.last_completed_page = mergedJob.last_completed_page;
+    }
+    if (typeof mergedJob.last_processed_urn_index === "number") {
+      patch.last_processed_urn_index = mergedJob.last_processed_urn_index;
+    }
+    if (backendStatus === "completed") {
+      patch.completed_at = new Date().toISOString();
+    }
+
+    await apiFetch("/api/sync-jobs", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  } catch (err) {
+    // Best-effort — never throw; progress UI degradation is tolerable.
+    console.warn("[API Client] updateSyncJobRecord failed (non-fatal):", err);
+  }
 }
 
 // ---------------------------------------------------------------------------

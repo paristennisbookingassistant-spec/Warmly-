@@ -248,25 +248,30 @@ export async function handleGetJob(
 
 /**
  * Handles SYNC_UPDATE_JOB from content script.
- * Merges the partial update into the persisted job and syncs to backend.
+ * Merges the partial update into the persisted job, persists locally, and
+ * syncs to the backend PATCH /api/sync-jobs endpoint using the fully-merged
+ * job so all field mappings (status, phase, counters) are correct.
  */
 export async function handleUpdateJob(
   partialJob: Partial<SyncJob> & { id: string }
 ): Promise<void> {
-  // Merge with persisted state
+  // Merge partial into the full persisted job so updateSyncJobRecord receives
+  // all fields needed for the backend field mapping (e.g. profiles_enriched
+  // must be known to pick the right processed_contacts value).
   const local = await loadPersistedSyncJob();
   const merged: SyncJob = local?.id === partialJob.id
     ? { ...local, ...partialJob }
     : partialJob as SyncJob;
 
   await persistSyncJob(merged);
-  await updateSyncJobRecord(partialJob.id, partialJob);
 
-  // If status changed to completed or failed, relay to web app
-  if (partialJob.status === "completed" || partialJob.status === "failed") {
-    if (partialJob.status === "completed") {
-      await clearPersistedSyncJob();
-    }
+  // Pass the merged job (not just the partial) so the backend mapping has
+  // access to all fields (total_connections, profiles_enriched, etc.).
+  await updateSyncJobRecord(merged.id, merged);
+
+  // If status changed to completed, clear local storage.
+  if (partialJob.status === "completed") {
+    await clearPersistedSyncJob();
   }
 }
 
