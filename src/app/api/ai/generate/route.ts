@@ -21,6 +21,12 @@ import type { GenerateArtifactResponse } from "@/types/api";
 import type { Contact, User, ConversationMessage, Conversation } from "@/types/database";
 import type { ConversationSummary } from "@/types/ai";
 
+// Allow up to 60s for the (possibly cold-start) MiniMax generation call.
+// Without this, the default serverless function timeout fires on the first
+// cold invocation of a session before MiniMax responds, returning a platform
+// 500 ("first draft 500s, retry works"). See V2 P2 tester finding.
+export const maxDuration = 60;
+
 // ---------------------------------------------------------------------------
 // Validation schema
 // ---------------------------------------------------------------------------

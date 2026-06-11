@@ -264,17 +264,27 @@ export default function DraftEditorPage({
       if (convJson.error) throw new Error(convJson.error);
       conversationIdRef.current = convJson.data.id;
 
-      // Generate initial draft
+      // Generate initial draft. The AI route can cold-start; one transient
+      // failure (e.g. a slow first invocation) is retried once silently so the
+      // user doesn't see a spurious error on their first visit of a session.
       setShimmering(true);
-      const genRes = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          artifact_type: "outreach_draft",
-          contact_id: contactId,
-          conversation_id: conversationIdRef.current,
-        }),
+      const genBody = JSON.stringify({
+        artifact_type: "outreach_draft",
+        contact_id: contactId,
+        conversation_id: conversationIdRef.current,
       });
+      const callGenerate = () =>
+        fetch("/api/ai/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: genBody,
+        });
+      let genRes = await callGenerate();
+      if (!genRes.ok) {
+        // brief backoff, then one retry
+        await new Promise((r) => setTimeout(r, 1200));
+        genRes = await callGenerate();
+      }
       if (!genRes.ok) throw new Error(`Generate failed (${genRes.status})`);
       const genJson: GenerateApiResponse = await genRes.json() as GenerateApiResponse;
       if (genJson.error) throw new Error(genJson.error);
@@ -422,6 +432,9 @@ export default function DraftEditorPage({
 
       const firstName = contact.name.split(" ")[0];
       showToast(`Sent to ${firstName}. Logged in your CRM.`);
+      // Let the confirmation toast render on this screen before navigating back
+      // (an immediate push swaps the route before the toast is visible).
+      await new Promise((r) => setTimeout(r, 700));
       router.push(`/v2/contacts/${contactId}`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Send failed. Try again.");
