@@ -6,8 +6,10 @@
  */
 
 import { useState } from "react";
+import Link from "next/link";
 import { SectionLabel, Btn } from "@/components/v2/primitives";
 import { useToast } from "@/components/v2/Toast";
+import { Icon } from "@/components/v2/icons";
 
 interface ProfileBlockProps {
   name: string;
@@ -80,6 +82,19 @@ export function ProfileBlock({ name: initialName, email }: ProfileBlockProps) {
           </Btn>
         </div>
       )}
+      <div className="mt-5 pt-4" style={{ borderTop: "1px solid #e5d8be" }}>
+        <p className="text-[12.5px] mb-2" style={{ color: "var(--ink-3)" }}>
+          Want to update your AI coach profile?
+        </p>
+        <Link
+          href="/v2/onboarding"
+          className="inline-flex items-center gap-1.5 text-[12.5px] font-medium transition-colors hover:underline"
+          style={{ color: "#7a4a25" }}
+        >
+          <Icon.Upload size={13} />
+          Rebuild profile from CV
+        </Link>
+      </div>
     </div>
   );
 }

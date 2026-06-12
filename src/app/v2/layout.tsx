@@ -8,10 +8,12 @@
 import type { ReactNode } from "react";
 import { ToastProvider } from "@/components/v2/Toast";
 import Sidebar from "./Sidebar";
+import { OnboardingGate } from "./OnboardingGate";
 
 export default function V2Layout({ children }: { children: ReactNode }) {
   return (
     <ToastProvider>
+      <OnboardingGate />
       <div className="flex h-screen overflow-hidden" style={{ background: "var(--bg)" }}>
         <Sidebar />
         <main className="flex-1 overflow-y-auto scroll-area">{children}</main>
