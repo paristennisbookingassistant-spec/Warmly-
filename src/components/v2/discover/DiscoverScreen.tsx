@@ -206,9 +206,10 @@ function contactToDeckCard(c: Contact): DeckCard {
 // serverless timeout (504). 8 is fast and covers the visible window.
 const SCORE_BATCH = 8;
 // Scoring is a non-blocking enhancement (the deck is usable immediately). The
-// MiniMax rank is a reasoning call (~20-25s); give it a realistic window so the
-// tiers/rationale actually land, but always abort by here so nothing hangs.
-const RANK_TIMEOUT_MS = 30_000;
+// MiniMax rank is a reasoning call (~15-25s, occasionally longer under load);
+// give it a realistic window so the tiers/rationale actually land, but always
+// abort by here so nothing ever hangs.
+const RANK_TIMEOUT_MS = 35_000;
 
 interface RankItem {
   score: number;

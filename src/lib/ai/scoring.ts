@@ -221,12 +221,15 @@ export async function rankContactsBatch(
     [{ role: "user", content: prompt }],
     {
       systemPrompt: BATCH_RANK_SYSTEM_PROMPT,
-      // Cap output tokens: MiniMax-M2.7 is a reasoning model (emits <think>);
-      // the full 4000-token budget runs ~30s+ and intermittently times out the
-      // request. 1500 is enough for the think + the JSON for ~8 candidates and
-      // returns reliably (~20-25s). The deck-rank caller scores in the
-      // background with a non-blocking timeout, so this latency never blocks UI.
-      maxTokens: 1500,
+      // MiniMax-M2.7 is a reasoning model (always emits <think>; no disable
+      // param works). Budget must fit BOTH the think block (~700 tok) AND the
+      // full JSON answer for ~8 candidates — too small truncates the JSON →
+      // parse fails → 500 (measured: 1500 truncates, 2000 is clean ~15s, 2500
+      // gives headroom for richer candidates). Too large (4000) runs ~30s+ and
+      // intermittently fails the request. 2500 is the sweet spot. The deck-rank
+      // caller scores in the background with a non-blocking timeout, so this
+      // ~15-25s latency never blocks the UI.
+      maxTokens: 2500,
       temperature: 0.3,
     }
   );
