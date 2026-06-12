@@ -69,12 +69,14 @@ reasoning model (~15-30s, no disable-thinking param) → a real perf item: consi
 model for scoring or pre-computing/caching scores on save (tracked under reliability #12).
 Rank routes now degrade to unscored (200) instead of 500 when the model can't return JSON.
 
-**Phase 2, Real onboarding (CV → profile).** Port the V2 onboarding: drag-drop file
-upload → `POST /api/onboarding/parse-cv` (PDF/DOCX→text + a MiniMax extraction into
-structured fields) → the review/prefill screen (inferred-from-CV background + targets) →
-"Build my coach" → processing animation. Reuse `src/lib/ai/profile.ts`. Net-new: upload
-+ parse + structured extraction + the review UI. Side benefit: a rich `profile_md` fixes
-the thin-profile draft/scoring quality.
+**Phase 2, Real onboarding (CV → profile), ✅ DONE (2026-06-12).** `/v2/onboarding`:
+drag-drop CV upload → `POST /api/onboarding/parse-cv` (PDF via `unpdf`, DOCX via
+`mammoth`, txt direct; + MiniMax field extraction ~5-9s) → the "here's what we pulled from
+your CV" review/prefill screen (background + targets, editable) → "Build my coach" →
+existing `onboarding-complete` builds `profile_md`/`voice_md` (~22s). An `OnboardingGate`
+redirects non-onboarded users from `/v2/*` to onboarding; Settings has a "Rebuild profile
+from CV" link. Tester-verified end to end (prefill accurate, build lands on `/v2`).
+Minor polish left: the processing "0 of 2" step counter.
 
 **Phase 3, Goal-driven + proactive discovery.** (a) Pre-filter the INSEAD first batch
 by the user's goal (target industry/geo → `/api/directory` params) **then** LLM-rank,
