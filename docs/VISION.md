@@ -58,13 +58,16 @@
 
 ## Roadmap (phased; each phase tester-gated via the three-agent loop)
 
-**Phase 1, Stabilize discovery (current).** Fix scoring (score only ~8 visible cards,
-`top_n ≤ 20`, AbortController client timeout so the spinner always resolves, trim
-candidate payloads in `scoring.ts`); fix the INSEAD refine (case-insensitive multi-value
-`industries` overlap with a keyword→canonical map, city terms → `location` ilike, an
-in-place "refining" state instead of the full-screen skeleton, never empty the deck on
-0 results); LinkedIn refine honesty. Plus reliability: generate cold-start 500,
-company-intel search 500/404, populate the test-account profile.
+**Phase 1, Stabilize discovery, ✅ DONE (2026-06-12).** No infinite spinner
+(AbortController, non-blocking scoring); INSEAD refine works (case-insensitive
+multi-value `industries` overlap + keyword→canonical map, city→`location` ilike, in-place
+refine state, never empties on 0 results); LinkedIn refine honest on no-match; scoring
+lands real tier + rationale (~10-30s). **Key learning:** the AI features all depend on the
+user having a `profile_md`, with none, scoring 500s and drafts/prep return clarifying-
+question stubs (so Phase 2 onboarding is a *prerequisite*, not polish). MiniMax-M2.7 is a
+reasoning model (~15-30s, no disable-thinking param) → a real perf item: consider a faster
+model for scoring or pre-computing/caching scores on save (tracked under reliability #12).
+Rank routes now degrade to unscored (200) instead of 500 when the model can't return JSON.
 
 **Phase 2, Real onboarding (CV → profile).** Port the V2 onboarding: drag-drop file
 upload → `POST /api/onboarding/parse-cv` (PDF/DOCX→text + a MiniMax extraction into
