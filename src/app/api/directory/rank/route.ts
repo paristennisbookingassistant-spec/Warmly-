@@ -155,9 +155,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       topN: top_n ?? Math.min(candidates.length, 10),
     });
   } catch (err) {
-    console.error("directory rank: batch ranking failed:", err);
-    const reason = err instanceof Error ? err.message : "Unknown error";
-    return internalError(`Ranking failed: ${reason}`);
+    // Scoring is a NON-ESSENTIAL enhancement (the deck is fully usable
+    // unscored). The model can legitimately fail to return rankable JSON —
+    // most often when the user has no profile_md yet (a brand-new user), where
+    // it asks for context instead of ranking. Degrade to "no scores" (200) so
+    // the client shows the unscored deck cleanly, rather than surfacing a 500.
+    console.warn("directory rank: ranking unavailable, returning unscored:", err);
+    return NextResponse.json({ data: { rankings: [] }, error: null } satisfies RankDirectoryResponse);
   }
 
   logAiCall({
