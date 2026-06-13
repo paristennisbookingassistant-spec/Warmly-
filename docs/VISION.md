@@ -78,12 +78,20 @@ redirects non-onboarded users from `/v2/*` to onboarding; Settings has a "Rebuil
 from CV" link. Tester-verified end to end (prefill accurate, build lands on `/v2`).
 Minor polish left: the processing "0 of 2" step counter.
 
-**Phase 3, Goal-driven + proactive discovery.** (a) Pre-filter the INSEAD first batch
-by the user's goal (target industry/geo → `/api/directory` params) **then** LLM-rank,
-i.e. hybrid: structured retrieval to narrow + LLM to rank/justify (the answer to "LLM or
-other": both). (b) Wire the extension's `CDP_DISCOVER` into the V2 chat: user names a
-company → validate-criteria step → trigger the existing extension discovery → results
-stream into the deck. Reuses the built `CDP_DISCOVER`/`discovery_sessions` plumbing.
+**Phase 3a, Goal-driven discovery, ✅ DONE (2026-06-12).** The INSEAD first batch is
+filtered by the user's goal (target_industries → canonical directory industries via
+overlap) then LLM-ranked best-first, hybrid retrieval + ranking. Scoring is now
+**per-user cached** (`directory_scores` table, read-through in `/api/directory/rank`):
+first successful rank persists, repeat opens are instant + scored, and a client timeout
+no longer loses the result (server finishes + caches). This resolved the recurring
+scoring-latency flakiness. Verified: deck leads with the strongest match, "Strong" badge
++ rationale render <1s.
+
+**Phase 3b, Proactive company discovery (PENDING).** Wire the extension's `CDP_DISCOVER`
+into the V2 chat: user names a company → validate-criteria step → trigger the existing
+extension discovery → results stream into the deck. Reuses the built
+`CDP_DISCOVER`/`discovery_sessions` plumbing; net-new is the web-app trigger + results
+channel. (Bigger; design pass needed.)
 
 **Phase 4, Cross-user 2nd-degree warm-intro graph (the differentiator; explicit
 opt-in).** Net-new: (1) capture each user's own LinkedIn URN at sync; (2) a consent flag
