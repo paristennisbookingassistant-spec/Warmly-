@@ -11,7 +11,7 @@
  *   Refine chat filters client-side + re-ranks.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "../Toast";
 import { tierLabelFromNumber } from "../palette";
 import { DoorsView } from "./Doors";
@@ -91,6 +91,32 @@ function parseInseadInstruction(text: string): DirectoryParams {
 
   // Fallback: full-text search
   return { search: text.trim() };
+}
+
+// User goals shape (subset we read) — written by onboarding-complete.
+interface UserGoals {
+  target_industries?: string[];
+  target_industry?: string;
+  target_geographies?: string[];
+  target_geography?: string[];
+}
+
+// Derive the INSEAD door's INITIAL batch filter from the user's goals: map their
+// target-industry text → ALL matching canonical directory industries so the
+// first batch is people in their target field (not alphabetical). Geography is
+// left off the initial filter to keep the batch broad; the user can narrow via
+// the refine chat. Returns {} when nothing maps (→ unfiltered first batch).
+function goalsToCvParams(goals: UserGoals | null): DirectoryParams {
+  if (!goals) return {};
+  const text = [
+    ...(goals.target_industries ?? []),
+    goals.target_industry ?? "",
+  ].join(" ; ");
+  const matched = new Set<string>();
+  for (const { re, value } of INDUSTRY_KEYWORDS) {
+    if (re.test(text)) value.split(",").forEach((v) => matched.add(v.trim()));
+  }
+  return matched.size > 0 ? { industry: [...matched].join(",") } : {};
 }
 
 // ---------- buildDirectoryUrl helper ----------
@@ -282,6 +308,10 @@ type View = "doors" | "cv-tinder" | "linkedin-setup" | "linkedin-tinder";
 export function DiscoverScreen() {
   const toast = useToast();
   const [view, setView] = useState<View>("doors");
+  // The user's goals, fetched lazily when the INSEAD door is first opened.
+  // undefined = not fetched yet; null = fetched, none. Used to goal-filter the
+  // first INSEAD batch.
+  const userGoalsRef = useRef<UserGoals | null | undefined>(undefined);
 
   // --- INSEAD deck state ---
   const [cvDeck, setCvDeck] = useState<DeckCard[]>([]);
@@ -388,7 +418,28 @@ export function DiscoverScreen() {
 
   const openCV = () => {
     if (cvDeck.length === 0 && !cvLoading && !cvError) {
-      void fetchAndScoreCvDeck();
+      // First batch is goal-driven: filter the directory by the user's target
+      // industry before ranking, so they see people in their target field
+      // (not alphabetical). Fall back to unfiltered if the goal filter is empty
+      // or matches nothing.
+      void (async () => {
+        let goals = userGoalsRef.current;
+        if (goals === undefined) {
+          try {
+            const res = await fetch("/api/users/me", { credentials: "include" });
+            const json = (await res.json()) as { data?: { goals?: UserGoals } };
+            goals = json.data?.goals ?? null;
+          } catch {
+            goals = null;
+          }
+          userGoalsRef.current = goals;
+        }
+        const params = goalsToCvParams(goals);
+        const n = await fetchAndScoreCvDeck(params);
+        if (n === 0 && Object.keys(params).length > 0) {
+          await fetchAndScoreCvDeck({}); // goal filter too narrow — show everyone
+        }
+      })();
     }
     setView("cv-tinder");
   };
