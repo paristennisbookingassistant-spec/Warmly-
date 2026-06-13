@@ -182,17 +182,26 @@ export default function MeetingPrepPage({
         intake.focus ? `Additional context: ${intake.focus}.` : "",
       ].filter(Boolean).join(" ");
 
-      // Generate meeting_prep
-      const genRes = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          artifact_type: "meeting_prep",
-          contact_id: contactId,
-          conversation_id: convJson.data.id,
-          user_instructions: userInstructions,
-        }),
+      // Generate meeting_prep. The AI route can cold-start and 500 on the first
+      // (cold) call of a session; retry once silently so the user doesn't see a
+      // spurious error + a wiped form (same pattern as the draft editor).
+      const genBody = JSON.stringify({
+        artifact_type: "meeting_prep",
+        contact_id: contactId,
+        conversation_id: convJson.data.id,
+        user_instructions: userInstructions,
       });
+      const callGen = () =>
+        fetch("/api/ai/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: genBody,
+        });
+      let genRes = await callGen();
+      if (!genRes.ok) {
+        await new Promise((r) => setTimeout(r, 1500));
+        genRes = await callGen();
+      }
       if (!genRes.ok) throw new Error(`Generation failed (${genRes.status})`);
       const genJson = (await genRes.json()) as GenerateApiResponse;
       if (genJson.error) throw new Error(genJson.error);
