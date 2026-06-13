@@ -102,9 +102,16 @@ A's goal → surface as 2nd-degree cards with "ask B for a warm intro" provenanc
 the design's "via peer · N mutual" real); (5) a warm-intro request draft type. Needs a
 short design/schema spike first. Consent is **explicit opt-in** (decided).
 
-**Phase 5, Meeting synthesis + CRM.** (a) Wire meeting synthesis: a "Save & synthesize"
-action POSTing raw notes to `/api/ai/generate {artifact_type:"meeting_notes"}` → a
-structured artifact on the contact's timeline (type already exists). (b) CRM/relationship
+**Phase 5a, Meeting synthesis, ✅ DONE (2026-06-13).** The prep live-notes panel has a
+"Save & synthesize" → `/api/ai/generate {meeting_notes}` → a `{key_takeaways, next_steps,
+user_raw_notes}` artifact on the contact's timeline, shown inline as a simple summary card
+(lightweight per request; generate's instruction cap raised 1000→8000 for full notes).
+Tester-verified. **Reliability (#12):** the cold-start generate 500 is now masked on every
+AI surface, draft editor + meeting prep both silent-retry once, and directory scoring
+caches + degrades. Underlying cause (reasoning-model cold latency) remains but never
+reaches the user.
+
+**Phase 5b, CRM, proposal ready, awaiting approval.** (b) CRM/relationship
 maintenance, **research-first**: the proposal is written, see `docs/CRM_PROPOSAL.md`
 (6 job-search categories; cadence inherits from category, overridable; 3 schema columns
 `relationship_category`/`cadence_days`/`next_touch_at`; **AI-suggest + one-tap-confirm**
