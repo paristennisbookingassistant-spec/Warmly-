@@ -44,7 +44,9 @@ const GenerateArtifactSchema = z.object({
   artifact_type: ArtifactTypeEnum,
   contact_id: z.string().uuid("contact_id must be a valid UUID"),
   conversation_id: z.string().uuid("conversation_id must be a valid UUID"),
-  user_instructions: z.string().max(1000).optional(),
+  // Raised from 1000 → 8000 so meeting-notes synthesis can pass the user's
+  // full raw notes as the instruction. Backward-compatible (only widens).
+  user_instructions: z.string().max(8000).optional(),
   force_reasoning_model: z.boolean().optional().default(false),
 });
 

@@ -111,6 +111,7 @@ export default function MeetingPrepPage({
   const [brief, setBrief] = useState<GeneratedBrief | null>(null);
   const [activeTab, setActiveTab] = useState<PrepTab>("snapshot");
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
 
   // Live notes
   const [notes, setNote] = useLiveNotes(brief?.artifactId ?? null);
@@ -171,6 +172,7 @@ export default function MeetingPrepPage({
       if (!convRes.ok) throw new Error(`Conversation create failed (${convRes.status})`);
       const convJson = (await convRes.json()) as ConversationApiResponse;
       if (convJson.error) throw new Error(convJson.error);
+      setConversationId(convJson.data.id); // reused by the notes-synthesis call
 
       // Build instructions from intake
       const userInstructions = [
@@ -286,6 +288,8 @@ export default function MeetingPrepPage({
         <div className="w-72 flex-shrink-0">
           <LiveNotesPanel
             contactId={contactId}
+            contactName={contact.name}
+            conversationId={conversationId}
             existingNotes={contact.notes ?? null}
             onSaved={() => {
               const now = new Date();
