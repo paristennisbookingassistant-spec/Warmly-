@@ -111,77 +111,98 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     | "networking_preferences"
   >;
 
-  // 3. Build BatchRankCandidate[] — contact_id = directory id
-  const candidates: BatchRankCandidate[] = profiles.map((p) => ({
-    contact_id: p.id,
-    profile: {
-      name: p.name,
-      current_title: p.current_title ?? null,
-      company: p.company ?? null,
-      // Map experience → career_history (same JSONB shape in the scoring engine)
-      career_history: (p.experience ?? []).map((e) => ({
-        title: e.title,
-        company: e.company,
-        start_date: e.dateRange?.start ?? "",
-        end_date: e.dateRange?.end ?? null,
-        description: e.description,
-      })),
-      // Map education_v2 → education
-      education: (p.education_v2 ?? []).map((e) => ({
-        school: e.school,
-        degree: e.degree ?? "",
-        field: e.fieldOfStudy,
-        year: e.dateRange?.end ?? "",
-      })),
-      location: p.location ?? null,
-      profile_snapshot: null,
-    },
-  }));
-
-  // 4. Call the shared batch ranking engine
-  const start = Date.now();
-  let rankings;
-  try {
-    rankings = await rankContactsBatch({
-      user_profile: {
-        career_history: userTyped.career_history,
-        education: userTyped.education,
-        goals: userTyped.goals,
-        networking_preferences: userTyped.networking_preferences,
-      },
-      user_profile_md: userTyped.profile_md,
-      user_memory: userTyped.user_memory,
-      candidates,
-      topN: top_n ?? Math.min(candidates.length, 10),
+  // 3. Read-through cache: return already-scored profiles instantly, and only
+  // run the (slow, variable ~15-45s) LLM rank on the never-scored ones. The
+  // first successful rank sticks, so repeat opens are instant.
+  interface ScoreRow { directory_id: string; score: number; tier: number; reasoning: string; hook: string }
+  const cached: ScoreRow[] = [];
+  const { data: cachedData } = await supabase
+    .from("directory_scores")
+    .select("directory_profile_id, score, tier, reasoning, hook")
+    .eq("user_id", user.id)
+    .in("directory_profile_id", directory_ids);
+  for (const r of cachedData ?? []) {
+    cached.push({
+      directory_id: r.directory_profile_id as string,
+      score: Number(r.score ?? 0),
+      tier: Number(r.tier ?? 3),
+      reasoning: String(r.reasoning ?? ""),
+      hook: String(r.hook ?? ""),
     });
-  } catch (err) {
-    // Scoring is a NON-ESSENTIAL enhancement (the deck is fully usable
-    // unscored). The model can legitimately fail to return rankable JSON —
-    // most often when the user has no profile_md yet (a brand-new user), where
-    // it asks for context instead of ranking. Degrade to "no scores" (200) so
-    // the client shows the unscored deck cleanly, rather than surfacing a 500.
-    console.warn("directory rank: ranking unavailable, returning unscored:", err);
-    return NextResponse.json({ data: { rankings: [] }, error: null } satisfies RankDirectoryResponse);
+  }
+  const cachedIds = new Set(cached.map((c) => c.directory_id));
+  const uncached = profiles.filter((p) => !cachedIds.has(p.id));
+
+  const fresh: ScoreRow[] = [];
+  if (uncached.length > 0) {
+    const candidates: BatchRankCandidate[] = uncached.map((p) => ({
+      contact_id: p.id,
+      profile: {
+        name: p.name,
+        current_title: p.current_title ?? null,
+        company: p.company ?? null,
+        career_history: (p.experience ?? []).map((e) => ({
+          title: e.title,
+          company: e.company,
+          start_date: e.dateRange?.start ?? "",
+          end_date: e.dateRange?.end ?? null,
+          description: e.description,
+        })),
+        education: (p.education_v2 ?? []).map((e) => ({
+          school: e.school,
+          degree: e.degree ?? "",
+          field: e.fieldOfStudy,
+          year: e.dateRange?.end ?? "",
+        })),
+        location: p.location ?? null,
+        profile_snapshot: null,
+      },
+    }));
+
+    const start = Date.now();
+    try {
+      const rankings = await rankContactsBatch({
+        user_profile: {
+          career_history: userTyped.career_history,
+          education: userTyped.education,
+          goals: userTyped.goals,
+          networking_preferences: userTyped.networking_preferences,
+        },
+        user_profile_md: userTyped.profile_md,
+        user_memory: userTyped.user_memory,
+        candidates,
+        topN: candidates.length,
+      });
+      for (const r of rankings) {
+        fresh.push({ directory_id: r.contact_id, score: r.score, tier: r.tier, reasoning: r.reasoning, hook: r.hook });
+      }
+      logAiCall({ route: "POST /api/directory/rank", model: "MiniMax-M2.7-highspeed-reasoning", tokensInput: 0, tokensOutput: 0, latencyMs: Date.now() - start });
+
+      // Persist the fresh scores (best-effort; RLS allows own rows).
+      if (fresh.length > 0) {
+        await supabase.from("directory_scores").upsert(
+          fresh.map((f) => ({ user_id: user.id, directory_profile_id: f.directory_id, score: f.score, tier: f.tier, reasoning: f.reasoning, hook: f.hook, scored_at: new Date().toISOString() })),
+          { onConflict: "user_id,directory_profile_id" }
+        );
+      }
+    } catch (err) {
+      // Non-essential enhancement: degrade to "cached-only" (or empty) rather
+      // than 500 when the model can't return rankable JSON (e.g. no profile_md).
+      console.warn("directory rank: live ranking unavailable, returning cached only:", err);
+    }
   }
 
-  logAiCall({
-    route: "POST /api/directory/rank",
-    model: "MiniMax-M2.7-highspeed-reasoning",
-    tokensInput: 0,
-    tokensOutput: 0,
-    latencyMs: Date.now() - start,
-  });
-
-  // 5. Map BatchRankResult.contact_id → directory_id and return (NOT persisted)
+  // 4. Combine cached + fresh, re-rank by score desc, assign 1-based rank.
+  const combined = [...cached, ...fresh].sort((a, b) => b.score - a.score);
   const response: RankDirectoryResponse = {
     data: {
-      rankings: rankings.map((r) => ({
-        directory_id: r.contact_id,
+      rankings: combined.map((r, i) => ({
+        directory_id: r.directory_id,
         score: r.score,
-        tier: r.tier,
+        tier: (r.tier === 1 || r.tier === 2 ? r.tier : 3) as 1 | 2 | 3,
         reasoning: r.reasoning,
         hook: r.hook,
-        rank: r.rank,
+        rank: i + 1,
       })),
     },
     error: null,
