@@ -4,10 +4,13 @@
  * components/v2/contacts/ContactsList.tsx
  * Full contacts list view: saved-today cards + filterable all-contacts table.
  * Fetches from GET /api/contacts with the API contract from the spec.
+ * Module 6: adds "reconnect" filter (isReconnectDue), URL deep-link ?filter=reconnect,
+ * header count "· N due to reconnect", and DraftReTouchButton on due rows.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { Contact } from "@/types/database";
 import { Icon } from "@/components/v2/icons";
 import { ContactRow } from "./ContactRow";
@@ -16,7 +19,11 @@ import { ContactsListSkeleton, SavedTodayCardSkeleton } from "./ContactsListSkel
 import { EmptySavedToday, EmptyContacts, ErrorState } from "./ContactsEmptyStates";
 import { ContactsFilterBar, type FilterId } from "./ContactsFilterBar";
 import { isSavedToday, deriveFollowUpDue } from "./contactsUtils";
+import { isReconnectDue } from "@/lib/crm/cadence";
 import type { ContactStatusValue } from "@/components/v2/primitives";
+import { ReconnectRow } from "./ReconnectRow";
+
+const RECONNECT_CAP = 10;
 
 interface ApiListResponse {
   data: { items: Contact[]; total: number; page: number; per_page: number; has_more: boolean };
@@ -24,10 +31,13 @@ interface ApiListResponse {
 }
 
 export function ContactsList() {
+  const searchParams = useSearchParams();
+  const initialFilter = (searchParams.get("filter") as FilterId | null) ?? "all";
+
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FilterId>("all");
+  const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [searchInput, setSearchInput] = useState("");
   const [activeSearch, setActiveSearch] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -72,16 +82,28 @@ export function ContactsList() {
     isSavedToday(c.reviewed_at, c.created_at)
   );
 
-  const allFiltered = contacts.filter((c) => {
-    if (filter === "all") return true;
-    if (filter === "followup") return deriveFollowUpDue(c.status as ContactStatusValue, c.last_interaction_at);
-    return c.status === filter;
-  });
+  // Reconnect list: due contacts sorted most-overdue first, capped
+  const reconnectContacts = contacts
+    .filter((c) => isReconnectDue(c.next_touch_at))
+    .sort((a, b) => {
+      const aTime = a.next_touch_at ? new Date(a.next_touch_at).getTime() : 0;
+      const bTime = b.next_touch_at ? new Date(b.next_touch_at).getTime() : 0;
+      return aTime - bTime;
+    })
+    .slice(0, RECONNECT_CAP);
+
+  const allFiltered = (() => {
+    if (filter === "reconnect") return reconnectContacts;
+    if (filter === "followup") return contacts.filter((c) => deriveFollowUpDue(c.status as ContactStatusValue, c.last_interaction_at));
+    if (filter === "all") return contacts;
+    return contacts.filter((c) => c.status === filter);
+  })();
 
   const counts = {
     total: contacts.length,
     met: contacts.filter((c) => c.status === "met").length,
     followup: contacts.filter((c) => deriveFollowUpDue(c.status as ContactStatusValue, c.last_interaction_at)).length,
+    reconnect: reconnectContacts.length,
   };
 
   return (
@@ -90,6 +112,15 @@ export function ContactsList() {
         <h1 className="font-display text-ink" style={{ fontSize: 36, lineHeight: 1.05 }}>Contacts</h1>
         <div className="text-[12.5px] text-ink-3">
           {counts.total} contacts · {counts.met} met · {counts.followup} follow-up due
+          {counts.reconnect > 0 && (
+            <span className="ml-1 inline-flex items-center gap-1">
+              ·
+              <span className="inline-flex items-center gap-1 text-amber-700 font-medium">
+                <Icon.Alert size={11} />
+                {counts.reconnect} due to reconnect
+              </span>
+            </span>
+          )}
         </div>
       </div>
 
@@ -137,6 +168,12 @@ export function ContactsList() {
         <ErrorState message={error} onRetry={() => fetchContacts(activeSearch || undefined)} />
       ) : allFiltered.length === 0 ? (
         <EmptyContacts filter={filter} hasSearch={!!activeSearch} />
+      ) : filter === "reconnect" ? (
+        <div className="bg-white rounded-2xl overflow-hidden" style={{ border: "1px solid #e5d8be" }}>
+          {allFiltered.map((c) => (
+            <ReconnectRow key={c.id} contact={c} />
+          ))}
+        </div>
       ) : (
         <div className="bg-white rounded-2xl overflow-hidden" style={{ border: "1px solid #e5d8be" }}>
           {allFiltered.map((c) => <ContactRow key={c.id} contact={c} />)}

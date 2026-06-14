@@ -8,7 +8,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import type { Contact, Artifact } from "@/types/database";
+import type { Contact, Artifact, RelationshipCategory } from "@/types/database";
 import { Icon } from "@/components/v2/icons";
 import { Btn } from "@/components/v2/primitives";
 import { useToast } from "@/components/v2/Toast";
@@ -89,6 +89,14 @@ export function ContactDetail({ contactId }: { contactId: string }) {
     showToast("Note saved.");
   };
 
+  const handleCategoryChange = (
+    newCategory: RelationshipCategory | null,
+    newCadenceDays: number | null
+  ) => {
+    if (!contact) return;
+    setContact({ ...contact, relationship_category: newCategory, cadence_days: newCadenceDays });
+  };
+
   if (loading) return <ContactDetailSkeleton />;
 
   if (error || !contact) {
@@ -128,6 +136,7 @@ export function ContactDetail({ contactId }: { contactId: string }) {
           contact={contact}
           onMarkMet={() => void handleMarkMet()}
           onArchive={() => void handleArchive()}
+          onCategoryChange={handleCategoryChange}
           markingMet={markingMet}
           archiving={archiving}
         />

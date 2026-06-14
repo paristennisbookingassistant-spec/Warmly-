@@ -32,6 +32,7 @@ import type {
   DeleteArtifactResponse,
 } from "@/types/api";
 import type { Artifact, User } from "@/types/database";
+import { computeNextTouchAt } from "@/lib/crm/cadence";
 
 // ---------------------------------------------------------------------------
 // Validation schema
@@ -150,18 +151,52 @@ export async function PUT(
     parsed.data.status === "sent" &&
     outreachTypes.includes(currentArtifact.type)
   ) {
+    const nowIso = new Date().toISOString();
+    // Fetch current CRM fields to recompute next_touch_at
+    const { data: contactForOutreach } = await supabase
+      .from("contacts")
+      .select("relationship_category, cadence_days")
+      .eq("id", currentArtifact.contact_id)
+      .eq("user_id", user.id)
+      .single();
+    const outreachNextTouch = computeNextTouchAt(
+      (contactForOutreach?.relationship_category as "nurturing" | "keep_warm" | "inner_circle" | "dormant" | null) ?? null,
+      (contactForOutreach?.cadence_days as number | null) ?? null,
+      nowIso
+    );
     await supabase
       .from("contacts")
-      .update({ status: "contacted", last_interaction_at: new Date().toISOString() })
+      .update({
+        status: "contacted",
+        last_interaction_at: nowIso,
+        next_touch_at: outreachNextTouch,
+      })
       .eq("id", currentArtifact.contact_id)
       .eq("user_id", user.id);
   }
 
   // Side-effect: if meeting_notes created → contact becomes 'met'
   if (parsed.data.status === "sent" && currentArtifact.type === "meeting_notes") {
+    const nowIso = new Date().toISOString();
+    // Fetch current CRM fields to recompute next_touch_at
+    const { data: contactForMeeting } = await supabase
+      .from("contacts")
+      .select("relationship_category, cadence_days")
+      .eq("id", currentArtifact.contact_id)
+      .eq("user_id", user.id)
+      .single();
+    const meetingNextTouch = computeNextTouchAt(
+      (contactForMeeting?.relationship_category as "nurturing" | "keep_warm" | "inner_circle" | "dormant" | null) ?? null,
+      (contactForMeeting?.cadence_days as number | null) ?? null,
+      nowIso
+    );
     await supabase
       .from("contacts")
-      .update({ status: "met", last_interaction_at: new Date().toISOString() })
+      .update({
+        status: "met",
+        last_interaction_at: nowIso,
+        next_touch_at: meetingNextTouch,
+      })
       .eq("id", currentArtifact.contact_id)
       .eq("user_id", user.id);
   }

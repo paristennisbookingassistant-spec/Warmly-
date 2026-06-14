@@ -8,7 +8,7 @@
 import type { ContactStatus } from "@/types/database";
 import { Icon } from "@/components/v2/icons";
 
-export type FilterId = "all" | ContactStatus | "followup";
+export type FilterId = "all" | ContactStatus | "followup" | "reconnect";
 
 const FILTERS: { id: FilterId; label: string; icon?: boolean }[] = [
   { id: "all", label: "All" },
@@ -17,6 +17,7 @@ const FILTERS: { id: FilterId; label: string; icon?: boolean }[] = [
   { id: "connected", label: "Connected" },
   { id: "met", label: "Met" },
   { id: "followup", label: "Follow-up due", icon: true },
+  { id: "reconnect", label: "Due to reconnect", icon: true },
 ];
 
 interface ContactsFilterBarProps {

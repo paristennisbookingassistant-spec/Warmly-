@@ -6,17 +6,19 @@
  */
 
 import Link from "next/link";
-import type { Contact } from "@/types/database";
+import type { Contact, RelationshipCategory } from "@/types/database";
 import { Btn, SectionLabel, StatusBadge, TierBadge } from "@/components/v2/primitives";
 import { Icon } from "@/components/v2/icons";
 import { relativeTime, deriveFollowUpDue, detectInsead } from "./contactsUtils";
 import type { ContactStatusValue } from "@/components/v2/primitives";
 import { tierLabelFromNumber } from "@/components/v2/palette";
+import { RelationshipDropdown } from "./RelationshipDropdown";
 
 interface ContactDetailSidebarProps {
   contact: Contact;
   onMarkMet: () => void;
   onArchive: () => void;
+  onCategoryChange: (category: RelationshipCategory | null, cadenceDays: number | null) => void;
   markingMet: boolean;
   archiving: boolean;
 }
@@ -25,6 +27,7 @@ export function ContactDetailSidebar({
   contact: c,
   onMarkMet,
   onArchive,
+  onCategoryChange,
   markingMet,
   archiving,
 }: ContactDetailSidebarProps) {
@@ -121,6 +124,13 @@ export function ContactDetailSidebar({
               </div>
             </div>
           )}
+          <RelationshipDropdown
+            contactId={c.id}
+            category={c.relationship_category}
+            cadenceDays={c.cadence_days}
+            nextTouchAt={c.next_touch_at}
+            onSaved={onCategoryChange}
+          />
         </div>
 
         {signals.length > 0 && (

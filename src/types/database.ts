@@ -262,6 +262,12 @@ export type ContactUserAction = "pending" | "saved" | "skipped" | "starred";
 export type ContactFeedback = "great_match" | "not_relevant";
 
 /**
+ * CRM relationship category. Orthogonal to tier.
+ * null (uncategorized) = no reminders until explicitly tagged.
+ */
+export type RelationshipCategory = "nurturing" | "keep_warm" | "inner_circle" | "dormant";
+
+/**
  * Raw profile data captured from the LinkedIn DOM by the browser extension.
  * Shape mirrors the extension's extraction output (see PRD Section 5.3).
  */
@@ -336,6 +342,15 @@ export interface Contact {
   discovery_session_id: string | null;
   /** User's own free-text annotations */
   notes: string | null;
+  // ---------------------------------------------------------------------------
+  // CRM relationship-maintenance fields (added in migration 20260613000000)
+  // ---------------------------------------------------------------------------
+  /** CRM category: nurturing|keep_warm|inner_circle|dormant|null(uncategorized). Orthogonal to tier. */
+  relationship_category: RelationshipCategory | null;
+  /** Per-contact cadence override in days; null = inherit CATEGORY_CADENCE default */
+  cadence_days: number | null;
+  /** Materialized due timestamp = (last_interaction_at ?? now()) + effective_cadence; null = no cadence */
+  next_touch_at: ISODateString | null;
   /** Profile photo URL — populated by extension or enrichment */
   avatar_url: string | null;
   /**

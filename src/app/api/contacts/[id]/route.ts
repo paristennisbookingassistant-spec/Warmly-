@@ -22,6 +22,7 @@ import type {
   DeleteContactResponse,
 } from "@/types/api";
 import type { Contact, User } from "@/types/database";
+import { computeNextTouchAt } from "@/lib/crm/cadence";
 
 // ---------------------------------------------------------------------------
 // Validation schema
@@ -38,6 +39,13 @@ const UpdateContactSchema = z.object({
     .optional(),
   notes: z.string().max(2000).optional(),
   user_feedback: z.enum(["great_match", "not_relevant"]).optional(),
+  /** CRM relationship category — null clears to uncategorized */
+  relationship_category: z
+    .enum(["nurturing", "keep_warm", "inner_circle", "dormant"])
+    .nullable()
+    .optional(),
+  /** Per-contact cadence override in days (≥ 1); null clears to category default */
+  cadence_days: z.number().int().min(1).nullable().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -104,19 +112,52 @@ export async function PUT(
     );
   }
 
-  // Verify the contact belongs to this user
+  // Verify the contact belongs to this user; also fetch CRM + interaction
+  // fields so we can recompute next_touch_at when category/cadence changes.
   const { data: existing } = await supabase
     .from("contacts")
-    .select("id, company, current_title, career_history, education, location")
+    .select(
+      "id, company, current_title, career_history, education, location, last_interaction_at, relationship_category, cadence_days"
+    )
     .eq("id", id)
     .eq("user_id", user.id)
     .single();
 
   if (!existing) return notFound("Contact");
 
+  // Build update payload — start with the validated fields
+  const updateFields: Record<string, unknown> = { ...parsed.data };
+
+  // Recompute next_touch_at whenever relationship_category or cadence_days
+  // is being written. Fall back to the contact's current stored values when
+  // only one of the two CRM fields is included in the update body.
+  const crmFieldsPresent =
+    parsed.data.relationship_category !== undefined ||
+    parsed.data.cadence_days !== undefined;
+
+  if (crmFieldsPresent) {
+    const incomingCategory =
+      parsed.data.relationship_category !== undefined
+        ? parsed.data.relationship_category
+        : (existing.relationship_category as "nurturing" | "keep_warm" | "inner_circle" | "dormant" | null);
+
+    const incomingOverride =
+      parsed.data.cadence_days !== undefined
+        ? parsed.data.cadence_days
+        : (existing.cadence_days as number | null);
+
+    const lastInteraction = existing.last_interaction_at as string | null;
+
+    updateFields.next_touch_at = computeNextTouchAt(
+      incomingCategory,
+      incomingOverride,
+      lastInteraction
+    );
+  }
+
   const { data: updatedContact, error: updateError } = await supabase
     .from("contacts")
-    .update({ ...parsed.data })
+    .update(updateFields)
     .eq("id", id)
     .eq("user_id", user.id)
     .select()

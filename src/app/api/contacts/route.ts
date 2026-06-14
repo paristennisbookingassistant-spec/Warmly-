@@ -148,6 +148,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     "discovered_at",
     "discovery_session_id",
     "notes",
+    "relationship_category",
+    "cadence_days",
+    "next_touch_at",
   ].join(", ");
 
   const columns = lite ? LIST_COLUMNS : "*";

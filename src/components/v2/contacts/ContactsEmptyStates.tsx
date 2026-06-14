@@ -10,7 +10,7 @@ import { Btn } from "@/components/v2/primitives";
 import { Icon } from "@/components/v2/icons";
 import type { ContactStatus } from "@/types/database";
 
-type FilterId = "all" | ContactStatus | "followup";
+type FilterId = "all" | ContactStatus | "followup" | "reconnect";
 
 export function EmptySavedToday() {
   return (
@@ -54,11 +54,15 @@ export function EmptyContacts({ filter, hasSearch }: EmptyContactsProps) {
             ? "No contacts match your search"
             : filter === "followup"
             ? "No follow-ups due"
+            : filter === "reconnect"
+            ? "No one due to reconnect"
             : "No contacts yet"}
         </div>
         <div className="text-[13px] text-ink-3">
           {hasSearch
             ? "Try a different name or company."
+            : filter === "reconnect"
+            ? "Tag contacts with a relationship category to activate reconnect reminders."
             : filter !== "all"
             ? "Try removing the filter."
             : "Start by discovering contacts in the Discover view."}
