@@ -121,3 +121,13 @@ Code TODOs noted: warm-intros targeted-query scaling; capture user's OWN urn at 
 Diagnosed: meeting prep WORKS (5 briefs generated) — the "doesn't work" was the slow-load perception.
 Queued: "Sort your network" swipe game (user undecided — propose, don't build blind); deeper
 client-side caching for nav latency (bigger refactor); LinkedIn sync = extension-dependent (clarify).
+
+## Overnight session 2 — more shipped + verified
+7. Meeting-prep loading paced to ~40s (05b25d4) — was the "meeting prep doesn't work" cause
+   (anim finished in 12s, sat on "Almost ready" for 30s). Onboarding loader paced too (8e72dba).
+8. "Sort your network" swipe-categorize game (a0e6498) — /v2/contacts/sort: one card at a time,
+   AI-suggested category pre-highlighted (key 1-4 / → skip), optimistic advance, progress bar,
+   done/empty states. Entry: "Sort N · contacts without a category" banner on Contacts. VERIFIED.
+   NOTE: Vercel missed the webhook for a0e6498 (deployed nothing); empty-commit re-trigger
+   (84bd23a) fixed it → READY + verified. Watch for this — push≠deploy if a webhook drops.
+Richer scoring rationale confirmed live on contact cards too (ESSEC/Bain/INSEAD specific hooks).
