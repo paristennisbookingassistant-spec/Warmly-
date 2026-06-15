@@ -11,6 +11,7 @@ import type {
 } from "@/types/ai";
 import { MAX_TOKENS } from "./models";
 import { callMiniMax } from "./minimax";
+import { stripDashes } from "./sanitizeOutreach";
 
 /**
  * Scores a contact against the user's profile using the PRD scoring rubric.
@@ -38,6 +39,11 @@ export async function scoreContact(
   }
 
   const parsed = JSON.parse(jsonMatch[0]) as ScoringResponse;
+  // Strip em/en-dashes from model-written rationale (the #1 AI tell).
+  if (parsed.recommendation_reason)
+    parsed.recommendation_reason = stripDashes(parsed.recommendation_reason).text;
+  if (parsed.suggested_hook)
+    parsed.suggested_hook = stripDashes(parsed.suggested_hook).text;
   return parsed;
 }
 
@@ -275,7 +281,9 @@ export async function rankContactsBatch(
       rank: Number(r.rank),
       score: Number(r.score),
       tier: (r.tier === 1 || r.tier === 2 || r.tier === 3 ? r.tier : 3) as 1 | 2 | 3,
-      reasoning: String(r.reasoning ?? ""),
-      hook: String(r.hook ?? ""),
+      // Strip em/en-dashes from model-written rationale (the #1 AI tell), same
+      // gate the outreach drafts use. Keeps the deck copy human.
+      reasoning: stripDashes(String(r.reasoning ?? "")).text,
+      hook: stripDashes(String(r.hook ?? "")).text,
     }));
 }

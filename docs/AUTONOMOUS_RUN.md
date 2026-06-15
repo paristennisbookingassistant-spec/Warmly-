@@ -38,8 +38,24 @@ rotate the Brave key + Vercel token.
   `parseCompanyIntent` detects "find people at [company]" → coach offers "Run live search at
   {Company}" button opening company discovery prefilled. Browse-verified with "find people at
   Bain in Paris"; non-company refines unchanged.
-- **Iter 2 (in progress):** Phase 4 backend, agent building migration + `GET /api/warm-intros`
-  matcher + seed-2nd-user script. On completion: validate, ship, confirm READY.
+- **Iter 2-4 Phase 4 (verifying):** cross-user warm-intro graph, BUILT + shipped.
+  Backend (9374b57): schema (`users.linkedin_urn` + `share_network_for_intros` + contacts index),
+  `GET /api/warm-intros` matcher, PATCH consent on /api/users/me, seed-2nd-user script (peer B +
+  3 candidates). Frontend (4a9180c): Sidebar "Warm Intros" → /v2/warm-intros lane (opt-in prompt /
+  "via {peer}" cards / ask-for-intro draft) + Settings consent toggle.
+  **2 matcher bugs found+fixed live:** (a) giant IN() over A's 1000-urn network → 500 (4b9221d);
+  (b) 1000-row default cap dropped the bridge contact (A has 1331) → fetch range to 9999 (4a9180c).
+  Scale TODO noted in route: targeted queries for very large networks.
+- **Phase 4 DONE + VERIFIED LIVE (01f6f20):** 3rd matcher bug fixed, goal filter did literal
+  includes() of A's compound industry string ("AI/Technology; Private Equity & Venture Capital")
+  → 0 matches; now tokenizes industries+geos and matches on ANY industry OR geo hit. API returns
+  4 "via {peer}" cards; /v2/warm-intros lane renders them with provenance chips + ask-for-intro
+  CTA. The differentiator works end-to-end (web surface + matching, on seeded multi-user data).
+  Remaining for Phase 4: real cross-user demo needs ≥2 real opted-in users (GTM, not code);
+  capture user's OWN urn at sync (extension follow-up); the ask-for-intro draft reuses the
+  already-verified generate flow.
+- **Next:** iter 5 = polish (em-dash in scoring rationale; onboarding "0 of 2" counter);
+  iter 6 = full fresh-journey regression walkthrough + final report.
 - **Phase 4 spike DONE:** `docs/specs/V2_P4_WARM_INTROS.md` written (schema = 2 cols on `users`
   + index; server-side `/api/warm-intros` matching with consent; seed a 2nd user to validate).
   Ready to build as iter 2+.
