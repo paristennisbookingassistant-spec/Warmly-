@@ -32,6 +32,8 @@
     {
       "matches": [
         "https://ai-networking-coach.vercel.app/*",
+        "https://thewarmly.com/*",
+        "https://www.thewarmly.com/*",
         "http://localhost:3000/*"
       ],
       "js": ["content-script/auth-bridge.js"],
