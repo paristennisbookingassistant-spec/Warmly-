@@ -239,7 +239,7 @@ function contactToDeckCard(c: Contact): DeckCard {
 // Only score the front of the deck — the cards the user actually sees before
 // swiping. Ranking the whole 24-25 set in one MiniMax call blows past the
 // serverless timeout (504). 8 is fast and covers the visible window.
-const SCORE_BATCH = 8;
+const SCORE_BATCH = 10;
 // Scoring is a non-blocking enhancement (the deck is usable immediately). The
 // MiniMax rank is a reasoning call — measured ~30s with a real profile + 8
 // candidates — so give it a generous window to land, but always abort by here
