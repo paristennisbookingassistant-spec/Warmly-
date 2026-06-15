@@ -19,6 +19,12 @@ interface UserMeResponse {
   error?: unknown;
 }
 
+// Module-level: once we've confirmed the user is onboarded this session, never
+// re-check on subsequent navigations. Previously this fetched /api/users/me on
+// EVERY screen switch (effect keyed on pathname), adding a redundant round-trip
+// to each navigation. Resets only on a full page reload.
+let confirmedOnboarded = false;
+
 export function OnboardingGate() {
   const router = useRouter();
   const pathname = usePathname();
@@ -26,12 +32,16 @@ export function OnboardingGate() {
   useEffect(() => {
     // Never redirect when already on the onboarding page
     if (pathname === "/v2/onboarding") return;
+    // Already verified onboarded this session — skip the network call.
+    if (confirmedOnboarded) return;
 
     fetch("/api/users/me", { credentials: "include" })
       .then((r) => r.json() as Promise<UserMeResponse>)
       .then((body) => {
         if (body.data && body.data.onboarded === false) {
           router.replace("/v2/onboarding");
+        } else if (body.data) {
+          confirmedOnboarded = true;
         }
       })
       .catch(() => {
