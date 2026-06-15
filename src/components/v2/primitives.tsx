@@ -8,6 +8,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { Icon, type IconProps } from "./icons";
 import { TIER_STYLES, type Tier } from "./palette";
+import { AvatarImg } from "./AvatarImg";
 
 type IconType = (props: IconProps) => ReactNode;
 
@@ -239,16 +240,62 @@ export function StatusBadge({ status, followUpDue }: StatusBadgeProps) {
 }
 
 // ---------- Avatar ----------
-export function Avatar({ src, size = 40, className = "" }: { src?: string | null; size?: number; className?: string }) {
-  return (
+
+/** Deterministic soft background for initials avatars — drawn from the warm palette */
+const INITIALS_BG = [
+  { bg: "#f3e2cd", fg: "#7a4a25" }, // sienna
+  { bg: "#dde6ee", fg: "#2f4d63" }, // steel
+  { bg: "#dcebd9", fg: "#34553e" }, // sage
+  { bg: "#ede9fe", fg: "#4c1d95" }, // violet
+  { bg: "#fef3c7", fg: "#92400e" }, // amber
+  { bg: "#fce7f3", fg: "#9d174d" }, // rose
+];
+
+function avatarColorFor(name: string): { bg: string; fg: string } {
+  const hash = name.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  return INITIALS_BG[hash % INITIALS_BG.length];
+}
+
+function nameInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+}
+
+export function Avatar({
+  src,
+  name,
+  size = 40,
+  className = "",
+}: {
+  src?: string | null;
+  name?: string;
+  size?: number;
+  className?: string;
+}) {
+  // Initials on a deterministic soft tinted background — shown when there's no
+  // photo OR (via AvatarImg's onError) when the remote image fails to load.
+  const label = name ? nameInitials(name) : "?";
+  const { bg, fg } = name ? avatarColorFor(name) : { bg: "#f3e2cd", fg: "#7a4a25" };
+  const fontSize = Math.round(size * 0.36);
+
+  const initialsEl = (
     <div
-      className={`rounded-full overflow-hidden flex-shrink-0 ${className}`}
-      style={{ width: size, height: size, background: "var(--bg-sunk)" }}
+      className={`rounded-full flex-shrink-0 flex items-center justify-center select-none font-semibold ${className}`}
+      style={{ width: size, height: size, background: bg, color: fg, fontSize }}
+      aria-label={name}
+      title={name}
     >
-      {src && (
-        // eslint-disable-next-line @next/next/no-img-element -- remote avatars (LinkedIn CDN / pravatar), no static import
-        <img src={src} alt="" className="w-full h-full object-cover" />
-      )}
+      {label}
     </div>
   );
+
+  if (src) {
+    return (
+      <AvatarImg src={src} size={size} className={className} fallback={initialsEl} />
+    );
+  }
+
+  return initialsEl;
 }
