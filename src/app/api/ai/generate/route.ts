@@ -175,6 +175,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           education: contact.education ?? [],
           location: contact.location,
           profile_snapshot: contact.profile_snapshot,
+          source: contact.source,
         },
         conversation_summary: conversationSummaryText,
         recent_messages: recentMessages.map((m) => ({

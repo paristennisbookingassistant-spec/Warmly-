@@ -111,6 +111,9 @@ export interface ContactProfileForScoring {
   education: EducationEntry[];
   location: string | null;
   profile_snapshot: ProfileSnapshot | null;
+  /** Where this contact came from (e.g. 'cv_book' = INSEAD alumnus). Used to
+   *  surface the shared-school hook in outreach drafts. */
+  source?: string | null;
 }
 
 export interface ScoringPromptInput {

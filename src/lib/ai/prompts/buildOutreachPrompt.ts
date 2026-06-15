@@ -144,13 +144,22 @@ function buildOutreachUserPrompt(
 
   // Recipient identity
   if (c) {
+    // INSEAD alumnus? cv_book contacts are INSEAD alumni by definition; also
+    // catch any contact whose education mentions INSEAD. The user is an INSEAD
+    // MBA, so this is the strongest shared-context hook — make it explicit so
+    // the draft leads with it instead of burying or missing it.
+    const isInseadAlum =
+      c.source === "cv_book" || /insead/i.test(JSON.stringify(c.education ?? []));
+    const inseadNote = isInseadAlum
+      ? `\n\nSHARED-SCHOOL HOOK (use it): ${c.name} is an INSEAD alumnus, like the user. The shared INSEAD network is your STRONGEST connection point. Lead with it naturally ("as a fellow INSEAD…", name the cohort if known) rather than burying it or opening cold. Do not over-formalize it.`
+      : "";
     blocks.push(
       `## Recipient
 - Name: ${c.name}
 - Current role: ${c.current_title ?? "—"} at ${c.company ?? "—"}
 - Location: ${c.location ?? "—"}
 - Career history: ${JSON.stringify(c.career_history)}
-- Education: ${JSON.stringify(c.education)}`
+- Education: ${JSON.stringify(c.education)}${inseadNote}`
     );
   }
 
