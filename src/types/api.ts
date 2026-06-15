@@ -473,5 +473,50 @@ export interface BulkImportResponseData {
 
 export type BulkImportResponse = ApiResponse<BulkImportResponseData>;
 
+// ---------------------------------------------------------------------------
+// Warm Intros — /api/warm-intros (Phase 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single 2nd-degree warm-intro candidate card returned by GET /api/warm-intros.
+ * The candidate is reachable via a bridge peer (user B) who both:
+ *   (a) is opted in to sharing their network, and
+ *   (b) appears in the requester's (user A's) contact list.
+ */
+export interface WarmIntroCard {
+  /** The 2nd-degree candidate A wants to meet */
+  candidate: {
+    name: string;
+    title: string | null;
+    company: string | null;
+    linkedin_url: string | null;
+  };
+  /** The bridge peer through whom A can request the intro */
+  via: {
+    /** B's display name (from users.name) */
+    peer_name: string;
+    /** B's contact_id in A's contacts table — used to look up B's conversation */
+    peer_contact_id: string;
+  };
+  /**
+   * One-line explanation of why this candidate matches A's goal.
+   * e.g. "PE/VC professional in Paris matching your target industries."
+   */
+  match_reason: string;
+}
+
+export interface GetWarmIntrosData {
+  /** Whether user A has opted in to the warm-intros feature */
+  optedIn: boolean;
+  /** Up to 25 warm-intro candidate cards; empty if not opted in or no matches */
+  cards: WarmIntroCard[];
+}
+
+export type GetWarmIntrosResponse = ApiResponse<GetWarmIntrosData>;
+
+// ---------------------------------------------------------------------------
+// Re-exports
+// ---------------------------------------------------------------------------
+
 // Re-export enrichment entry types for convenience (frontend + extension can import from api.ts)
 export type { LinkedInExperienceEntry, LinkedInEducationEntry, SyncJob, SyncJobStatus, SyncJobPhase };

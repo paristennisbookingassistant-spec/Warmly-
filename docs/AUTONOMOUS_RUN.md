@@ -34,8 +34,12 @@ extension reload; live-scrape founder verification; INSEAD IT allowlist for thew
 rotate the Brave key + Vercel token.
 
 ## Iteration log
-- **Iter 1 (in progress):** refine-chat → company-discovery routing, frontend agent building
-  (background). On its completion: validate, ship, confirm deploy READY, browse-verify.
+- **Iter 1 DONE + verified live (e8f5607):** refine-chat → company-discovery routing.
+  `parseCompanyIntent` detects "find people at [company]" → coach offers "Run live search at
+  {Company}" button opening company discovery prefilled. Browse-verified with "find people at
+  Bain in Paris"; non-company refines unchanged.
+- **Iter 2 (in progress):** Phase 4 backend, agent building migration + `GET /api/warm-intros`
+  matcher + seed-2nd-user script. On completion: validate, ship, confirm READY.
 - **Phase 4 spike DONE:** `docs/specs/V2_P4_WARM_INTROS.md` written (schema = 2 cols on `users`
   + index; server-side `/api/warm-intros` matching with consent; seed a 2nd user to validate).
   Ready to build as iter 2+.

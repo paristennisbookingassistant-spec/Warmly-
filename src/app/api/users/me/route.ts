@@ -27,6 +27,8 @@ const PatchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   profile_md: z.string().trim().max(20_000).optional(),
   voice_md: z.string().trim().max(10_000).optional(),
+  // Phase 4 warm-intro consent (explicit opt-in).
+  share_network_for_intros: z.boolean().optional(),
 });
 
 export async function GET(): Promise<NextResponse> {
@@ -38,7 +40,7 @@ export async function GET(): Promise<NextResponse> {
 
   const { data, error } = await supabase
     .from("users")
-    .select("id, email, name, onboarded, profile_md, voice_md, onboarding_materials, goals, networking_preferences")
+    .select("id, email, name, onboarded, profile_md, voice_md, onboarding_materials, goals, networking_preferences, share_network_for_intros")
     .eq("id", user.id)
     .single();
 
@@ -75,16 +77,18 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const updatePayload: Record<string, string> = {};
+  const updatePayload: Record<string, string | boolean> = {};
   if (parsed.data.name !== undefined) updatePayload.name = parsed.data.name;
   if (parsed.data.profile_md !== undefined) updatePayload.profile_md = parsed.data.profile_md;
   if (parsed.data.voice_md !== undefined) updatePayload.voice_md = parsed.data.voice_md;
+  if (parsed.data.share_network_for_intros !== undefined)
+    updatePayload.share_network_for_intros = parsed.data.share_network_for_intros;
 
   // No-op if the client sent no editable fields. Return current row.
   if (Object.keys(updatePayload).length === 0) {
     const { data } = await supabase
       .from("users")
-      .select("id, email, name, profile_md, voice_md")
+      .select("id, email, name, profile_md, voice_md, share_network_for_intros")
       .eq("id", user.id)
       .single();
     return NextResponse.json({ data, error: null });

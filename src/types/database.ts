@@ -164,6 +164,19 @@ export interface User {
   /** Agent's long-term memory — nullable until first interaction */
   user_memory: UserMemory | null;
   /**
+   * The user's own LinkedIn profile URN (e.g. urn:li:fsd_profile:ACoAAA…).
+   * Lets other Warmly users detect they are connected to this user via contacts.
+   * Null until captured at network sync.
+   */
+  linkedin_urn: string | null;
+  /**
+   * Explicit opt-in for cross-user warm-intro matching.
+   * When true, this user's synced connections may be surfaced to peers they're
+   * connected to as warm-intro candidates. Default false.
+   * Both the requester (A) and the bridge peer (B) must be opted in.
+   */
+  share_network_for_intros: boolean;
+  /**
    * Free-form markdown IDENTITY narrative — auto-built from onboarding
    * answers, optional CV upload, and structured career history.
    * Slow-changing. Editable by user via Settings. Injected into outreach
