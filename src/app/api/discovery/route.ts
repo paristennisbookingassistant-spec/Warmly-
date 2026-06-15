@@ -29,9 +29,12 @@ import type { DiscoverySession } from "@/types/database";
 // ---------------------------------------------------------------------------
 
 export const MAX_PROFILES_PER_SESSION = 25;
-export const MAX_SESSIONS_PER_DAY = 2;
-/** Minimum milliseconds between sessions: 2 hours */
-export const MIN_COOLDOWN_MS = 2 * 60 * 60 * 1000;
+// TESTING: raised from 2 → 50 and cooldown 2h → 1min so Liyang can test the
+// live scrape repeatedly. RESTORE to 2 / 2h before real use (LinkedIn ban
+// safety — see docs/LINKEDIN_GUARDRAILS.md).
+export const MAX_SESSIONS_PER_DAY = 50;
+/** Minimum milliseconds between sessions (testing: 1 min; production: 2h) */
+export const MIN_COOLDOWN_MS = 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Validation schemas

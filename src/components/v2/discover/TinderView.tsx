@@ -336,14 +336,13 @@ function QueueBanner({
         <div className="font-mono-tag mb-1.5" style={{ fontSize: 9, color: c.accent }}>
           Queue
         </div>
-        {/* maxWidth forces the queue to wrap at 8 chips per row → at most two
-            tidy rows for a 16-card batch (8 + 8) instead of one long line. */}
-        <div className="flex items-center gap-1.5 flex-wrap" style={{ maxWidth: 244 }}>
+        {/* Single row of larger tokens (batch capped at 10), no wrap. */}
+        <div className="flex items-center gap-2">
           {deck.map((p, i) => {
             const isSaved = savedIds.includes(p.id);
             const isSkipped = skippedIds.includes(p.id);
             const isCurrent = i === idx;
-            const size = isCurrent ? 28 : 24;
+            const size = isCurrent ? 42 : 36;
 
             // One cohesive palette — state only, no per-person rainbow.
             // Upcoming: soft cream token. Current: channel-accent ring.
@@ -382,7 +381,7 @@ function QueueBanner({
                   border,
                   boxShadow,
                   opacity,
-                  fontSize: isCurrent ? 10.5 : 9,
+                  fontSize: isCurrent ? 15 : 13,
                   letterSpacing: "0.01em",
                 }}
                 title={p.name}

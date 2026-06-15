@@ -202,7 +202,17 @@ function buildBatchRankPrompt(input: BatchRankInput): string {
   // Task
   const topN = Math.min(input.topN ?? 10, input.candidates.length);
   blocks.push(
-    `## Task\nRank the ${topN} best candidates for this user. Compare them against each other — your reasoning should explain WHY this candidate beats the others, not just describe them. Return JSON matching the schema.`
+    `## Task
+Rank the ${topN} best candidates for this user, strongest first.
+
+For each, the "reasoning" field must be a SUBSTANTIVE 1-2 sentence rationale a sharp networking coach would give — name the SPECIFIC reason this person matters to THIS user's goal. Draw on at least one concrete hook:
+- a shared school / INSEAD cohort (name it),
+- a career-transition parallel the user is trying to make (e.g. consulting→VC, pharma→AI PM) that this person has already navigated,
+- the candidate's exact role/company relevance to the user's target industry/companies/geography,
+- or a specific conversation angle (what the user could learn from them).
+Do NOT write generic filler ("relevant background", "strong profile") and do NOT just restate their title. If you can't find a real hook, score them lower. Compare candidates against each other (why this one beats the rest).
+
+The "hook" field = the single strongest outreach angle in a few words. Return JSON matching the schema.`
   );
 
   return blocks.join("\n\n");

@@ -10,8 +10,10 @@
 // ---------------------------------------------------------------------------
 
 export const MAX_PROFILES_PER_SESSION = 25;
-export const MAX_SESSIONS_PER_DAY = 2;
-export const MIN_HOURS_BETWEEN_SESSIONS = 2;
+// TESTING: raised 2 → 50, cooldown 2h → 0 so Liyang can test the live scrape
+// repeatedly. RESTORE to 2 / 2 before real use (LinkedIn ban safety).
+export const MAX_SESSIONS_PER_DAY = 50;
+export const MIN_HOURS_BETWEEN_SESSIONS = 0;
 export const MIN_DELAY_BETWEEN_PROFILES_MS = 15_000;
 export const MAX_DELAY_BETWEEN_PROFILES_MS = 45_000;
 
