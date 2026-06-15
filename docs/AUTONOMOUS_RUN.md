@@ -110,3 +110,14 @@ Code TODOs noted: warm-intros targeted-query scaling; capture user's OWN urn at 
 - **Next up (queue):** iter 2 = Phase 4 migration + matching API + seed; iter 3 = opt-in toggle;
   iter 4 = warm-intros lane + ask-for-intro draft; iter 5 = polish (em-dash in scoring, onboarding
   counter); iter 6 = full regression walkthrough + final report.
+
+## Overnight session 2 — verified shipped (all live, browse-confirmed)
+1. Warm intros IN the LinkedIn deck (ddc9d97) — "via {peer} · ask for intro · 2nd" cards lead it. ✓
+2. Queue overlap fixed (ddc9d97) — single row, no spill over saved/skipped. ✓
+3. Nav latency: OnboardingGate once-per-session, not per-nav (faee30a). ✓ (API calls still 1-6s = cold starts)
+4. INSEAD-alumni draft hook (753258a) — drafts lead with shared-school. ✓
+5. CRM category auto-suggest + one-tap Confirm chip (fa187a0). ✓ (Ning Gao → Nurturing)
+6. Scoring loading state (72d4bf7) — "Scoring this match…" shimmer instead of weak placeholder. ✓
+Diagnosed: meeting prep WORKS (5 briefs generated) — the "doesn't work" was the slow-load perception.
+Queued: "Sort your network" swipe game (user undecided — propose, don't build blind); deeper
+client-side caching for nav latency (bigger refactor); LinkedIn sync = extension-dependent (clarify).
