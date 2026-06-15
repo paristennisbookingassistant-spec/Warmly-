@@ -652,15 +652,34 @@ function ProfileCard({
           </div>
         </div>
 
-        {/* Rationale */}
-        {p.rationale && (
+        {/* Rationale — an unscored directory/LinkedIn card (tier null, not a
+            warm-intro) is still being scored: show a clear loading state rather
+            than the raw placeholder ribbon (which reads as a weak "done"). */}
+        {p.tier === null && !p.via ? (
+          <div className="px-6 py-2 flex-1 overflow-hidden">
+            <div className="font-mono-tag text-ink-4 mb-1.5" style={{ fontSize: 9.5 }}>
+              Why I&apos;m pushing them
+            </div>
+            <div className="flex items-center gap-2 text-[13px] text-ink-3">
+              <span
+                className="rounded-full pulse-dot inline-block flex-shrink-0"
+                style={{ width: 7, height: 7, background: c.accent }}
+              />
+              Scoring this match against your profile&hellip;
+            </div>
+            <div className="mt-2.5 space-y-1.5" aria-hidden>
+              <div className="h-2.5 rounded shimmering" style={{ width: "92%" }} />
+              <div className="h-2.5 rounded shimmering" style={{ width: "78%" }} />
+            </div>
+          </div>
+        ) : p.rationale ? (
           <div className="px-6 py-2 flex-1 overflow-hidden">
             <div className="font-mono-tag text-ink-4 mb-1.5" style={{ fontSize: 9.5 }}>
               Why I&apos;m pushing them
             </div>
             <p className="text-[13px] text-ink-2 leading-relaxed">{p.rationale}</p>
           </div>
-        )}
+        ) : null}
 
         {/* About */}
         {p.about.length > 0 && (
