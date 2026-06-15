@@ -33,6 +33,16 @@ intel (Brave, live), meeting synthesis (5a), CRM (5b), WhatsApp, /v2 default, di
 extension reload; live-scrape founder verification; INSEAD IT allowlist for thewarmly.com;
 rotate the Brave key + Vercel token.
 
+## Overnight session 2 (user asleep, Product Director mode, follow VISION, test every piece)
+Queue: (a) **queue circles overlap saved/skipped icons**, bug I introduced with bigger circles, FIX
+(in TinderView, but a warm-intro agent is editing it, fix after it lands). (b) **warm-intro →
+LinkedIn-deck integration**, agent building, ship+verify. (c) **screen-switch latency**, diagnose
++ fix (client fetches on every mount? gate re-check?). (d) **meeting prep "doesn't work"**, re-test,
+fix. (e) **draft outreach context**, CV-book contacts are INSEAD alumni → shared-school hook should
+be automatic; wire contact source/alumni into the draft prompt. (f) **LinkedIn sync reality**,
+clarify status (extension-dependent; can't sync for the user). (g) **contact categorization / game**,
+AI auto-suggest category (deferred from CRM MVP) + decide swipe-to-categorize game. Work each, verify.
+
 ## Iteration log
 - **Iter 1 DONE + verified live (e8f5607):** refine-chat → company-discovery routing.
   `parseCompanyIntent` detects "find people at [company]" → coach offers "Run live search at

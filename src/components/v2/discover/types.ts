@@ -61,6 +61,12 @@ export interface DeckCard {
    * Null/undefined when not available (seed deck, unscored contacts).
    */
   education?: LinkedInEducationEntry[] | null;
+  /**
+   * If present, this is a 2nd-degree warm-intro card (sourced from /api/warm-intros).
+   * The peer is the mutual connection who can broker the introduction.
+   * Null / undefined = ordinary 1st-degree card.
+   */
+  via?: { peerName: string; peerContactId: string } | null;
 }
 
 /**

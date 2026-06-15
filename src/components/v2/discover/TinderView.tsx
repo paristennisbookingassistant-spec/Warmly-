@@ -197,7 +197,12 @@ export function TinderView({ channel, deck, scoring = false, onBack, onSave, onS
                   />
                   <div className="flex items-center gap-5 mt-7">
                     <SwipeBtn variant="skip" onClick={handleSkip} />
-                    <SwipeBtn variant="save" channel={channel} onClick={handleSave} />
+                    <SwipeBtn
+                      variant="save"
+                      channel={channel}
+                      onClick={handleSave}
+                      isWarmIntro={Boolean(current?.via)}
+                    />
                   </div>
                 </>
               )}
@@ -332,7 +337,9 @@ function QueueBanner({
         }}
       />
 
-      <div className="flex-1 min-w-0">
+      {/* overflow-hidden so the single non-wrapping row of large tokens never
+          spills over the saved/skipped counter on narrow panels. */}
+      <div className="flex-1 min-w-0 overflow-hidden">
         <div className="font-mono-tag mb-1.5" style={{ fontSize: 9, color: c.accent }}>
           Queue
         </div>
@@ -342,7 +349,7 @@ function QueueBanner({
             const isSaved = savedIds.includes(p.id);
             const isSkipped = skippedIds.includes(p.id);
             const isCurrent = i === idx;
-            const size = isCurrent ? 42 : 36;
+            const size = isCurrent ? 38 : 32;
 
             // One cohesive palette — state only, no per-person rainbow.
             // Upcoming: soft cream token. Current: channel-accent ring.
@@ -381,7 +388,7 @@ function QueueBanner({
                   border,
                   boxShadow,
                   opacity,
-                  fontSize: isCurrent ? 15 : 13,
+                  fontSize: isCurrent ? 14 : 12,
                   letterSpacing: "0.01em",
                 }}
                 title={p.name}
@@ -523,51 +530,83 @@ function ProfileCard({
         style={style}
       >
         {/* Source ribbon */}
-        <div
-          className="flex items-center gap-2 px-5 py-2.5 border-b flex-shrink-0"
-          style={{ background: c.soft, borderColor: `${c.accent}33` }}
-        >
-          {channel === "linkedin" ? (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/v2/linkedin-logo.png" alt="LinkedIn" className="h-3 w-auto object-contain" />
-              <span className="text-ink-4">·</span>
-              <div className="text-[11.5px] leading-tight flex-1 min-w-0 truncate" style={{ color: c.ink }}>
-                <span className="font-semibold">1st-degree connection</span>
-              </div>
-              <span
-                className="text-[10px] font-medium px-1.5 h-[18px] inline-flex items-center rounded-md"
-                style={{
-                  background: "#ffffff",
-                  color: c.ink,
-                  fontFamily: '"JetBrains Mono", monospace',
-                }}
-              >
-                1st
-              </span>
-            </>
-          ) : (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/v2/insead-logo.png" alt="INSEAD" className="h-4 w-auto object-contain" />
-              <span className="text-ink-4">·</span>
-              <Icon.Book size={12} style={{ color: c.accent }} />
-              <div className="text-[11.5px] leading-tight flex-1" style={{ color: c.ink }}>
-                <span className="font-semibold">INSEAD CV book</span> · indexed alumnus
-              </div>
-              <span
-                className="text-[10px] font-medium px-1.5 h-[18px] inline-flex items-center rounded-md"
-                style={{
-                  background: "#ffffff",
-                  color: c.ink,
-                  fontFamily: '"JetBrains Mono", monospace',
-                }}
-              >
-                1st
-              </span>
-            </>
-          )}
-        </div>
+        {p.via ? (
+          // 2nd-degree warm-intro ribbon — steel-blue palette
+          <div
+            className="flex items-center gap-2 px-5 py-2.5 border-b flex-shrink-0"
+            style={{ background: "#dde6ee", borderColor: "rgba(74,111,135,0.25)" }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/v2/linkedin-logo.png" alt="LinkedIn" className="h-3 w-auto object-contain" />
+            <span className="text-ink-4">·</span>
+            <Icon.Users size={12} style={{ color: "#2f4d63" }} />
+            <span
+              className="inline-flex items-center gap-1.5 px-2 h-[20px] rounded-full text-[10.5px] font-medium flex-shrink-0"
+              style={{ background: "#4a6f87", color: "#ffffff" }}
+            >
+              via {p.via.peerName}
+            </span>
+            <div className="text-[11px] leading-tight flex-1 min-w-0 truncate" style={{ color: "#2f4d63" }}>
+              · ask for a warm intro
+            </div>
+            <span
+              className="text-[10px] font-medium px-1.5 h-[18px] inline-flex items-center rounded-md flex-shrink-0"
+              style={{
+                background: "#ffffff",
+                color: "#2f4d63",
+                fontFamily: '"JetBrains Mono", monospace',
+              }}
+            >
+              2nd
+            </span>
+          </div>
+        ) : (
+          <div
+            className="flex items-center gap-2 px-5 py-2.5 border-b flex-shrink-0"
+            style={{ background: c.soft, borderColor: `${c.accent}33` }}
+          >
+            {channel === "linkedin" ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/v2/linkedin-logo.png" alt="LinkedIn" className="h-3 w-auto object-contain" />
+                <span className="text-ink-4">·</span>
+                <div className="text-[11.5px] leading-tight flex-1 min-w-0 truncate" style={{ color: c.ink }}>
+                  <span className="font-semibold">1st-degree connection</span>
+                </div>
+                <span
+                  className="text-[10px] font-medium px-1.5 h-[18px] inline-flex items-center rounded-md"
+                  style={{
+                    background: "#ffffff",
+                    color: c.ink,
+                    fontFamily: '"JetBrains Mono", monospace',
+                  }}
+                >
+                  1st
+                </span>
+              </>
+            ) : (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/v2/insead-logo.png" alt="INSEAD" className="h-4 w-auto object-contain" />
+                <span className="text-ink-4">·</span>
+                <Icon.Book size={12} style={{ color: c.accent }} />
+                <div className="text-[11.5px] leading-tight flex-1" style={{ color: c.ink }}>
+                  <span className="font-semibold">INSEAD CV book</span> · indexed alumnus
+                </div>
+                <span
+                  className="text-[10px] font-medium px-1.5 h-[18px] inline-flex items-center rounded-md"
+                  style={{
+                    background: "#ffffff",
+                    color: c.ink,
+                    fontFamily: '"JetBrains Mono", monospace',
+                  }}
+                >
+                  1st
+                </span>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Identity */}
         <div className="px-6 pt-5 pb-3">
@@ -901,32 +940,40 @@ function SwipeBtn({
   variant,
   channel,
   onClick,
+  isWarmIntro,
 }: {
   variant: "save" | "skip";
   channel?: ChannelKey;
   onClick: () => void;
+  /** When true, the Save button reads "Ask for intro" instead of "Save". */
+  isWarmIntro?: boolean;
 }) {
   const isSave = variant === "save";
   const c = channel ? CHANNELS[channel] : CHANNELS.cv;
+  // Warm-intro saves use a steel-blue accent to visually match the "via" chip.
+  const saveBackground = isWarmIntro ? "#4a6f87" : c.accent;
+  const saveShadow = isWarmIntro ? "0 8px 22px rgba(74,111,135,0.28)" : `0 8px 22px ${c.tint}`;
 
   return (
     <button
       onClick={onClick}
       className="inline-flex items-center justify-center gap-2 transition-all hover:scale-[1.04] focus-ring"
       style={{
-        background: isSave ? c.accent : "#ffffff",
+        background: isSave ? saveBackground : "#ffffff",
         color: isSave ? "#ffffff" : "#6b5e4a",
         border: isSave ? "none" : "1px solid #d9cdb4",
-        width: 168,
+        width: isWarmIntro && isSave ? 196 : 168,
         height: 52,
         borderRadius: 999,
         boxShadow: isSave
-          ? `0 8px 22px ${c.tint}`
+          ? saveShadow
           : "0 1px 0 rgba(31,27,22,0.04), 0 2px 8px rgba(31,27,22,0.04)",
       }}
     >
-      {isSave ? <Icon.HeartFill size={17} /> : <Icon.X size={17} />}
-      <span className="text-[14px] font-medium">{isSave ? "Save" : "Skip"}</span>
+      {isSave ? <Icon.Users size={17} /> : <Icon.X size={17} />}
+      <span className="text-[14px] font-medium">
+        {isSave ? (isWarmIntro ? "Ask for intro" : "Save") : "Skip"}
+      </span>
       <span className="text-[11px] opacity-60 ml-1">{isSave ? "→" : "←"}</span>
     </button>
   );

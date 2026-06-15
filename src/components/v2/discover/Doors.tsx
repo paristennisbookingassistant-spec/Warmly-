@@ -30,6 +30,8 @@ interface DoorsViewProps {
   onOpenLinkedIn: () => void;
   /** Opens the validate-criteria card for live company discovery */
   onOpenCompanyDiscover: () => void;
+  /** When true, the user has NOT opted in to warm intros — show a hint on the LinkedIn door */
+  warmIntrosOptedIn?: boolean;
 }
 
 export function DoorsView({
@@ -39,6 +41,7 @@ export function DoorsView({
   onOpenCV,
   onOpenLinkedIn,
   onOpenCompanyDiscover,
+  warmIntrosOptedIn = true,
 }: DoorsViewProps) {
   return (
     <div className="fade-up flex flex-col flex-1 min-h-0">
@@ -80,6 +83,7 @@ export function DoorsView({
           connected={linkedInConnected}
           onClick={onOpenLinkedIn}
           peers={SYNCED_PEERS}
+          showWarmIntrosHint={!warmIntrosOptedIn}
         />
       </div>
 
@@ -177,11 +181,13 @@ function LinkedInDoor({
   connected,
   onClick,
   peers,
+  showWarmIntrosHint,
 }: {
   queueCount: number;
   connected: boolean;
   onClick: () => void;
   peers: SyncedPeer[];
+  showWarmIntrosHint?: boolean;
 }) {
   const c = CHANNELS.linkedin;
   return (
@@ -226,6 +232,17 @@ function LinkedInDoor({
         ]}
         cta={connected ? "Open LinkedIn Network" : "Set up LinkedIn channel"}
       />
+      {showWarmIntrosHint && (
+        <div
+          className="mx-7 mb-5 -mt-1 flex items-center gap-2 px-3 py-2 rounded-lg text-[11.5px]"
+          style={{ background: "#f1f5f9", color: "#4a6f87", border: "1px dashed #c2d4e0" }}
+        >
+          <Icon.Network size={12} />
+          <span>
+            Turn on <strong>Warm Intros</strong> in Settings to see 2nd-degree paths in this deck.
+          </span>
+        </div>
+      )}
     </DoorShell>
   );
 }

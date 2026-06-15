@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useToast } from "../Toast";
 import { tierLabelFromNumber } from "../palette";
 import { DoorsView } from "./Doors";
@@ -35,6 +35,30 @@ interface ContactsApiResponse {
     total: number;
     has_more: boolean;
   };
+}
+
+interface WarmIntroApiCard {
+  candidate: {
+    name: string;
+    title: string | null;
+    company: string | null;
+    linkedin_url: string | null;
+  };
+  via: {
+    peer_name: string;
+    peer_contact_id: string;
+  };
+  match_reason: string;
+}
+
+interface WarmIntrosApiResponse {
+  data: { optedIn: boolean; cards: WarmIntroApiCard[] } | null;
+  error: { code: string; message: string } | null;
+}
+
+interface ConversationApiResponse { data: { id: string }; error?: string; }
+interface GenerateApiResponse {
+  data: { artifact_id: string; content: { message: string } }; error?: string;
 }
 
 
@@ -316,6 +340,7 @@ type View = "doors" | "cv-tinder" | "linkedin-setup" | "linkedin-tinder";
 
 export function DiscoverScreen() {
   const toast = useToast();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [view, setView] = useState<View>("doors");
   // Show the validate-criteria card below the doors grid
@@ -361,6 +386,9 @@ export function DiscoverScreen() {
   const [liveScoring, setLiveScoring] = useState(false);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [linkedInConnected, setLinkedInConnected] = useState(false);
+  // Tracks warm-intros opt-in status (populated during fetchLiveDeck).
+  // undefined = not yet loaded (hides the hint during initial load).
+  const [warmIntrosOptedIn, setWarmIntrosOptedIn] = useState<boolean | undefined>(undefined);
 
   // ---------- INSEAD: fetch + score ----------
 
@@ -417,24 +445,73 @@ export function DiscoverScreen() {
     setLiveLoading(true);
     setLiveError(null);
     try {
-      const res = await fetch(
-        "/api/contacts?user_action=pending&sort_by=relevance_score&sort_order=desc&per_page=10&lite=true",
-        { credentials: "include" }
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as ContactsApiResponse;
+      // Fetch 1st-degree pending contacts and warm-intro candidates in parallel.
+      const [contactsRes, warmRes] = await Promise.all([
+        fetch(
+          "/api/contacts?user_action=pending&sort_by=relevance_score&sort_order=desc&per_page=10&lite=true",
+          { credentials: "include" }
+        ),
+        fetch("/api/warm-intros", { credentials: "include" }).catch(() => null),
+      ]);
+
+      if (!contactsRes.ok) throw new Error(`HTTP ${contactsRes.status}`);
+      const json = (await contactsRes.json()) as ContactsApiResponse;
       const items = json.data?.items ?? [];
       setLivePendingTotal(json.data?.total ?? items.length);
       setLinkedInConnected(items.length > 0);
-      const cards = items.map(contactToDeckCard);
+      const firstDegreecards = items.map(contactToDeckCard);
+
+      // Parse warm-intro cards. If the user isn't opted in or the call fails,
+      // silently skip — no error surfaced, the deck just shows 1st-degree only.
+      let warmCards: DeckCard[] = [];
+      if (warmRes?.ok) {
+        const warmJson = (await warmRes.json()) as WarmIntrosApiResponse;
+        setWarmIntrosOptedIn(warmJson.data?.optedIn ?? false);
+        if (!warmJson.error && warmJson.data?.optedIn && warmJson.data.cards.length > 0) {
+          warmCards = warmJson.data.cards.map((c) => ({
+            // Use a stable synthetic id so ranking map lookups don't collide
+            // with real contact UUIDs.
+            id: `warm-${c.via.peer_contact_id}-${c.candidate.name.replace(/\s+/g, "-")}`,
+            name: c.candidate.name,
+            role: c.candidate.title ?? null,
+            company: c.candidate.company ?? null,
+            location: null,
+            avatar: null,
+            linkedinUrl: c.candidate.linkedin_url ?? null,
+            tier: null,
+            rationale: c.match_reason,
+            about: [],
+            inseadShort: null,
+            channel: "linkedin" as const,
+            experience: null,
+            education: null,
+            via: { peerName: c.via.peer_name, peerContactId: c.via.peer_contact_id },
+          }));
+        }
+      }
+
+      // Warm-intro (2nd-degree) cards lead the deck — they're higher-value warm paths.
+      // 1st-degree cards follow.
+      const cards = [...warmCards, ...firstDegreecards];
       setLiveDeck(cards);
       setLiveLoading(false);
 
-      // Score the visible front of the deck (bounded + hard timeout).
-      if (cards.length > 0) {
+      // Score only the 1st-degree portion (warm-intro cards have match_reason already).
+      if (firstDegreecards.length > 0) {
         setLiveScoring(true);
-        const ranks = await rankWithTimeout("/api/ai/rank-batch", cards.map((c) => c.id), "contact_ids");
-        if (ranks) setLiveDeck((prev) => applyRankByMap(prev, ranks));
+        const ranks = await rankWithTimeout(
+          "/api/ai/rank-batch",
+          firstDegreecards.map((c) => c.id),
+          "contact_ids"
+        );
+        if (ranks) {
+          setLiveDeck((prev) => {
+            // Keep warm cards at the front, re-rank only the 1st-degree tail.
+            const warmPart = prev.filter((c) => c.via);
+            const firstPart = prev.filter((c) => !c.via);
+            return [...warmPart, ...applyRankByMap(firstPart, ranks)];
+          });
+        }
         setLiveScoring(false);
       }
     } catch (err) {
@@ -544,24 +621,84 @@ export function DiscoverScreen() {
     return `Filtered to ${what} — ${n} alumni in the queue, strongest matches first.`;
   }, [fetchAndScoreCvDeck]);
 
+  // ---------- LinkedIn: warm-intro ask-for-intro draft ----------
+
+  // Mirrors WarmIntrosLane.handleAskIntro exactly:
+  //   1. POST /api/conversations → get conversation id for the peer
+  //   2. POST /api/ai/generate outreach_draft with warm-intro framing + 1 cold-start retry
+  //   3. Route to /v2/contacts/{peerContactId} where the draft lands
+  const handleAskIntro = useCallback(
+    async (card: DeckCard) => {
+      if (!card.via) return;
+      const { peerName, peerContactId } = card.via;
+      toast(`Drafting your intro request to ${peerName}…`);
+      try {
+        const convRes = await fetch("/api/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ type: "contact_session", contact_id: peerContactId }),
+        });
+        if (!convRes.ok) throw new Error(`Conversation failed (${convRes.status})`);
+        const convJson = (await convRes.json()) as ConversationApiResponse;
+        if (convJson.error) throw new Error(convJson.error);
+
+        const titleCompany = [card.role, card.company].filter(Boolean).join(" at ");
+        const instructions = `Draft a warm intro request to ${peerName} asking them to introduce me to ${card.name}${titleCompany ? ` (${titleCompany})` : ""}. Reason: ${card.rationale ?? "shared networking goals"}`;
+        const genBody = JSON.stringify({
+          artifact_type: "outreach_draft",
+          contact_id: peerContactId,
+          conversation_id: convJson.data.id,
+          user_instructions: instructions,
+        });
+        const callGen = () =>
+          fetch("/api/ai/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: genBody,
+          });
+        let genRes = await callGen();
+        if (!genRes.ok) { await new Promise((r) => setTimeout(r, 1200)); genRes = await callGen(); }
+        if (!genRes.ok) throw new Error(`Generate failed (${genRes.status})`);
+        const genJson = (await genRes.json()) as GenerateApiResponse;
+        if (genJson.error) throw new Error(genJson.error);
+
+        toast(`Draft ready — asking ${peerName} to intro you to ${card.name.split(" ")[0]}.`);
+        router.push(`/v2/contacts/${peerContactId}`);
+      } catch (err) {
+        toast(err instanceof Error ? err.message : "Draft generation failed. Try again.");
+      }
+    },
+    [router, toast]
+  );
+
   // ---------- LinkedIn: save / skip ----------
 
-  const handleLinkedInSave = useCallback(async (card: DeckCard) => {
-    try {
-      const res = await fetch(`/api/contacts/${card.id}/review`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ action: "save" }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      toast(`${card.name} saved to contacts.`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Save failed";
-      toast(`Could not save ${card.name}: ${msg}`);
-      console.error("[DiscoverScreen] save failed:", err);
-    }
-  }, [toast]);
+  const handleLinkedInSave = useCallback(
+    async (card: DeckCard) => {
+      // Warm-intro cards: trigger the ask-for-intro draft flow to the peer.
+      if (card.via) {
+        await handleAskIntro(card);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/contacts/${card.id}/review`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ action: "save" }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        toast(`${card.name} saved to contacts.`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Save failed";
+        toast(`Could not save ${card.name}: ${msg}`);
+        console.error("[DiscoverScreen] save failed:", err);
+      }
+    },
+    [toast, handleAskIntro]
+  );
 
   const handleLinkedInSkip = useCallback(async (card: DeckCard) => {
     try {
@@ -759,6 +896,7 @@ export function DiscoverScreen() {
             cvQueueCount={cvTotal > 0 ? cvTotal : 961}
             onOpenCV={openCV}
             onOpenLinkedIn={openLinkedIn}
+            warmIntrosOptedIn={warmIntrosOptedIn}
             onOpenCompanyDiscover={() => {
               setShowCompanyCard(true);
               setIsUrlSeeded(false);
