@@ -6,7 +6,7 @@
  * Sits inside ContactDetailSidebar. PUT /api/contacts/[id] on change.
  */
 
-import { useState } from "react";
+import { useState, forwardRef } from "react";
 import type { RelationshipCategory } from "@/types/database";
 import { CATEGORY_CADENCE, CATEGORY_LABEL, isReconnectDue } from "@/lib/crm/cadence";
 import { SectionLabel } from "@/components/v2/primitives";
@@ -74,13 +74,14 @@ interface RelationshipDropdownProps {
   onSaved: (category: RelationshipCategory | null, cadenceDays: number | null) => void;
 }
 
-export function RelationshipDropdown({
+export const RelationshipDropdown = forwardRef<HTMLSelectElement, RelationshipDropdownProps>(
+function RelationshipDropdownInner({
   contactId,
   category,
   cadenceDays,
   nextTouchAt,
   onSaved,
-}: RelationshipDropdownProps) {
+}: RelationshipDropdownProps, ref) {
   const showToast = useToast();
   const [saving, setSaving] = useState(false);
   const [localCategory, setLocalCategory] = useState<RelationshipCategory | null>(category);
@@ -145,6 +146,7 @@ export function RelationshipDropdown({
       )}
       <div className="relative">
         <select
+          ref={ref}
           value={localCategory ?? ""}
           onChange={handleCategoryChange}
           disabled={saving}
@@ -177,4 +179,6 @@ export function RelationshipDropdown({
       )}
     </div>
   );
-}
+});
+
+RelationshipDropdown.displayName = "RelationshipDropdown";

@@ -5,6 +5,7 @@
  * Right-column action sidebar on the contact detail page.
  */
 
+import { useRef, useState } from "react";
 import Link from "next/link";
 import type { Contact, RelationshipCategory } from "@/types/database";
 import { Btn, SectionLabel, StatusBadge, TierBadge } from "@/components/v2/primitives";
@@ -13,6 +14,8 @@ import { relativeTime, deriveFollowUpDue, detectInsead, phoneToWaLink } from "./
 import type { ContactStatusValue } from "@/components/v2/primitives";
 import { tierLabelFromNumber } from "@/components/v2/palette";
 import { RelationshipDropdown } from "./RelationshipDropdown";
+import { CategorySuggestionChip } from "./CategorySuggestionChip";
+import { suggestCategory } from "@/lib/crm/suggestCategory";
 
 interface ContactDetailSidebarProps {
   contact: Contact;
@@ -35,6 +38,15 @@ export function ContactDetailSidebar({
   const followUpDue = deriveFollowUpDue(status, c.last_interaction_at);
   const lastLabel = relativeTime(c.last_interaction_at);
   const tierLabel = c.tier ? tierLabelFromNumber(c.tier) : null;
+
+  // Suggestion chip: only shown while uncategorized + not dismissed by user
+  const [chipDismissed, setChipDismissed] = useState(false);
+  const dropdownRef = useRef<HTMLSelectElement | null>(null);
+
+  const suggestion =
+    c.relationship_category === null && !chipDismissed
+      ? suggestCategory(c)
+      : null;
 
   // Derive match signals for bottom of sidebar
   const signals: Array<{ label: string; bg: string; fg: string }> = [];
@@ -138,7 +150,20 @@ export function ContactDetailSidebar({
               </div>
             </div>
           )}
+          {suggestion && (
+            <CategorySuggestionChip
+              contactId={c.id}
+              suggestion={suggestion}
+              onConfirmed={(category, cadenceDays) => {
+                setChipDismissed(true);
+                onCategoryChange(category, cadenceDays);
+              }}
+              onDismiss={() => setChipDismissed(true)}
+              dropdownRef={dropdownRef}
+            />
+          )}
           <RelationshipDropdown
+            ref={dropdownRef}
             contactId={c.id}
             category={c.relationship_category}
             cadenceDays={c.cadence_days}

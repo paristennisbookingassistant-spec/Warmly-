@@ -11,6 +11,8 @@ import { Avatar, StatusBadge } from "@/components/v2/primitives";
 import { Icon, WhatsAppIcon } from "@/components/v2/icons";
 import { relativeTime, deriveFollowUpDue, detectInsead, phoneToWaLink } from "./contactsUtils";
 import type { ContactStatusValue } from "@/components/v2/primitives";
+import { suggestCategory } from "@/lib/crm/suggestCategory";
+import { CATEGORY_LABEL } from "@/lib/crm/cadence";
 
 interface ContactRowProps {
   contact: Contact;
@@ -21,6 +23,9 @@ export function ContactRow({ contact: c }: ContactRowProps) {
   const followUpDue = deriveFollowUpDue(status, c.last_interaction_at);
   const lastContact = relativeTime(c.last_interaction_at);
   const inseadShort = detectInsead(c.education_v2);
+
+  // Subtle suggestion indicator for uncategorized contacts
+  const suggestion = c.relationship_category === null ? suggestCategory(c) : null;
 
   return (
     <Link
@@ -51,6 +56,20 @@ export function ContactRow({ contact: c }: ContactRowProps) {
       </div>
 
       <StatusBadge status={status} followUpDue={followUpDue} />
+
+      {suggestion && (
+        <span
+          className="hidden sm:inline-flex items-center gap-1 px-2 h-[20px] rounded-full text-[11px] font-medium flex-shrink-0"
+          style={{ background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb" }}
+          title={`Suggested: ${CATEGORY_LABEL[suggestion.category]}`}
+        >
+          <span
+            className="w-[5px] h-[5px] rounded-full inline-block"
+            style={{ background: "#9ca3af" }}
+          />
+          {CATEGORY_LABEL[suggestion.category]}
+        </span>
+      )}
 
       <div className="text-[12px] text-ink-3 w-[72px] text-right inline-flex items-center justify-end gap-1">
         {followUpDue && <Icon.Alert size={11} className="text-warn" />}
