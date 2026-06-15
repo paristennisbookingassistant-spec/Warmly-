@@ -25,6 +25,8 @@ and running. Stack: Next.js 16 (App Router) + React 19 + Tailwind v4.
 - **Phase 3a**, Goal-driven discovery: INSEAD first batch filtered by the user's target industry/geo, then LLM-ranked best-first, with a **per-user score cache** (`directory_scores`) so tiers + rationale render instantly and reliably.
 - **Phase 5a**, Meeting synthesis: prep live-notes "Save & synthesize" → `meeting_notes` artifact (key takeaways + next steps) on the contact timeline.
 - **Phase 5b**, CRM MVP (`docs/specs/V2_P5B_CRM_MVP.md`): 4 relationship categories (nurturing 14d / keep_warm 30d / inner_circle 60d / dormant off; null = uncategorized; cadence overridable per contact). `next_touch_at` recomputed at categorize / outreach-sent / meeting-logged (no cron). "Due to reconnect" surfaces in the V2 Contacts list (filter pill + capped section) AND a brief V2 home strip; per-contact dropdown + override on the detail; one-tap "Draft re-touch" reuses `follow_up_draft`. Shared logic `src/lib/crm/cadence.ts` (19 unit tests). Tester-verified live. Deferred: AI auto-suggest, swipe-to-sort, inferred cadence.
+- **Phase 3b**, Proactive company discovery (`docs/specs/V2_P3B_COMPANY_DISCOVERY.md`): "Discover at a company" card in `/v2/discover` → `POST /api/discovery` (now works without a conversation) → `WEBAPP_DISCOVER` over the existing auth-bridge → the SW runs the existing `CDP_DISCOVER` scrape → results stream into the deck (poll `GET /api/contacts?discovery_session_id=`, also consumable as a `?discovery_session_id=` deep-link). Web-half **tester-verified** (trigger, no-extension state, deck render, no regression); the live scrape itself is **founder-verified** (extension + LinkedIn session required, tester can't run it).
+- **WhatsApp click-to-chat**: `phone` on `contacts` + `directory_profiles`, backfilled from the CV book (933 directory / 207 contacts); a green WhatsApp action on the contact detail + a compact row glyph → `https://wa.me/<digits>`, shown only when a phone exists. Tester-verified. Known limit: simple digit-normalization keeps a trunk `0` on a few malformed `+33-0X` source numbers.
 - **Reliability**, cold-start AI 500 (#12) masked on every surface (draft + prep silent-retry; scoring caches+degrades); Invalid-Date fixed; test-account profile seeded.
 
 The core loop works end to end: **CV → profile → goal-filtered, scored discovery → save → draft → meeting prep → synthesized notes.**
@@ -63,13 +65,13 @@ The core loop works end to end: **CV → profile → goal-filtered, scored disco
 ## Next steps (all decision-gated, pick one; none are blockers)
 1. ~~**CRM build**~~ ✅ **DONE (Phase 5b, 2026-06-15)**, see above. Possible fast-follows: AI auto-suggest category (one-tap confirm), swipe-to-sort bulk triage on `TinderView`, automatic (interaction-frequency-inferred) cadence.
 2. **Phase 4, cross-user 2nd-degree warm-intro graph (the differentiator)**, run a schema/architecture spike first. Consent is **explicit opt-in** (decided). Needs: capture each user's own LinkedIn URN at sync; `users.share_network_for_intros` flag; Warmly-user adjacency detection; a matching query (peers A is connected to whose connections match A's goal) → "ask B for an intro" cards.
-3. **Phase 3b, proactive company discovery**, wire the extension's existing `CDP_DISCOVER` (company → live scrape, already built, driven from the extension popup today) into the V2 chat: name a company → validate criteria → trigger → results stream into the deck.
-4. **#15 company-intel**, `searchCompanyIntel` needs a `PERPLEXITY_API_KEY` (paid) or an alternative search source; currently degrades to "no recent news" in meeting prep.
-5. **Domain wiring (thewarmly.com)**, set `NEXT_PUBLIC_APP_URL` + add the domain to Supabase Auth redirect URLs + the extension manifest/auth-bridge allowed-origins (rebuild extension). Partly needs Liyang (Supabase dashboard + reload the extension).
+3. ~~**Phase 3b, proactive company discovery**~~ ✅ **web-half DONE (2026-06-15)**, see above. Remaining: Liyang founder-verifies the live extension scrape (criterion E) with the extension installed + a LinkedIn session.
+4. **#15 company-intel**, `searchCompanyIntel` needs a search backend. **MiniMax's chat API has no web search** (that's only in their agent/MCP platform), so the model can't browse. Recommended: add **Tavily** (free tier, LLM-search) or Brave, feed results to MiniMax to summarize. Or skip (prep degrades to "no recent news"). Perplexity is the paid alternative.
+5. **Domain wiring (thewarmly.com)**, mostly DONE: domain verified + serving; email login works; `thewarmly.com` added to Supabase redirect allow-list (via Management API) + to the extension auth-bridge origins (rebuilt, needs a reload). **Remaining:** (a) **Google sign-in is disabled at Supabase** (`external_google_enabled:false`), needs a Google Cloud OAuth client (client ID/secret) Liyang creates + pastes into Supabase; (b) **INSEAD IT allowlist** for the Cato filter (on-campus access), only Liyang can file.
 6. **Minor polish**, the onboarding processing "0 of 2" step counter reads oddly.
 
 **Recommended top next action:** the differentiator is **Phase 4** (cross-user 2nd-degree
 warm-intro graph), start with the schema/architecture spike (it's research, not a shippable
-slice yet). If Liyang prefers a shippable user-facing slice instead, **Phase 3b** (proactive
-company discovery, wire the built `CDP_DISCOVER` into V2 chat) is the next-most build-ready.
-Either way, proceed via the three-agent tester-gated loop.
+slice yet). Lower-effort, high-delight follow-ons available: add **Tavily** for real
+company-intel in meeting prep, or the CRM fast-follows (AI category auto-suggest). Proceed via
+the three-agent tester-gated loop.
