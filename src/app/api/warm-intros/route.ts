@@ -128,20 +128,26 @@ export async function GET(request: Request): Promise<NextResponse> {
       return NextResponse.json(response);
     }
 
-    // 4. Find bridge peers B: opted-in users whose linkedin_urn is in A's contacts' urns
-    //    Exclude A themselves.
-    const { data: bridgePeers, error: bridgePeersError } = await svc
+    // 4. Find bridge peers B: opted-in users (a SMALL set) that A is connected to.
+    //    Fetch all opted-in users first, then intersect with A's contact urns in
+    //    memory — A's network can be thousands of urns, so an IN() over them would
+    //    overflow the request URL. Opted-in users are few; this scales.
+    const { data: optedInUsers, error: bridgePeersError } = await svc
       .from("users")
       .select("id, name, linkedin_urn, share_network_for_intros")
       .eq("share_network_for_intros", true)
       .not("linkedin_urn", "is", null)
-      .in("linkedin_urn", Array.from(aContactUrns))
       .neq("id", authUser.id);
 
     if (bridgePeersError) {
       console.error("[warm-intros] failed to fetch bridge peers:", bridgePeersError);
       return internalError("Failed to find bridge peers");
     }
+
+    const bridgePeers = (optedInUsers ?? []).filter(
+      (b: { linkedin_urn: string | null }) =>
+        b.linkedin_urn !== null && aContactUrns.has(b.linkedin_urn)
+    );
 
     if (!bridgePeers || bridgePeers.length === 0) {
       const response: GetWarmIntrosResponse = {
