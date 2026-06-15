@@ -30,7 +30,7 @@ export default function LoginPage() {
         const params = new URLSearchParams(window.location.search);
         const raw = params.get("redirect_to");
         const dest =
-          raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : "/chat";
+          raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : "/v2";
         window.location.href = dest;
       }
     } finally {
