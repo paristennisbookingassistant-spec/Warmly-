@@ -43,6 +43,22 @@ be automatic; wire contact source/alumni into the draft prompt. (f) **LinkedIn s
 clarify status (extension-dependent; can't sync for the user). (g) **contact categorization / game**,
 AI auto-suggest category (deferred from CRM MVP) + decide swipe-to-categorize game. Work each, verify.
 
+## Overnight session 2 — progress
+- **Warm intros now IN the LinkedIn deck** (ddc9d97): 2nd-degree "via {peer} · ask for a warm
+  intro" cards lead the deck (steel-blue ribbon, Save→"Ask for intro" drafts to the peer), then
+  1st-degree. Separate page removed; Settings toggle kept; opt-in hint on the door. **Queue
+  overlap FIXED**: overflow-hidden + slightly smaller tokens so the single row doesn't spill over
+  the saved/skipped counter. (Verify on deploy.)
+- **Latency diagnosed**: API calls 1–6s each (Vercel cold starts + Supabase round-trips), run on
+  every page mount. Fixed the worst offender: OnboardingGate fetched /api/users/me on EVERY screen
+  switch → now once per session (faee30a). Deeper fix = client-side data cache (noted, bigger).
+- **Meeting prep WORKS** (5 recent briefs all complete w/ intel+themes) — the "doesn't work" was
+  the ~40s gen with weak feedback (user retried). UX/loading improvement needed, not a bug fix.
+- **Draft alumni context** (753258a): cv_book/INSEAD contacts now flagged in the outreach prompt
+  so drafts lead with the shared-INSEAD hook instead of missing it.
+- **Queued next**: verify warm-intro deck live; contact categorization (AI auto-suggest + decide
+  swipe-to-categorize game); meeting-prep/scoring loading-state UX; LinkedIn-sync reality clarif.
+
 ## Iteration log
 - **Iter 1 DONE + verified live (e8f5607):** refine-chat → company-discovery routing.
   `parseCompanyIntent` detects "find people at [company]" → coach offers "Run live search at
