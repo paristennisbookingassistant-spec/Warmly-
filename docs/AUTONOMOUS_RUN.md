@@ -131,3 +131,14 @@ client-side caching for nav latency (bigger refactor); LinkedIn sync = extension
    NOTE: Vercel missed the webhook for a0e6498 (deployed nothing); empty-commit re-trigger
    (84bd23a) fixed it → READY + verified. Watch for this — push≠deploy if a webhook drops.
 Richer scoring rationale confirmed live on contact cards too (ESSEC/Bain/INSEAD specific hooks).
+
+## Overnight session 2 — full-surface gap-hunt (CLEAN)
+Verified healthy after tonight's 10 changes, no new bugs: home (greeting/pickup/reconnect strip),
+discover (deck, scoring loading state, warm-intro cards, company-discovery, refine), contacts
+(list + sort banner + rich rationale on cards), /v2/contacts/sort game, warm-intros-in-deck,
+settings (warm-intro toggle/linkedin/draft-lang/rebuild), prep, draft. No console errors (beyond
+known pravatar 404s). Draft loader uses a skeleton (no "ends-early" issue); company-discovery is
+event-driven. Queue from the user's overnight list is COMPLETE.
+Remaining = user-decision/extension-dependent: deep latency caching (refactor — flagged, not risked
+unattended); LinkedIn sync + live scrape (extension); Google OAuth; rotate keys. Dialing loop to a
+long monitoring cadence to avoid busywork.
