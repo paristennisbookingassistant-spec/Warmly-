@@ -11,7 +11,7 @@ import { CHANNELS, type ChannelKey } from "../palette";
 import { Icon } from "../icons";
 import { Avatar, Btn, InseadPill, TierBadge } from "../primitives";
 import type { LinkedInExperienceEntry, LinkedInEducationEntry } from "@/types/database";
-import type { DeckCard, ChatMsg, SearchHint } from "./types";
+import type { DeckCard, ChatMsg, ChatMsgAction, RefineResult, SearchHint } from "./types";
 
 // ---------- Chat seed messages ----------
 
@@ -55,12 +55,18 @@ interface TinderViewProps {
   /**
    * Called when the user sends a refine instruction.
    * Parent fetches/filters/re-ranks and updates deck via prop.
-   * Returns the agent reply text to show in chat.
+   * Returns either a plain reply string OR a RefineResult with an optional
+   * action button to attach to the agent message.
    */
-  onRefine?: (text: string) => Promise<string>;
+  onRefine?: (text: string) => Promise<string | RefineResult>;
+  /**
+   * Called when the user taps "Run live search at <Company>" in the refine chat.
+   * Navigates back to the doors view and starts company discovery.
+   */
+  onLiveSearch?: (company: string, location?: string) => void;
 }
 
-export function TinderView({ channel, deck, scoring = false, onBack, onSave, onSkip, onRefine }: TinderViewProps) {
+export function TinderView({ channel, deck, scoring = false, onBack, onSave, onSkip, onRefine, onLiveSearch }: TinderViewProps) {
   const [idx, setIdx] = useState(0);
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [skippedIds, setSkippedIds] = useState<string[]>([]);
@@ -110,14 +116,24 @@ export function TinderView({ channel, deck, scoring = false, onBack, onSave, onS
     setChat((prev) => [...prev, { role: "user", text }]);
     setChatTyping(true);
     try {
-      let reply: string;
+      let agentMsg: ChatMsg;
       if (onRefine) {
-        reply = await onRefine(text);
+        const result = await onRefine(text);
+        if (typeof result === "string") {
+          agentMsg = { role: "agent", text: result };
+        } else {
+          // RefineResult — may carry an inline action button
+          agentMsg = { role: "agent", text: result.text, action: result.action };
+        }
       } else {
-        reply = "Got it — refining the queue.";
+        agentMsg = { role: "agent", text: "Got it — refining the queue." };
       }
-      setChat((prev) => [...prev, { role: "agent", text: reply }]);
-      setSearchHint({ label: "Refined", idx: 0 });
+      setChat((prev) => [...prev, agentMsg]);
+      // Only show the "Refined" hint on the card when it's a genuine re-filter,
+      // not when we're surfacing a live-search action (no deck change happened).
+      if (!agentMsg.action) {
+        setSearchHint({ label: "Refined", idx: 0 });
+      }
     } catch {
       setChat((prev) => [...prev, { role: "agent", text: "Something went wrong while refining. Please try again." }]);
     } finally {
@@ -195,6 +211,7 @@ export function TinderView({ channel, deck, scoring = false, onBack, onSave, onS
           messages={chat}
           typing={chatTyping}
           onSend={handleSendChat}
+          onAction={onLiveSearch}
         />
       </div>
     </div>
@@ -961,11 +978,14 @@ function ChatSidebar({
   messages,
   typing,
   onSend,
+  onAction,
 }: {
   channel: ChannelKey;
   messages: ChatMsg[];
   typing: boolean;
   onSend: (text: string) => void | Promise<void>;
+  /** Handles action buttons embedded in agent messages (e.g. live company search) */
+  onAction?: (company: string, location?: string) => void;
 }) {
   const c = CHANNELS[channel];
   const [val, setVal] = useState("");
@@ -1025,7 +1045,7 @@ function ChatSidebar({
         className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3 min-h-0"
       >
         {messages.map((m, i) => (
-          <ChatMessage key={i} msg={m} channel={channel} />
+          <ChatMessage key={i} msg={m} channel={channel} onAction={onAction} />
         ))}
         {typing && <ChatTyping channel={channel} />}
       </div>
@@ -1084,7 +1104,15 @@ function ChatSidebar({
   );
 }
 
-function ChatMessage({ msg, channel }: { msg: ChatMsg; channel: ChannelKey }) {
+function ChatMessage({
+  msg,
+  channel,
+  onAction,
+}: {
+  msg: ChatMsg;
+  channel: ChannelKey;
+  onAction?: (company: string, location?: string) => void;
+}) {
   const c = CHANNELS[channel];
   if (msg.role === "user") {
     return (
@@ -1105,16 +1133,61 @@ function ChatMessage({ msg, channel }: { msg: ChatMsg; channel: ChannelKey }) {
         <Icon.Sparkles size={12} />
       </div>
       <div
-        className="px-3.5 py-2.5 rounded-2xl text-[13px] leading-relaxed text-ink-2"
+        className="rounded-2xl text-[13px] leading-relaxed text-ink-2 overflow-hidden"
         style={{
           background: "#ffffff",
           borderBottomLeftRadius: 4,
-          whiteSpace: "pre-wrap",
           border: "1px solid #ece2d0",
         }}
       >
-        {msg.text}
+        <p className="px-3.5 py-2.5" style={{ whiteSpace: "pre-wrap" }}>
+          {msg.text}
+        </p>
+        {msg.action?.type === "live_company_search" && onAction && (
+          <LiveSearchButton
+            action={msg.action}
+            onAction={onAction}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+// ---------- LiveSearchButton ----------
+
+function LiveSearchButton({
+  action,
+  onAction,
+}: {
+  action: ChatMsgAction;
+  onAction: (company: string, location?: string) => void;
+}) {
+  return (
+    <div
+      className="px-3.5 pb-3 pt-1 border-t"
+      style={{ borderColor: "#ece2d0" }}
+    >
+      <button
+        onClick={() => onAction(action.company, action.location)}
+        className="inline-flex items-center gap-2 px-3 h-8 rounded-lg text-[12px] font-medium transition-all hover:opacity-90 active:scale-[0.97]"
+        style={{
+          background: "#dde6ee",
+          color: "#2a5270",
+          border: "1px solid #c2d4e0",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "#c8d9e6";
+          e.currentTarget.style.borderColor = "#4a6f87";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "#dde6ee";
+          e.currentTarget.style.borderColor = "#c2d4e0";
+        }}
+      >
+        <Icon.Search size={11} />
+        {action.label}
+      </button>
     </div>
   );
 }

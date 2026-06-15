@@ -63,10 +63,38 @@ export interface DeckCard {
   education?: LinkedInEducationEntry[] | null;
 }
 
+/**
+ * One-tap CTA attached to an agent chat message.
+ * When present, the ChatMessage component renders an inline action button
+ * below the message text.
+ */
+export interface ChatMsgAction {
+  /** Label shown on the button */
+  label: string;
+  /** Identifies the action type so the handler in TinderView can route it */
+  type: "live_company_search";
+  /** Company name to prefill / pass to startDiscovery */
+  company: string;
+  /** Optional location to prefill */
+  location?: string;
+}
+
 /** Chat message in the refine sidebar */
 export interface ChatMsg {
   role: "user" | "agent";
   text: string;
+  /** Optional one-tap action button rendered below the agent message text */
+  action?: ChatMsgAction;
+}
+
+/**
+ * Structured return value from onRefine handlers.
+ * Handlers may return a plain string (backwards-compatible) OR this object
+ * when they want to attach an inline action to the agent reply.
+ */
+export interface RefineResult {
+  text: string;
+  action?: ChatMsgAction;
 }
 
 /** Hint tag overlaid on the next card after a refine command */

@@ -22,7 +22,8 @@ import { CompanyDiscoveryCard } from "./CompanyDiscoveryCard";
 import { DiscoveryResultsGroup } from "./DiscoveryResultsGroup";
 import { useCompanyDiscovery } from "./useCompanyDiscovery";
 import { LINKEDIN_DEMO_DECK } from "./seed";
-import type { DeckCard } from "./types";
+import { parseCompanyIntent } from "./parseCompanyIntent";
+import type { DeckCard, RefineResult } from "./types";
 import type { Contact, LinkedInExperienceEntry, LinkedInEducationEntry } from "@/types/database";
 import type { DirectoryProfile, ListDirectoryResponse, SaveDirectoryResponse } from "@/types/directory";
 
@@ -511,7 +512,23 @@ export function DiscoverScreen() {
 
   // ---------- INSEAD: refine chat ----------
 
-  const handleCvRefine = useCallback(async (text: string): Promise<string> => {
+  const handleCvRefine = useCallback(async (text: string): Promise<string | RefineResult> => {
+    // Check for "find people at <Company>" intent FIRST.
+    // If detected, skip the directory re-filter and offer a live LinkedIn search instead.
+    const intent = parseCompanyIntent(text);
+    if (intent) {
+      const locationSuffix = intent.location ? ` in ${intent.location}` : "";
+      return {
+        text: `The INSEAD directory is alumni-only — it won't show current employees at ${intent.company}. I can run a live LinkedIn search for INSEAD alumni at ${intent.company}${locationSuffix} via the extension instead.`,
+        action: {
+          type: "live_company_search",
+          label: `Run live search at ${intent.company} →`,
+          company: intent.company,
+          location: intent.location,
+        },
+      };
+    }
+
     const params = parseInseadInstruction(text);
     const what = params.cohort
       ? `cohort ${params.cohort.toUpperCase()}`
@@ -562,7 +579,24 @@ export function DiscoverScreen() {
 
   // ---------- LinkedIn: refine chat ----------
 
-  const handleLinkedInRefine = useCallback(async (text: string): Promise<string> => {
+  const handleLinkedInRefine = useCallback(async (text: string): Promise<string | RefineResult> => {
+    // Check for "find people at <Company>" intent FIRST.
+    // The live-contacts deck only contains already-synced 1st-degree connections;
+    // it cannot find NEW people at a company. Offer the live discovery flow instead.
+    const intent = parseCompanyIntent(text);
+    if (intent) {
+      const locationSuffix = intent.location ? ` in ${intent.location}` : "";
+      return {
+        text: `Your synced connections won't include new hires at ${intent.company}. I can run a live LinkedIn search for INSEAD alumni at ${intent.company}${locationSuffix} via the extension instead.`,
+        action: {
+          type: "live_company_search",
+          label: `Run live search at ${intent.company} →`,
+          company: intent.company,
+          location: intent.location,
+        },
+      };
+    }
+
     const t = text.toLowerCase();
 
     // Client-side filter first
@@ -614,6 +648,31 @@ export function DiscoverScreen() {
     return `${label} — deck updated, strongest matches first.`;
   }, [liveDeck]);
 
+  // ---------- Live search handler (from refine chat intent) ----------
+
+  // Called when the user taps "Run live search at <Company> →" in the refine chat.
+  // Navigates back to the doors view, opens the CompanyDiscoveryCard, and immediately
+  // starts the discovery flow with the parsed company + optional location. This reuses
+  // the exact same useCompanyDiscovery flow — no logic is duplicated.
+  const handleLiveSearch = useCallback(
+    (company: string, location?: string) => {
+      // Reset any prior discovery state first
+      companyDiscovery.reset();
+      setIsUrlSeeded(false);
+      seededSessionRef.current = null;
+      // Show the company card and navigate to doors
+      setShowCompanyCard(true);
+      setView("doors");
+      // Kick off discovery immediately with the parsed params — the form is bypassed
+      void companyDiscovery.startDiscovery({
+        companyName: company,
+        hint: company,
+        locationLabel: location,
+      });
+    },
+    [companyDiscovery]
+  );
+
   // ---------- Company discovery: save / skip ----------
 
   const handleDiscoverySave = useCallback(async (card: DeckCard) => {
@@ -660,6 +719,7 @@ export function DiscoverScreen() {
         onSave={handleCvSave}
         onSkip={handleCvSkip}
         onRefine={handleCvRefine}
+        onLiveSearch={handleLiveSearch}
       />
     );
   }
@@ -682,6 +742,7 @@ export function DiscoverScreen() {
         onSave={handleLinkedInSave}
         onSkip={handleLinkedInSkip}
         onRefine={handleLinkedInRefine}
+        onLiveSearch={handleLiveSearch}
       />
     );
   }
