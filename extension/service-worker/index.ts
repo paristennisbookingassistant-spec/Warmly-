@@ -1112,6 +1112,9 @@ async function handleMessage(
         schoolLabel?: string;
         locationLabel?: string;
         functionLabel?: string;
+        // Set when triggered from the web app (WEBAPP_DISCOVER) so scraped
+        // contacts get tagged and the deck can poll them by session id.
+        discovery_session_id?: string;
       };
       const companyName = p?.companyName?.trim();
       const schoolId = p?.schoolId ?? "5176";
@@ -1634,7 +1637,7 @@ async function handleMessage(
                 captured_at: new Date().toISOString(),
                 source_session_id: null,
               },
-              { kind: "discovery" }
+              { kind: "discovery", discoverySessionId: p.discovery_session_id ?? null }
             );
 
             if (contact) {
@@ -1866,6 +1869,9 @@ async function handleMessage(
           schoolLabel: discoverPayload.schoolLabel,
           locationLabel: discoverPayload.locationLabel,
           functionLabel: discoverPayload.functionLabel,
+          // Thread the session id so saved contacts get tagged and the deck
+          // can poll them by discovery_session_id.
+          discovery_session_id: prepared.sessionId,
         },
       };
 

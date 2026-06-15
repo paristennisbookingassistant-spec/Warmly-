@@ -170,7 +170,7 @@ export async function updateDiscoverySession(
  */
 export async function bookmarkProfile(
   profile: ExtractedProfile,
-  options: { kind?: "manual" | "discovery" } = {}
+  options: { kind?: "manual" | "discovery"; discoverySessionId?: string | null } = {}
 ): Promise<Contact | null> {
   const kind = options.kind ?? "manual";
   return apiFetch<Contact>("/api/contacts", {
@@ -189,6 +189,9 @@ export async function bookmarkProfile(
       })),
       education: profile.education,
       profile_snapshot: profile,
+      // Tag the discovery session so the web deck (which polls by
+      // discovery_session_id) actually surfaces these scraped contacts.
+      ...(options.discoverySessionId ? { discovery_session_id: options.discoverySessionId } : {}),
       source: kind === "discovery" ? "discovery" : "extension_bookmark",
       // user_action is set server-side based on source (see /api/contacts
       // POST handler). Discovery sources land as 'pending', manual saves
