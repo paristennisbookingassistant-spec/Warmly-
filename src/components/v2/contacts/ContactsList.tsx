@@ -22,6 +22,7 @@ import { isSavedToday, deriveFollowUpDue } from "./contactsUtils";
 import { isReconnectDue } from "@/lib/crm/cadence";
 import type { ContactStatusValue } from "@/components/v2/primitives";
 import { ReconnectRow } from "./ReconnectRow";
+import { SortBanner } from "./sort/SortBanner";
 
 const RECONNECT_CAP = 10;
 
@@ -99,6 +100,10 @@ export function ContactsList() {
     return contacts.filter((c) => c.status === filter);
   })();
 
+  const uncategorizedCount = contacts.filter(
+    (c) => c.relationship_category === null
+  ).length;
+
   const counts = {
     total: contacts.length,
     met: contacts.filter((c) => c.status === "met").length,
@@ -123,6 +128,9 @@ export function ContactsList() {
           )}
         </div>
       </div>
+
+      {/* Sort your network banner — shown when there are uncategorized saved contacts */}
+      {!loading && <SortBanner count={uncategorizedCount} />}
 
       {/* Saved today */}
       <section className="mb-10">
