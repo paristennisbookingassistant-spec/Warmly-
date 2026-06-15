@@ -24,7 +24,9 @@ import type { PickedFile } from "@/components/v2/onboarding/DropZone";
 
 // ---- Step indicator ----
 function StepBar({ step }: { step: number }) {
-  if (step === 3 || step === 4) return null; // hide during building states
+  // Only the real numbered steps show a count; transitional screens
+  // (processing / building, mapped to 0) hide the bar instead of "0 of 2".
+  if (step !== 1 && step !== 2) return null;
   return (
     <div className="flex items-center justify-between px-8 pt-7 shrink-0">
       <div
