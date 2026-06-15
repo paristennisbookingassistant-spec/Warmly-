@@ -259,6 +259,14 @@ function ChannelChip({ channel }: { channel: ChannelKey }) {
 
 // ---------- QueueBanner ----------
 
+/** Two-letter initials for the small uniform queue tokens. */
+function queueInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "·";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function QueueBanner({
   channel,
   deck,
@@ -318,44 +326,51 @@ function QueueBanner({
             const isSaved = savedIds.includes(p.id);
             const isSkipped = skippedIds.includes(p.id);
             const isCurrent = i === idx;
+            const size = isCurrent ? 28 : 24;
 
-            let borderColor = "#d9cdb4";
-            let background = "#ffffff";
+            // One cohesive palette — state only, no per-person rainbow.
+            // Upcoming: soft cream token. Current: channel-accent ring.
+            // Saved: filled accent. Skipped: faded dashed.
+            let background = "var(--bg-sunk)";
+            let color = "#b09a78";
+            let border = "1px solid #e6dcc6";
             let boxShadow = "";
             let opacity = 1;
 
             if (isSaved) {
               background = c.accent;
-              borderColor = c.accent;
+              color = "#fff";
+              border = `1px solid ${c.accent}`;
             } else if (isSkipped) {
-              background = "#cdbf9f";
-              borderColor = "#cdbf9f";
-              opacity = 0.55;
+              background = "transparent";
+              color = "#c4b89e";
+              border = "1px dashed #dccfb4";
+              opacity = 0.45;
             } else if (isCurrent) {
-              borderColor = c.accent;
-              boxShadow = `0 0 0 3px ${c.tint}`;
+              background = c.tint;
+              color = c.accent;
+              border = `1.5px solid ${c.accent}`;
+              boxShadow = `0 0 0 3px ${c.tint}, 0 1px 2px rgba(0,0,0,0.05)`;
             }
 
-            const thumbSize = isCurrent ? 30 : 24;
             return (
               <div
                 key={p.id}
-                className="rounded-full flex-shrink-0 transition-all duration-300 overflow-hidden"
+                className="rounded-full flex-shrink-0 flex items-center justify-center select-none transition-all duration-300 font-semibold"
                 style={{
-                  width: thumbSize,
-                  height: thumbSize,
-                  border: `2px solid ${borderColor}`,
+                  width: size,
+                  height: size,
+                  background,
+                  color,
+                  border,
                   boxShadow,
                   opacity,
+                  fontSize: isCurrent ? 10.5 : 9,
+                  letterSpacing: "0.01em",
                 }}
                 title={p.name}
               >
-                <Avatar
-                  src={p.avatar}
-                  name={p.name}
-                  size={thumbSize}
-                  className={isSkipped ? "opacity-50" : ""}
-                />
+                {queueInitials(p.name)}
               </div>
             );
           })}

@@ -886,7 +886,7 @@ export default function Popup() {
         </p>
         <button
           style={S.btnFull}
-          onClick={() => chrome.tabs.create({ url: `${getWebAppUrl()}/login` })}
+          onClick={() => chrome.tabs.create({ url: `${getWebAppUrl()}/login?redirect_to=/v2` })}
         >
           Sign in to Warmly
         </button>
@@ -1008,7 +1008,7 @@ export default function Popup() {
                 .map((r) => (
                   <button
                     key={r.contact_id}
-                    onClick={() => chrome.tabs.create({ url: `${getWebAppUrl()}/contacts/${r.contact_id}` })}
+                    onClick={() => chrome.tabs.create({ url: `${getWebAppUrl()}/v2/contacts/${r.contact_id}` })}
                     style={S.rankingsRow}
                   >
                     <div style={{ display: "flex", alignItems: "baseline", gap: "6px" }}>
@@ -1050,7 +1050,7 @@ export default function Popup() {
 
           <button
             style={{ ...S.btnPrimary, marginTop: "4px" }}
-            onClick={() => chrome.tabs.create({ url: `${getWebAppUrl()}/contacts` })}
+            onClick={() => chrome.tabs.create({ url: `${getWebAppUrl()}/v2/contacts` })}
           >
             View in App
           </button>

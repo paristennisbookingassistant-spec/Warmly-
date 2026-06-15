@@ -23,7 +23,7 @@ const PUBLIC_ROUTES = [
 ];
 
 /** Route prefix for the authenticated app — redirect here after login */
-const APP_HOME = "/chat";
+const APP_HOME = "/v2";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -68,10 +68,13 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Redirect authenticated users away from auth pages
+  // Redirect authenticated users away from auth pages — honor ?redirect_to
+  // (e.g. the extension opens /login?redirect_to=/v2) else land on APP_HOME.
   if (user && (pathname === "/login" || pathname === "/signup")) {
     const url = request.nextUrl.clone();
-    url.pathname = APP_HOME;
+    const raw = url.searchParams.get("redirect_to");
+    url.pathname = raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : APP_HOME;
+    url.searchParams.delete("redirect_to");
     return NextResponse.redirect(url);
   }
 
