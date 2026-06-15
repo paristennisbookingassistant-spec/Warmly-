@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { ProfileBlock } from "@/components/v2/settings/ProfileBlock";
 import { LinkedInIntegrationBlock } from "@/components/v2/settings/LinkedInIntegrationBlock";
 import { DraftLanguageBlock } from "@/components/v2/settings/DraftLanguageBlock";
+import { WarmIntrosBlock } from "@/components/v2/settings/WarmIntrosBlock";
 import { SignOutBlock } from "@/components/v2/settings/SignOutBlock";
 import { SettingsSkeleton } from "@/components/v2/settings/SettingsSkeleton";
 
@@ -81,6 +82,7 @@ export default function V2SettingsPage() {
         <div className="flex flex-col gap-6">
           {user && <ProfileBlock name={user.name} email={user.email} />}
           <LinkedInIntegrationBlock />
+          <WarmIntrosBlock />
           <DraftLanguageBlock />
           <SignOutBlock />
         </div>

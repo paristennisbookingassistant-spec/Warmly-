@@ -95,11 +95,16 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     // 3. Fetch A's contacts (need linkedin_urn to find bridge peers, and linkedin_url
     //    to exclude already-known candidates later)
+    // NOTE: Supabase returns max 1000 rows by default; A's network can be larger
+    // (1300+), so fetch a wide range to include all bridge candidates. Scale TODO:
+    // for very large networks, replace this with targeted queries on the (few)
+    // opted-in users' urns instead of pulling A's whole network into memory.
     const { data: aContacts, error: aContactsError } = await svc
       .from("contacts")
       .select("id, linkedin_urn, linkedin_url, name")
       .eq("user_id", authUser.id)
-      .not("linkedin_urn", "is", null);
+      .not("linkedin_urn", "is", null)
+      .range(0, 9999);
 
     if (aContactsError) {
       console.error("[warm-intros] failed to fetch A's contacts:", aContactsError);

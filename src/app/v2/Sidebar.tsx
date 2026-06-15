@@ -21,6 +21,7 @@ type NavItem = { href: string; label: string; icon: (p: IconProps) => React.Reac
 const NAV_ITEMS: NavItem[] = [
   { href: "/v2", label: "Home", icon: Icon.Home },
   { href: "/v2/discover", label: "Discover", icon: Icon.Compass },
+  { href: "/v2/warm-intros", label: "Warm Intros", icon: Icon.Network },
   { href: "/v2/contacts", label: "Contacts", icon: Icon.Users },
   { href: "/v2/settings", label: "Settings", icon: Icon.Settings },
 ];

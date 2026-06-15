@@ -6,7 +6,7 @@
 export function SettingsSkeleton() {
   return (
     <div className="flex flex-col gap-6">
-      {[1, 2].map((i) => (
+      {[1, 2, 3].map((i) => (
         <div
           key={i}
           className="bg-white border rounded-2xl p-7"
