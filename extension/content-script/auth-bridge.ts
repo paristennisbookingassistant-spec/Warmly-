@@ -25,6 +25,11 @@ import type {
   SyncProgressPayload,
   SyncCompletePayload,
   SyncFailedPayload,
+  StartCompanyDiscoveryPayload,
+  DiscoveryStartedPayload,
+  DiscoveryProgressPayload,
+  DiscoveryDonePayload,
+  DiscoveryErrorPayload,
 } from "../shared/types";
 
 // ---------------------------------------------------------------------------
@@ -127,6 +132,36 @@ window.addEventListener("message", (event: MessageEvent) => {
       break;
     }
 
+    // ---- New: start company discovery ---------------------------------
+    // The web app sends WEBAPP_DISCOVER with a StartCompanyDiscoveryPayload.
+    // We relay it to the SW which invokes the existing CDP_DISCOVER flow.
+    case "WEBAPP_DISCOVER": {
+      const payload = data.payload as StartCompanyDiscoveryPayload | undefined;
+      if (!payload?.companyName || !payload?.user_id) {
+        console.warn("[Auth Bridge] WEBAPP_DISCOVER missing companyName or user_id");
+        postToWebApp("DISCOVERY_ERROR", {
+          discovery_session_id: null,
+          companyName: payload?.companyName ?? "",
+          reason: "missing_required_fields",
+        } satisfies DiscoveryErrorPayload);
+        return;
+      }
+
+      console.log("[Auth Bridge] Forwarding WEBAPP_DISCOVER to SW:", payload.companyName);
+      chrome.runtime.sendMessage({
+        type: "WEBAPP_DISCOVER",
+        payload,
+      }).catch((err) => {
+        console.error("[Auth Bridge] Failed to forward WEBAPP_DISCOVER:", err);
+        postToWebApp("DISCOVERY_ERROR", {
+          discovery_session_id: payload.discovery_session_id ?? null,
+          companyName: payload.companyName,
+          reason: "extension_unavailable",
+        } satisfies DiscoveryErrorPayload);
+      });
+      break;
+    }
+
     default:
       // Ignore unrecognized message types from the web app
       break;
@@ -153,6 +188,19 @@ chrome.runtime.onMessage.addListener(
         break;
       case "SYNC_FAILED":
         postToWebApp("SYNC_FAILED", message.payload as SyncFailedPayload);
+        break;
+      // ---- Company discovery relay (SW → web app) -------------------
+      case "DISCOVERY_STARTED":
+        postToWebApp("DISCOVERY_STARTED", message.payload as DiscoveryStartedPayload);
+        break;
+      case "DISCOVERY_PROGRESS":
+        postToWebApp("DISCOVERY_PROGRESS", message.payload as DiscoveryProgressPayload);
+        break;
+      case "DISCOVERY_DONE":
+        postToWebApp("DISCOVERY_DONE", message.payload as DiscoveryDonePayload);
+        break;
+      case "DISCOVERY_ERROR":
+        postToWebApp("DISCOVERY_ERROR", message.payload as DiscoveryErrorPayload);
         break;
       default:
         break;

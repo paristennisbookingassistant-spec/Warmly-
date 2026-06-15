@@ -18,8 +18,17 @@
  * never here. MV3 service workers die after 30 s of inactivity.
  */
 
-import { bulkImportContacts, createSyncJobRecord, updateSyncJobRecord } from "./api-client";
-import type { SyncJob, BulkImportRequest, StartNetworkSyncPayload } from "../shared/types";
+import { bulkImportContacts, createSyncJobRecord, updateSyncJobRecord, createDiscoverySession } from "./api-client";
+import type {
+  SyncJob,
+  BulkImportRequest,
+  StartNetworkSyncPayload,
+  StartCompanyDiscoveryPayload,
+  DiscoveryStartedPayload,
+  DiscoveryProgressPayload,
+  DiscoveryDonePayload,
+  DiscoveryErrorPayload,
+} from "../shared/types";
 import { STORAGE_KEYS } from "../shared/constants";
 
 // ---------------------------------------------------------------------------
@@ -293,4 +302,194 @@ export async function handleBulkImport(request: BulkImportRequest): Promise<void
  */
 export async function handleWebAppRelay(type: string, payload: unknown): Promise<void> {
   await relayToWebApp(type, payload);
+}
+
+// ---------------------------------------------------------------------------
+// Company Discovery — web app trigger (WEBAPP_DISCOVER)
+// ---------------------------------------------------------------------------
+
+/**
+ * Storage key for the active company discovery session id.
+ * Allows the SW to skip creating a duplicate session on rapid re-triggers.
+ */
+export const DISCOVERY_SESSION_KEY = "active_discovery_session_id";
+
+/**
+ * CDP_DISCOVER result shape (returned by the case in index.ts).
+ * Typed here so index.ts and sync-coordinator both share it.
+ */
+export interface CdpDiscoverResult {
+  ok: boolean;
+  companyName?: string;
+  profiles?: Array<{ name: string; url: string }>;
+  count?: number;
+  saved?: number;
+  savedProfiles?: Array<{ name: string; url: string; id: string }>;
+  rankings?: unknown[];
+  errors?: string[];
+  error?: string;
+  needsPicker?: boolean;
+  candidates?: unknown[];
+  reasoning?: string;
+  failedSlug?: string;
+}
+
+/**
+ * Phase 1 of handling WEBAPP_DISCOVER: create the discovery_session,
+ * emit DISCOVERY_STARTED to the web app, and register a temporary
+ * SESSION_PROGRESS relay listener.
+ *
+ * Returns { sessionId, progressListener } on success so index.ts can
+ * run CDP_DISCOVER inline (no circular dep) and then call
+ * finalizeCompanyDiscovery with the result.
+ *
+ * On failure returns null and has already emitted DISCOVERY_ERROR.
+ */
+export async function prepareCompanyDiscovery(
+  payload: StartCompanyDiscoveryPayload
+): Promise<{
+  sessionId: string;
+  companyName: string;
+  progressListener: Parameters<typeof chrome.runtime.onMessage.addListener>[0];
+} | null> {
+  const { companyName, user_id } = payload;
+
+  // ---- Create/resolve discovery_session_id ----
+  let sessionId = payload.discovery_session_id ?? null;
+
+  if (!sessionId) {
+    // Web app did not pre-create a session — create one via the backend so
+    // contacts are tagged and the deck can poll by session id.
+    const session = await createDiscoverySession(companyName, {
+      schoolId: payload.schoolId,
+      locationGeoUrn: payload.locationGeoUrn,
+      functionKeywords: payload.functionKeywords,
+      user_id,
+    });
+
+    if (!session?.id) {
+      const errPayload: DiscoveryErrorPayload = {
+        discovery_session_id: null,
+        companyName,
+        reason: "Failed to create discovery session on backend",
+      };
+      await relayToWebApp("DISCOVERY_ERROR", errPayload);
+      return null;
+    }
+    sessionId = session.id;
+  }
+
+  // Persist so the active session id is accessible to the progress listener.
+  await chrome.storage.local.set({ [DISCOVERY_SESSION_KEY]: sessionId });
+
+  // ---- Emit DISCOVERY_STARTED ----
+  const startedPayload: DiscoveryStartedPayload = {
+    discovery_session_id: sessionId,
+    companyName,
+  };
+  await relayToWebApp("DISCOVERY_STARTED", startedPayload);
+
+  // ---- Register temporary SESSION_PROGRESS relay ----
+  // CDP_DISCOVER (running in the same SW) emits SESSION_PROGRESS via
+  // chrome.runtime.sendMessage(). Those messages are NOT received by the SW's
+  // own onMessage switch (SW can't receive its own sendMessage calls), but
+  // chrome.runtime.onMessage.addListener() in the SW DOES receive messages
+  // sent from OTHER extension pages (popup, content scripts). The SW also
+  // receives messages sent to itself via self.postMessage, but not via
+  // chrome.runtime.sendMessage from itself.
+  //
+  // In practice SESSION_PROGRESS is sent FROM the SW CDP_DISCOVER code → the
+  // only receivers are: the popup (if open) and any content scripts that
+  // registered onMessage listeners. The SW onMessage listener added below
+  // will NOT be called for these SW-self-sends.
+  //
+  // Alternative: CDP_DISCOVER fires these from within index.ts's handleMessage
+  // call stack (the same async task as WEBAPP_DISCOVER). We can intercept them
+  // by wrapping chrome.runtime.sendMessage for the duration. We do this via a
+  // module-level progress callback that index.ts invokes directly.
+  //
+  // We store the sessionId and companyName so index.ts can call
+  // emitDiscoveryProgress() directly from within CDP_DISCOVER rather than
+  // going through the messaging layer.
+  _activeDiscoverySession = { sessionId, companyName };
+
+  // Return a no-op listener (kept for API symmetry; real relay uses module state).
+  const progressListener = (_msg: unknown) => { /* no-op */ };
+
+  return { sessionId, companyName, progressListener };
+}
+
+/**
+ * Module-level state for the active web-app-triggered discovery.
+ * Set by prepareCompanyDiscovery, cleared by finalizeCompanyDiscovery.
+ * Allows index.ts to call emitDiscoveryProgress() directly without circular deps.
+ */
+let _activeDiscoverySession: { sessionId: string; companyName: string } | null = null;
+
+/**
+ * Called from index.ts's CDP_DISCOVER loop (SESSION_PROGRESS analogue).
+ * Relays per-profile progress to the web app as DISCOVERY_PROGRESS.
+ * No-op when no web-app discovery is in flight.
+ */
+export async function emitDiscoveryProgress(data: {
+  state?: string;
+  profilesVisited?: number;
+  profilesDiscovered?: number;
+  total?: number;
+}): Promise<void> {
+  if (!_activeDiscoverySession) return;
+  const { sessionId, companyName } = _activeDiscoverySession;
+
+  type ProgressState = DiscoveryProgressPayload["state"];
+  const stateMap: Record<string, ProgressState> = {
+    VISITING_PROFILE: "VISITING_PROFILE",
+    WAITING_BETWEEN_PROFILES: "WAITING",
+    RANKING: "RANKING",
+    SEARCHING_PROFILES: "SEARCHING_PROFILES",
+  };
+
+  const progressPayload: DiscoveryProgressPayload = {
+    discovery_session_id: sessionId,
+    companyName,
+    profiles_saved: data.profilesDiscovered ?? 0,
+    profiles_total: data.total ?? 0,
+    state: stateMap[data.state ?? ""] ?? "RESOLVING_COMPANY",
+  };
+
+  await relayToWebApp("DISCOVERY_PROGRESS", progressPayload);
+}
+
+/**
+ * Phase 2: emit DISCOVERY_DONE or DISCOVERY_ERROR to the web app and clean up.
+ * Called by index.ts after CDP_DISCOVER returns.
+ */
+export async function finalizeCompanyDiscovery(
+  sessionId: string,
+  companyName: string,
+  cdpResult: CdpDiscoverResult
+): Promise<{ ok: boolean; discovery_session_id?: string; error?: string }> {
+  _activeDiscoverySession = null;
+  await chrome.storage.local.remove(DISCOVERY_SESSION_KEY);
+
+  if (!cdpResult.ok) {
+    const errPayload: DiscoveryErrorPayload = {
+      discovery_session_id: sessionId,
+      companyName,
+      reason: cdpResult.error ?? "Unknown CDP_DISCOVER error",
+      needsPicker: cdpResult.needsPicker,
+      candidates: cdpResult.candidates,
+    };
+    await relayToWebApp("DISCOVERY_ERROR", errPayload);
+    return { ok: false, error: errPayload.reason };
+  }
+
+  const donePayload: DiscoveryDonePayload = {
+    discovery_session_id: sessionId,
+    companyName: cdpResult.companyName ?? companyName,
+    profiles_saved: cdpResult.saved ?? 0,
+    profiles_total: cdpResult.count ?? 0,
+  };
+  await relayToWebApp("DISCOVERY_DONE", donePayload);
+
+  return { ok: true, discovery_session_id: sessionId };
 }

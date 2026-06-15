@@ -304,6 +304,94 @@ export type SyncMessageType =
   | "SYNC_STATUS_REQUEST"
   | "SYNC_STATUS_RESPONSE";
 
+// ---------------------------------------------------------------------------
+// Web app ↔ extension company discovery message types
+// ---------------------------------------------------------------------------
+
+/**
+ * Payload the web app sends via window.postMessage to kick off a
+ * company-scoped CDP discovery session.
+ *
+ * Required: companyName, user_id.
+ * All other fields map directly to the existing CDP_DISCOVER payload and
+ * are forwarded verbatim to the SW.
+ */
+export interface StartCompanyDiscoveryPayload {
+  /** Target company (free-text, resolved via LLM + LinkedIn search). Required. */
+  companyName: string;
+  /** Free-text disambiguation hint (e.g. "the consulting firm"). Optional. */
+  hint?: string;
+  /**
+   * LinkedIn numeric school ID for the alumni filter.
+   * Defaults to "5176" (INSEAD) when omitted.
+   */
+  schoolId?: string;
+  /** LinkedIn geoUrn for location filter (e.g. "103644278" = France). Optional. */
+  locationGeoUrn?: string;
+  /** Keyword string for function/role filter (e.g. "private equity"). Optional. */
+  functionKeywords?: string;
+  /** Human-readable school label for LLM resolver context. Optional. */
+  schoolLabel?: string;
+  /** Human-readable location label for LLM resolver context. Optional. */
+  locationLabel?: string;
+  /** Human-readable function label for LLM resolver context. Optional. */
+  functionLabel?: string;
+  /**
+   * Pre-resolved company slug (bypasses LLM disambiguation).
+   * Supplied when the user picks from the disambiguation picker.
+   */
+  companySlug?: string;
+  /**
+   * Pre-resolved numeric company ID (bypasses ALL company navigation when
+   * combined with companySlug). Most-efficient fast path.
+   */
+  companyId?: string;
+  /** Supabase user ID — verified against stored session in the SW. Required. */
+  user_id: string;
+  /**
+   * Backend-created discovery_session_id to tag contacts under.
+   * If provided the SW skips creating a new session; if omitted the SW creates
+   * one via POST /api/discovery and returns it in DISCOVERY_STARTED.
+   */
+  discovery_session_id?: string;
+}
+
+/** Emitted immediately when the SW accepts the WEBAPP_DISCOVER request. */
+export interface DiscoveryStartedPayload {
+  discovery_session_id: string;
+  companyName: string;
+}
+
+/** Emitted after each profile is saved (count-so-far update). */
+export interface DiscoveryProgressPayload {
+  discovery_session_id: string;
+  companyName: string;
+  /** Profiles saved to the backend so far in this session. */
+  profiles_saved: number;
+  /** Total profiles found on the search results page (may be 0 until step 2). */
+  profiles_total: number;
+  /** Current state label for UI copy. */
+  state: "RESOLVING_COMPANY" | "SEARCHING_PROFILES" | "VISITING_PROFILE" | "WAITING" | "RANKING";
+}
+
+/** Emitted when CDP_DISCOVER completes successfully. */
+export interface DiscoveryDonePayload {
+  discovery_session_id: string;
+  companyName: string;
+  profiles_saved: number;
+  profiles_total: number;
+}
+
+/** Emitted when CDP_DISCOVER fails or is rejected by rate-limiter. */
+export interface DiscoveryErrorPayload {
+  discovery_session_id: string | null;
+  companyName: string;
+  reason: string;
+  /** True when the LLM couldn't disambiguate and the frontend should show the picker. */
+  needsPicker?: boolean;
+  candidates?: unknown[];
+}
+
 export interface StartNetworkSyncPayload {
   /** Supabase user ID — verified against stored session */
   user_id: string;

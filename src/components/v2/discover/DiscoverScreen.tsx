@@ -17,6 +17,9 @@ import { tierLabelFromNumber } from "../palette";
 import { DoorsView } from "./Doors";
 import { TinderView } from "./TinderView";
 import { LinkedInSetup } from "./LinkedInSetup";
+import { CompanyDiscoveryCard } from "./CompanyDiscoveryCard";
+import { DiscoveryResultsGroup } from "./DiscoveryResultsGroup";
+import { useCompanyDiscovery } from "./useCompanyDiscovery";
 import { LINKEDIN_DEMO_DECK } from "./seed";
 import type { DeckCard } from "./types";
 import type { Contact, LinkedInExperienceEntry, LinkedInEducationEntry } from "@/types/database";
@@ -308,6 +311,11 @@ type View = "doors" | "cv-tinder" | "linkedin-setup" | "linkedin-tinder";
 export function DiscoverScreen() {
   const toast = useToast();
   const [view, setView] = useState<View>("doors");
+  // Show the validate-criteria card below the doors grid
+  const [showCompanyCard, setShowCompanyCard] = useState(false);
+  // Company discovery hook (Module 3 + 4)
+  const companyDiscovery = useCompanyDiscovery();
+
   // The user's goals, fetched lazily when the INSEAD door is first opened.
   // undefined = not fetched yet; null = fetched, none. Used to goal-filter the
   // first INSEAD batch.
@@ -581,6 +589,37 @@ export function DiscoverScreen() {
     return `${label} — deck updated, strongest matches first.`;
   }, [liveDeck]);
 
+  // ---------- Company discovery: save / skip ----------
+
+  const handleDiscoverySave = useCallback(async (card: DeckCard) => {
+    try {
+      const res = await fetch(`/api/contacts/${card.id}/review`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ action: "save" }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      toast(`${card.name} saved to contacts.`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Save failed";
+      toast(`Could not save ${card.name}: ${msg}`);
+    }
+  }, [toast]);
+
+  const handleDiscoverySkip = useCallback(async (card: DeckCard) => {
+    try {
+      await fetch(`/api/contacts/${card.id}/review`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ action: "skip" }),
+      });
+    } catch {
+      // Silent — skip is best-effort
+    }
+  }, []);
+
   // ---------- Render: INSEAD tinder ----------
 
   if (view === "cv-tinder") {
@@ -627,13 +666,87 @@ export function DiscoverScreen() {
   return (
     <div className="px-10 pt-7 pb-6 max-w-[1280px] mx-auto flex-1 flex flex-col w-full">
       {view === "doors" && (
-        <DoorsView
-          linkedInConnected={linkedInConnected}
-          linkedInPendingCount={livePendingTotal}
-          cvQueueCount={cvTotal > 0 ? cvTotal : 961}
-          onOpenCV={openCV}
-          onOpenLinkedIn={openLinkedIn}
-        />
+        <>
+          <DoorsView
+            linkedInConnected={linkedInConnected}
+            linkedInPendingCount={livePendingTotal}
+            cvQueueCount={cvTotal > 0 ? cvTotal : 961}
+            onOpenCV={openCV}
+            onOpenLinkedIn={openLinkedIn}
+            onOpenCompanyDiscover={() => {
+              setShowCompanyCard(true);
+              companyDiscovery.reset();
+            }}
+          />
+
+          {/* Module 3: Validate-criteria card */}
+          {showCompanyCard && companyDiscovery.phase === "idle" && (
+            <CompanyDiscoveryCard
+              onFind={(params) => void companyDiscovery.startDiscovery(params)}
+              onPickCandidate={companyDiscovery.retryWithCandidate}
+              onDismiss={() => {
+                setShowCompanyCard(false);
+                companyDiscovery.reset();
+              }}
+              phase={companyDiscovery.phase}
+              errorMessage={companyDiscovery.errorMessage}
+              candidates={companyDiscovery.candidates}
+            />
+          )}
+
+          {/* Module 3: Card in submitting / connect states */}
+          {showCompanyCard &&
+            (companyDiscovery.phase === "detecting" ||
+              companyDiscovery.phase === "creating_session" ||
+              companyDiscovery.phase === "no_extension" ||
+              (companyDiscovery.phase === "error" && companyDiscovery.candidates === null)) && (
+            <CompanyDiscoveryCard
+              onFind={(params) => void companyDiscovery.startDiscovery(params)}
+              onPickCandidate={companyDiscovery.retryWithCandidate}
+              onDismiss={() => {
+                setShowCompanyCard(false);
+                companyDiscovery.reset();
+              }}
+              phase={companyDiscovery.phase}
+              errorMessage={companyDiscovery.errorMessage}
+              candidates={companyDiscovery.candidates}
+            />
+          )}
+
+          {/* Module 3: Company picker (needsPicker=true) */}
+          {companyDiscovery.phase === "error" && companyDiscovery.candidates !== null && (
+            <CompanyDiscoveryCard
+              onFind={(params) => void companyDiscovery.startDiscovery(params)}
+              onPickCandidate={companyDiscovery.retryWithCandidate}
+              onDismiss={() => {
+                setShowCompanyCard(false);
+                companyDiscovery.reset();
+              }}
+              phase={companyDiscovery.phase}
+              errorMessage={companyDiscovery.errorMessage}
+              candidates={companyDiscovery.candidates}
+            />
+          )}
+
+          {/* Module 4: Results stream while running or done */}
+          {(companyDiscovery.phase === "running" ||
+            companyDiscovery.phase === "done" ||
+            (companyDiscovery.phase === "error" && companyDiscovery.discoveredCards.length > 0)) && (
+            <DiscoveryResultsGroup
+              companyName={companyDiscovery.companyName}
+              phase={companyDiscovery.phase}
+              progress={companyDiscovery.progress}
+              cards={companyDiscovery.discoveredCards}
+              errorMessage={companyDiscovery.errorMessage}
+              onSave={handleDiscoverySave}
+              onSkip={handleDiscoverySkip}
+              onDismiss={() => {
+                setShowCompanyCard(false);
+                companyDiscovery.reset();
+              }}
+            />
+          )}
+        </>
       )}
       {view === "linkedin-setup" && (
         <LinkedInSetup onDone={onSetupDone} onBack={backToDoors} />

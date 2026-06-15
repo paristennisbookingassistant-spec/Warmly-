@@ -137,6 +137,14 @@ export interface ListContactsQuery extends PaginationParams {
   discovered_after?: string;
   sort_by?: "relevance_score" | "discovered_at" | "last_interaction_at";
   sort_order?: "asc" | "desc";
+  /**
+   * Filter to contacts tagged with a specific discovery session UUID.
+   * Used by the Discover deck to poll for contacts scraped by the extension
+   * during a company discovery run. When set, the default triage filter
+   * (which hides "pending" contacts) is suppressed so newly-scraped contacts
+   * appear immediately.
+   */
+  discovery_session_id?: string;
 }
 
 export type ListContactsResponse = ApiResponse<PaginatedResponse<Contact>>;
@@ -292,10 +300,25 @@ export type ListDiscoverySessionsResponse = ApiResponse<
 >;
 
 export interface StartDiscoveryRequest {
-  conversation_id: string;
+  /**
+   * FK to Conversations.id. Optional — omit when triggering from the Discover
+   * screen outside a chat context.
+   */
+  conversation_id?: string | null;
   target_companies: string[];
   /** Max profiles to view in this session — hard cap is 25 (PRD DIS-08) */
   max_profiles?: number;
+  /**
+   * Free-form company disambiguation hint (e.g. "the AI agent startup").
+   * Forwarded to the extension's CDP_DISCOVER path via WEBAPP_DISCOVER.
+   */
+  company_hint?: string;
+  /** School filter label for alumni search. Default: "INSEAD". */
+  school_label?: string;
+  /** Location filter label (e.g. "Paris", "London"). */
+  location_label?: string;
+  /** LinkedIn function filter label (e.g. "Finance", "Consulting"). */
+  function_label?: string;
 }
 
 export type StartDiscoveryResponse = ApiResponse<DiscoverySession>;

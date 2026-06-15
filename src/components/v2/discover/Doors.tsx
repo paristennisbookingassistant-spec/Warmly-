@@ -4,6 +4,9 @@
  * components/v2/discover/Doors.tsx
  * DoorsView: the two-door chooser — INSEAD Directory + LinkedIn Network.
  * Ported pixel-faithfully from design/warmly-v2/project/js/screens/discover.jsx.
+ *
+ * Phase 3b addition: "Discover at a company" affordance button that opens
+ * the validate-criteria card (Module 3). Lives below the two door cards.
  */
 
 import { CHANNELS, type ChannelKey } from "../palette";
@@ -25,6 +28,8 @@ interface DoorsViewProps {
   cvQueueCount: number;
   onOpenCV: () => void;
   onOpenLinkedIn: () => void;
+  /** Opens the validate-criteria card for live company discovery */
+  onOpenCompanyDiscover: () => void;
 }
 
 export function DoorsView({
@@ -33,6 +38,7 @@ export function DoorsView({
   cvQueueCount,
   onOpenCV,
   onOpenLinkedIn,
+  onOpenCompanyDiscover,
 }: DoorsViewProps) {
   return (
     <div className="fade-up flex flex-col flex-1 min-h-0">
@@ -76,6 +82,44 @@ export function DoorsView({
           peers={SYNCED_PEERS}
         />
       </div>
+
+      {/* Module 3 entry point: Discover at a company */}
+      <CompanyDiscoverAffordance onClick={onOpenCompanyDiscover} />
+    </div>
+  );
+}
+
+// ---------- CompanyDiscoverAffordance ----------
+
+function CompanyDiscoverAffordance({ onClick }: { onClick: () => void }) {
+  return (
+    <div className="flex items-center justify-between mt-4 flex-shrink-0">
+      <div className="h-px flex-1" style={{ background: "#ece2d0" }} />
+      <button
+        onClick={onClick}
+        className="inline-flex items-center gap-2 mx-4 px-4 h-9 rounded-full text-[12.5px] font-medium transition-all"
+        style={{
+          background: "#ffffff",
+          color: "#4a6f87",
+          border: "1px solid #d9cdb4",
+          boxShadow: "0 1px 3px rgba(31,27,22,0.04)",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "#dde6ee";
+          e.currentTarget.style.borderColor = "#4a6f87";
+          e.currentTarget.style.boxShadow = "0 2px 8px rgba(74,111,135,0.12)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "#ffffff";
+          e.currentTarget.style.borderColor = "#d9cdb4";
+          e.currentTarget.style.boxShadow = "0 1px 3px rgba(31,27,22,0.04)";
+        }}
+      >
+        <Icon.Search size={13} />
+        Discover at a company
+        <Icon.ArrowRight size={13} />
+      </button>
+      <div className="h-px flex-1" style={{ background: "#ece2d0" }} />
     </div>
   );
 }

@@ -131,6 +131,47 @@ describe("GET /api/contacts", () => {
 
     expect(response.status).toBe(400);
   });
+
+  it("filters by discovery_session_id and returns pending contacts", async () => {
+    const sessionId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    const pendingContact = { ...mockContact, user_action: "pending", discovery_session_id: sessionId };
+    const chain = makeQueryChain({ data: [pendingContact], error: null, count: 1 });
+    (chain.range as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [pendingContact],
+      error: null,
+      count: 1,
+    });
+    mockSupabase.from.mockReturnValue(chain);
+
+    const request = makeRequest(
+      "GET",
+      `http://localhost/api/contacts?discovery_session_id=${sessionId}&lite=true`
+    );
+    const response = await getContacts(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.error).toBeNull();
+    expect(body.data.items).toBeInstanceOf(Array);
+    // The eq("discovery_session_id", ...) method should have been called on the chain
+    expect(chain.eq).toHaveBeenCalledWith("discovery_session_id", sessionId);
+    // The default triage .or() filter should NOT be applied when discovery_session_id is set
+    const orCalls = (chain.or as ReturnType<typeof vi.fn>).mock.calls;
+    const triageOrCall = orCalls.find((args: unknown[]) =>
+      typeof args[0] === "string" && (args[0] as string).includes("pending")
+    );
+    expect(triageOrCall).toBeUndefined();
+  });
+
+  it("returns 400 for non-UUID discovery_session_id", async () => {
+    const request = makeRequest(
+      "GET",
+      "http://localhost/api/contacts?discovery_session_id=not-a-uuid"
+    );
+    const response = await getContacts(request);
+
+    expect(response.status).toBe(400);
+  });
 });
 
 // ---------------------------------------------------------------------------

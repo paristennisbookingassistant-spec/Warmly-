@@ -41,6 +41,7 @@ import {
   getActiveTabId,
 } from "./cdp-helper";
 import { DEFAULT_BACKEND_URL } from "../shared/constants";
+import { emitDiscoveryProgress } from "./sync-coordinator";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1444,11 +1445,12 @@ async function handleMessage(
           const profileUrl = profiles[i].url;
           console.debug(`[CDP] Visiting profile ${i + 1}/${profiles.length}:`, profileUrl);
 
-          // Broadcast progress
+          // Broadcast progress (to popup + web app if triggered via WEBAPP_DISCOVER)
           chrome.runtime.sendMessage({
             type: "SESSION_PROGRESS",
             data: { profilesVisited: i, profilesDiscovered: saved.length, total: profiles.length, state: "VISITING_PROFILE" },
           }).catch(() => {});
+          emitDiscoveryProgress({ state: "VISITING_PROFILE", profilesVisited: i, profilesDiscovered: saved.length, total: profiles.length }).catch(() => {});
 
           try {
             // Ensure CDP session is alive — re-attach if it dropped
@@ -1670,6 +1672,7 @@ async function handleMessage(
                     nextProfileInSec: Math.ceil(remaining / 1000),
                   },
                 }).catch(() => { /* popup may be closed; ignore */ });
+                emitDiscoveryProgress({ state: "WAITING_BETWEEN_PROFILES", profilesVisited: i + 1, profilesDiscovered: saved.length, total: profiles.length }).catch(() => {});
                 nextNotifyAt += TICK_MS;
               }
 
@@ -1690,6 +1693,7 @@ async function handleMessage(
               type: "SESSION_PROGRESS",
               data: { profilesVisited: profiles.length, profilesDiscovered: saved.length, total: profiles.length, state: "RANKING" },
             }).catch(() => {});
+            emitDiscoveryProgress({ state: "RANKING", profilesVisited: profiles.length, profilesDiscovered: saved.length, total: profiles.length }).catch(() => {});
 
             rankings = await rankContactsBatch(
               saved.map((s) => s.id),
@@ -1824,6 +1828,60 @@ async function handleMessage(
       const type = (message.type as string).replace("WEBAPP_", "");
       await handleWebAppRelay(type, message.payload);
       return { ok: true };
+    }
+
+    // ---- Company discovery triggered by the web app --------------------
+    // Mirrors handleStartNetworkSync but invokes CDP_DISCOVER inline
+    // (no circular dep; SW cannot sendMessage to itself).
+    case "WEBAPP_DISCOVER": {
+      const {
+        prepareCompanyDiscovery,
+        finalizeCompanyDiscovery,
+      } = await import("./sync-coordinator");
+
+      const discoverPayload =
+        message.payload as import("../shared/types").StartCompanyDiscoveryPayload;
+
+      // Phase 1: create session, emit DISCOVERY_STARTED, arm progress relay.
+      const prepared = await prepareCompanyDiscovery(discoverPayload);
+      if (!prepared) {
+        // prepareCompanyDiscovery already emitted DISCOVERY_ERROR.
+        return { ok: false, error: "Preparation failed" };
+      }
+
+      // Phase 2: run the EXISTING CDP_DISCOVER logic inline by re-invoking
+      // handleMessage with a synthesised CDP_DISCOVER message. This is safe
+      // because handleMessage is pure async — there is no re-entrant SW state
+      // to protect and we are already inside a single async task.
+      const cdpDiscoverMsg = {
+        type: "CDP_DISCOVER",
+        payload: {
+          companyName: discoverPayload.companyName,
+          schoolId: discoverPayload.schoolId ?? "5176",
+          userContext: discoverPayload.hint,
+          companySlug: discoverPayload.companySlug,
+          companyId: discoverPayload.companyId,
+          locationGeoUrn: discoverPayload.locationGeoUrn,
+          functionKeywords: discoverPayload.functionKeywords,
+          schoolLabel: discoverPayload.schoolLabel,
+          locationLabel: discoverPayload.locationLabel,
+          functionLabel: discoverPayload.functionLabel,
+        },
+      };
+
+      let cdpResult: import("./sync-coordinator").CdpDiscoverResult;
+      try {
+        cdpResult = (await handleMessage(cdpDiscoverMsg)) as import("./sync-coordinator").CdpDiscoverResult;
+      } catch (err) {
+        cdpResult = { ok: false, error: String(err) };
+      }
+
+      // Phase 3: emit DISCOVERY_DONE or DISCOVERY_ERROR and clean up.
+      return finalizeCompanyDiscovery(
+        prepared.sessionId,
+        prepared.companyName,
+        cdpResult ?? { ok: false, error: "No response from CDP_DISCOVER" }
+      );
     }
 
     default:

@@ -62,6 +62,13 @@ const ListContactsQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => v === "true"),
+  /**
+   * Filter to contacts tagged with a specific discovery session.
+   * Used by the Discover deck to poll for freshly scraped contacts
+   * as the extension writes them during a company discovery run.
+   * UUID format enforced; non-UUID values return a 400.
+   */
+  discovery_session_id: z.string().uuid().optional(),
 });
 
 const CreateContactSchema = z.object({
@@ -109,7 +116,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const { page, per_page, status, company, tier, discovered_after, sort_by, sort_order, search, ids, user_action, lite } =
+  const { page, per_page, status, company, tier, discovered_after, sort_by, sort_order, search, ids, user_action, lite, discovery_session_id } =
     parsed.data;
 
   const from = (page - 1) * per_page;
@@ -163,13 +170,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // Triage filter:
   //   - Explicit ?user_action=pending → exactly that (used by /review page)
   //   - Explicit ?user_action=saved   → exactly that
-  //   - No param                       → exclude pending + skipped from the
+  //   - ?discovery_session_id set (no user_action) → no triage filter at all.
+  //     The Discover deck needs to see "pending" contacts as they arrive from
+  //     the extension scrape. Suppressing the default exclusion means all
+  //     triage states in the session are visible.
+  //   - No param, no session filter   → exclude pending + skipped from the
   //     default listing. This keeps un-triaged or rejected contacts out of
   //     the main /contacts view. Legacy NULL rows pass through (treated as
   //     already-reviewed).
   if (user_action) {
     query = query.eq("user_action", user_action);
-  } else {
+  } else if (!discovery_session_id) {
     query = query
       .or("user_action.is.null,user_action.not.in.(pending,skipped)");
   }
@@ -192,6 +203,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (idList.length > 0) {
       query = query.in("id", idList);
     }
+  }
+
+  // Filter by discovery session — used by the Discover deck to poll for
+  // contacts scraped by the extension during a company discovery run.
+  // When this filter is present we skip the default user_action exclusion
+  // so that newly-written "pending" contacts are immediately visible to
+  // the deck without a separate ?user_action=pending param.
+  if (discovery_session_id) {
+    query = query.eq("discovery_session_id", discovery_session_id);
   }
 
   // Handle nullable sort columns — null values always go last
