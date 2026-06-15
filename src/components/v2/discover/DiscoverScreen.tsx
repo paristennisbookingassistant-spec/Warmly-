@@ -175,6 +175,8 @@ function directoryToDeckCard(p: DirectoryProfile): DeckCard {
     about,
     inseadShort,
     channel: "cv",
+    experience: p.experience ?? null,
+    education: p.education_v2 ?? null,
   };
 }
 
@@ -226,6 +228,8 @@ function contactToDeckCard(c: Contact): DeckCard {
     about,
     inseadShort,
     channel: "linkedin",
+    experience: c.experience ?? null,
+    education: c.education_v2 ?? null,
   };
 }
 

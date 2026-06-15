@@ -5,6 +5,7 @@
  */
 
 import type { Tier } from "../palette";
+import type { LinkedInExperienceEntry, LinkedInEducationEntry } from "@/types/database";
 
 /** A single bullet in the "About" section of a profile card. */
 export type AboutBullet = string;
@@ -50,6 +51,16 @@ export interface DeckCard {
   inseadShort: string | null;
   /** Which channel this card comes from — controls source ribbon appearance */
   channel: SourceKind;
+  /**
+   * Full work experience entries — used by the "Full profile" expanded view.
+   * Null/undefined when not available (seed deck, unscored contacts).
+   */
+  experience?: LinkedInExperienceEntry[] | null;
+  /**
+   * Full education entries — used by the "Full profile" expanded view.
+   * Null/undefined when not available (seed deck, unscored contacts).
+   */
+  education?: LinkedInEducationEntry[] | null;
 }
 
 /** Chat message in the refine sidebar */
