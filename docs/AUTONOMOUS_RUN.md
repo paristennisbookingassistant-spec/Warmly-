@@ -54,8 +54,23 @@ rotate the Brave key + Vercel token.
   Remaining for Phase 4: real cross-user demo needs ≥2 real opted-in users (GTM, not code);
   capture user's OWN urn at sync (extension follow-up); the ask-for-intro draft reuses the
   already-verified generate flow.
-- **Next:** iter 5 = polish (em-dash in scoring rationale; onboarding "0 of 2" counter);
-  iter 6 = full fresh-journey regression walkthrough + final report.
+- **Iter 5 DONE (em-dash 65ee399, counter d2b8b3f):** scoring rationale + hook now run through
+  the existing stripDashes gate (no more "Bain, the same firm"); onboarding step bar hides on
+  the processing/building transitional screens (no more "0 of 2"). Verifying on next deploy.
+- **Iter 6 DONE, regression GREEN:** all 8 surfaces load (V2 home/discover/warm-intros/contacts/
+  settings + V1 chat/contacts/review); post-login → /v2; INSEAD deck opens, scores (tier +
+  rationale), no 500s/console errors; warm-intros lane renders 4 cards. Product meets the VISION
+  journey end-to-end except user/extension-dependent bits.
+
+## Status vs VISION (after this run)
+Built + verified: signup, onboarding (CV→profile, counter fixed), home, INSEAD discovery
+(goal-filtered + scored + refine + company-search routing), save→contacts→draft (refusal fixed,
+em-dash clean), meeting prep + company intel (Brave, live), meeting synthesis, CRM, WhatsApp,
+**Phase 4 cross-user warm intros (the differentiator)**, /v2 default.
+User/extension-dependent (not autonomous): live company scrape + network sync (extension reload),
+real multi-user warm intros (need ≥2 real opted-in users), Google sign-in (Google OAuth client),
+INSEAD on-campus domain (Cato allowlist), rotate Brave+Vercel keys.
+Code TODOs noted: warm-intros targeted-query scaling; capture user's OWN urn at sync (extension).
 - **Phase 4 spike DONE:** `docs/specs/V2_P4_WARM_INTROS.md` written (schema = 2 cols on `users`
   + index; server-side `/api/warm-intros` matching with consent; seed a 2nd user to validate).
   Ready to build as iter 2+.
