@@ -311,7 +311,9 @@ function QueueBanner({
         <div className="font-mono-tag mb-1.5" style={{ fontSize: 9, color: c.accent }}>
           Queue
         </div>
-        <div className="flex items-center gap-1.5 flex-wrap">
+        {/* maxWidth forces the queue to wrap at 8 chips per row → at most two
+            tidy rows for a 16-card batch (8 + 8) instead of one long line. */}
+        <div className="flex items-center gap-1.5 flex-wrap" style={{ maxWidth: 244 }}>
           {deck.map((p, i) => {
             const isSaved = savedIds.includes(p.id);
             const isSkipped = skippedIds.includes(p.id);

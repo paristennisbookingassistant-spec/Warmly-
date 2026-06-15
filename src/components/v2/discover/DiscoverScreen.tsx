@@ -372,7 +372,8 @@ export function DiscoverScreen() {
       else { setCvLoading(true); setCvDeck([]); }
       setCvError(null);
       try {
-        const url = buildDirectoryUrl({ per_page: 24, ...params });
+        // Cap the batch at 16 so the queue banner stays two tidy rows of 8.
+        const url = buildDirectoryUrl({ per_page: 16, ...params });
         const res = await fetch(url, { credentials: "include" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as ListDirectoryResponse;
@@ -416,7 +417,7 @@ export function DiscoverScreen() {
     setLiveError(null);
     try {
       const res = await fetch(
-        "/api/contacts?user_action=pending&sort_by=relevance_score&sort_order=desc&per_page=25&lite=true",
+        "/api/contacts?user_action=pending&sort_by=relevance_score&sort_order=desc&per_page=16&lite=true",
         { credentials: "include" }
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
