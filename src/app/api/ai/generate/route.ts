@@ -163,6 +163,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           networking_preferences: userTyped.networking_preferences,
         },
         user_memory: userTyped.user_memory,
+        // The rich CV-built identity narrative (schools, city, goal, transition
+        // story). Without this the outreach prompt only sees the structured
+        // columns and the model refuses, asking for context it should have had.
+        user_profile_md: userTyped.profile_md,
         contact_profile: {
           name: contact.name,
           current_title: contact.current_title,

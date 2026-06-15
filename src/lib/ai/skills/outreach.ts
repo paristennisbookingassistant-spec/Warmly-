@@ -215,7 +215,7 @@ export const LEARNED_PATTERNS = `## Hard-won learned patterns
 
 **Cross-reference all schools, not just the most recent.** If the user has multiple alma maters, check the recipient's education against ALL of them. A less-known shared school is often a stronger hook than a famous unrelated one.
 
-**Generic fallback is worse than no message.** If the recipient's profile can't be accessed or there isn't enough context to personalize, do not draft a generic message. Stop and surface what's missing.
+**Draft with the connection points you have — don't refuse on a thin profile.** A shared school (e.g. INSEAD), a similar career transition, or even just the recipient's role + company is enough to personalize. Lead with the strongest hook available. Only stop and surface what's missing if you genuinely cannot identify the recipient at all (no name AND no role AND no company) — a sparse recipient profile is NOT a reason to refuse. When context is thin, write a shorter, more focused message grounded in whatever shared context exists (the user's own background is always available); do not pad it into generic filler.
 
 **Frame company awareness as organic, not active research.** "Keeps coming up", "has been on my radar", "hard to miss in [scene]" works. "I've been digging into" / "I researched" / "after looking into" sounds like due diligence.
 
