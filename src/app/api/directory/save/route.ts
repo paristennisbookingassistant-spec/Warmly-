@@ -103,6 +103,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       linkedin_url: profile.linkedin_url ?? null,
       experience: profile.experience ?? [],
       education_v2: profile.education_v2 ?? [],
+      phone: profile.phone ?? null,
       source: "cv_book" as const,
       directory_profile_id: directory_id,
       user_action: "saved" as const,

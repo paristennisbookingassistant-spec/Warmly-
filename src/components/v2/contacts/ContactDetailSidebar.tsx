@@ -8,8 +8,8 @@
 import Link from "next/link";
 import type { Contact, RelationshipCategory } from "@/types/database";
 import { Btn, SectionLabel, StatusBadge, TierBadge } from "@/components/v2/primitives";
-import { Icon } from "@/components/v2/icons";
-import { relativeTime, deriveFollowUpDue, detectInsead } from "./contactsUtils";
+import { Icon, WhatsAppIcon } from "@/components/v2/icons";
+import { relativeTime, deriveFollowUpDue, detectInsead, phoneToWaLink } from "./contactsUtils";
 import type { ContactStatusValue } from "@/components/v2/primitives";
 import { tierLabelFromNumber } from "@/components/v2/palette";
 import { RelationshipDropdown } from "./RelationshipDropdown";
@@ -84,6 +84,20 @@ export function ContactDetailSidebar({
               <Btn variant="secondary" icon={Icon.Link} className="w-full justify-start">
                 LinkedIn profile
               </Btn>
+            </a>
+          )}
+          {c.phone && (
+            <a
+              href={phoneToWaLink(c.phone)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Message on WhatsApp"
+              aria-label="Message on WhatsApp"
+              className="w-full inline-flex items-center justify-start gap-2 h-10 px-4 rounded-lg text-[13.5px] font-medium transition-all duration-150 select-none"
+              style={{ background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0" }}
+            >
+              <WhatsAppIcon size={15} />
+              WhatsApp
             </a>
           )}
           <Btn

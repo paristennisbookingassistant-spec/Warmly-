@@ -35,6 +35,10 @@ export interface DirectoryProfile {
   functions: string[];
   geography: string[];
 
+  // Contact info
+  /** E.164-ish phone from the INSEAD CV book; used for wa.me click-to-chat. */
+  phone: string | null;
+
   // Deep data — same JSONB shapes as contacts.experience / contacts.education_v2
   experience: LinkedInExperienceEntry[];
   education_v2: LinkedInEducationEntry[];

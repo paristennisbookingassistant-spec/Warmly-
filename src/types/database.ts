@@ -391,6 +391,12 @@ export interface Contact {
    * Only set for contacts with source='cv_book'. Null for all other sources.
    */
   directory_profile_id: string | null;
+  /**
+   * E.164-ish phone number from the INSEAD CV book.
+   * Used to render a WhatsApp click-to-chat link: https://wa.me/<digits>.
+   * Null for contacts not sourced from the CV book, or where phone was not listed.
+   */
+  phone: string | null;
 }
 
 // ---------------------------------------------------------------------------

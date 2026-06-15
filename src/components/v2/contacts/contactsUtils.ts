@@ -56,6 +56,24 @@ export function formatFullDate(iso: ISODateString | null | undefined): string {
   });
 }
 
+/**
+ * Strips a phone string to digits only, removes a leading "00" international
+ * prefix (wa.me wants the country code without `+` or `00`), then returns the
+ * full `https://wa.me/<digits>` URL.
+ *
+ * Examples:
+ *   "+44 7493 550627"      → "https://wa.me/447493550627"
+ *   "+33-07-66-92-64-99"   → "https://wa.me/330766926499"
+ *   "0033 6 12 34 56 78"   → "https://wa.me/33612345678"
+ */
+export function phoneToWaLink(phone: string): string {
+  // Strip every character that isn't a digit
+  let digits = phone.replace(/\D/g, "");
+  // Remove a leading "00" (international dialling prefix) so country code is bare
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  return `https://wa.me/${digits}`;
+}
+
 /** Detect INSEAD from education_v2 entries. Returns short label e.g. "MBA Dec'26". */
 export function detectInsead(
   educationV2: Array<{ school: string; degree?: string; dateRange: { start: string | null; end: string | null } }> | null

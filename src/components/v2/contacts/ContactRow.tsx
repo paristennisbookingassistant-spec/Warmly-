@@ -8,8 +8,8 @@
 import Link from "next/link";
 import type { Contact } from "@/types/database";
 import { Avatar, StatusBadge } from "@/components/v2/primitives";
-import { Icon } from "@/components/v2/icons";
-import { relativeTime, deriveFollowUpDue, detectInsead } from "./contactsUtils";
+import { Icon, WhatsAppIcon } from "@/components/v2/icons";
+import { relativeTime, deriveFollowUpDue, detectInsead, phoneToWaLink } from "./contactsUtils";
 import type { ContactStatusValue } from "@/components/v2/primitives";
 
 interface ContactRowProps {
@@ -56,6 +56,23 @@ export function ContactRow({ contact: c }: ContactRowProps) {
         {followUpDue && <Icon.Alert size={11} className="text-warn" />}
         <span>{lastContact}</span>
       </div>
+
+      {c.phone ? (
+        <a
+          href={phoneToWaLink(c.phone)}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Message on WhatsApp"
+          aria-label="Message on WhatsApp"
+          onClick={(e) => e.stopPropagation()}
+          className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full transition-all duration-150"
+          style={{ color: "#16a34a" }}
+        >
+          <WhatsAppIcon size={14} />
+        </a>
+      ) : (
+        <span className="w-6 flex-shrink-0" />
+      )}
 
       <Icon.ChevronRight size={14} className="text-ink-4" />
     </Link>
