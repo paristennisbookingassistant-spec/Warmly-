@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useToast } from "../Toast";
 import { tierLabelFromNumber } from "../palette";
 import { DoorsView } from "./Doors";
@@ -310,11 +311,30 @@ type View = "doors" | "cv-tinder" | "linkedin-setup" | "linkedin-tinder";
 
 export function DiscoverScreen() {
   const toast = useToast();
+  const searchParams = useSearchParams();
   const [view, setView] = useState<View>("doors");
   // Show the validate-criteria card below the doors grid
   const [showCompanyCard, setShowCompanyCard] = useState(false);
   // Company discovery hook (Module 3 + 4)
   const companyDiscovery = useCompanyDiscovery();
+
+  // Deep-link / refresh: if ?discovery_session_id is present, seed the results
+  // display from that past session without starting a new live discovery.
+  // isUrlSeeded suppresses the CompanyDiscoveryCard form during the load.
+  const [isUrlSeeded, setIsUrlSeeded] = useState(false);
+  const seededSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    const sessionId = searchParams.get("discovery_session_id");
+    if (!sessionId) return;
+    if (seededSessionRef.current === sessionId) return; // already seeded
+    seededSessionRef.current = sessionId;
+    setShowCompanyCard(true);
+    setIsUrlSeeded(true);
+    void companyDiscovery.seedFromSession(sessionId);
+  // seedFromSession is stable (useCallback with no deps); searchParams reference
+  // changes only when the URL changes which is the correct trigger.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // The user's goals, fetched lazily when the INSEAD door is first opened.
   // undefined = not fetched yet; null = fetched, none. Used to goal-filter the
@@ -675,6 +695,8 @@ export function DiscoverScreen() {
             onOpenLinkedIn={openLinkedIn}
             onOpenCompanyDiscover={() => {
               setShowCompanyCard(true);
+              setIsUrlSeeded(false);
+              seededSessionRef.current = null;
               companyDiscovery.reset();
             }}
           />
@@ -694,8 +716,8 @@ export function DiscoverScreen() {
             />
           )}
 
-          {/* Module 3: Card in submitting / connect states */}
-          {showCompanyCard &&
+          {/* Module 3: Card in submitting / connect states — suppressed when URL-seeded (results panel shows instead) */}
+          {showCompanyCard && !isUrlSeeded &&
             (companyDiscovery.phase === "detecting" ||
               companyDiscovery.phase === "creating_session" ||
               companyDiscovery.phase === "no_extension" ||
@@ -728,9 +750,10 @@ export function DiscoverScreen() {
             />
           )}
 
-          {/* Module 4: Results stream while running or done */}
+          {/* Module 4: Results stream while running, loading a past session, or done */}
           {(companyDiscovery.phase === "running" ||
             companyDiscovery.phase === "done" ||
+            companyDiscovery.phase === "creating_session" ||
             (companyDiscovery.phase === "error" && companyDiscovery.discoveredCards.length > 0)) && (
             <DiscoveryResultsGroup
               companyName={companyDiscovery.companyName}
@@ -742,6 +765,8 @@ export function DiscoverScreen() {
               onSkip={handleDiscoverySkip}
               onDismiss={() => {
                 setShowCompanyCard(false);
+                setIsUrlSeeded(false);
+                seededSessionRef.current = null;
                 companyDiscovery.reset();
               }}
             />

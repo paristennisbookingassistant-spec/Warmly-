@@ -104,6 +104,12 @@ export interface UseCompanyDiscoveryReturn extends DiscoveryState {
   retryWithCandidate: (candidate: CompanyCandidate) => void;
   /** Reset to idle (e.g. user dismisses the card). */
   reset: () => void;
+  /**
+   * Deep-link / refresh entry: fetch contacts for a completed session by id and
+   * enter the "done" results state without going through the live discovery flow.
+   * A single fetch is performed (no polling — session is already complete).
+   */
+  seedFromSession: (sessionId: string) => Promise<void>;
 }
 
 export interface StartDiscoveryParams {
@@ -594,6 +600,64 @@ export function useCompanyDiscovery(): UseCompanyDiscoveryReturn {
   );
 
   // ---------------------------------------------------------------------------
+  // seedFromSession — deep-link / refresh entry for a completed session
+  // ---------------------------------------------------------------------------
+
+  const seedFromSession = useCallback(async (sessionId: string) => {
+    // Avoid double-seeding if already in a non-idle phase for the same session
+    if (activeSessionRef.current === sessionId) return;
+
+    activeSessionRef.current = sessionId;
+    seenIdsRef.current = new Set();
+
+    setState((prev) => ({
+      ...prev,
+      phase: "creating_session", // show skeleton while we fetch
+      sessionId,
+      discoveredCards: [],
+      errorMessage: null,
+      candidates: null,
+    }));
+
+    try {
+      const res = await fetch(
+        `/api/contacts?discovery_session_id=${sessionId}&lite=true`,
+        { credentials: "include" }
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as ContactsApiResponse;
+      const items = json.data?.items ?? [];
+      const cards: DeckCard[] = [];
+      for (const item of items) {
+        if (!seenIdsRef.current.has(item.id)) {
+          seenIdsRef.current.add(item.id);
+          cards.push(contactToDeckCard(item));
+        }
+      }
+
+      // Derive company label from first contact's company field (simplest, no extra call).
+      const companyLabel = items[0]?.company ?? "Company";
+
+      setState((prev) => ({
+        ...prev,
+        phase: "done",
+        companyName: companyLabel,
+        sessionId,
+        discoveredCards: cards,
+        progress: { profiles_saved: cards.length, profiles_total: cards.length, state: "RANKING" },
+        errorMessage: null,
+      }));
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        phase: "error",
+        sessionId,
+        errorMessage: err instanceof Error ? err.message : "Failed to load session results.",
+      }));
+    }
+  }, []);
+
+  // ---------------------------------------------------------------------------
   // reset
   // ---------------------------------------------------------------------------
 
@@ -614,5 +678,6 @@ export function useCompanyDiscovery(): UseCompanyDiscoveryReturn {
     startDiscovery,
     retryWithCandidate,
     reset,
+    seedFromSession,
   };
 }
