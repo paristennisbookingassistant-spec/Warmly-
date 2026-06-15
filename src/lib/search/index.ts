@@ -57,20 +57,105 @@ export function invalidateCompanyCache(companyName: string): void {
 }
 
 /**
- * Performs the actual web search API call via Perplexity.
- * Falls back to an empty result if PERPLEXITY_API_KEY is not set.
+ * Performs the actual web search for company intel.
+ * Primary: Brave Search API (real recent web results). Fallback: Perplexity
+ * (if its key is set), then a graceful empty result. The meeting-prep LLM
+ * synthesizes `raw_context` into the brief, so we return raw results here
+ * rather than summarizing — no extra LLM call needed.
  */
 async function fetchCompanyIntel(
   companyName: string,
   sinceDate?: string
 ): Promise<CompanySearchResult> {
-  const perplexityApiKey = process.env.PERPLEXITY_API_KEY;
+  const viaBrave = await fetchViaBrave(companyName, sinceDate);
+  if (viaBrave) return viaBrave;
 
-  if (!perplexityApiKey) {
-    // Graceful fallback: return empty result if no API key configured
-    // TODO: Connect real Perplexity/SerpAPI key when available
-    return buildEmptyResult(companyName);
+  const viaPerplexity = await fetchViaPerplexity(companyName, sinceDate);
+  if (viaPerplexity) return viaPerplexity;
+
+  return buildEmptyResult(companyName);
+}
+
+/** Strip the <strong> highlight tags Brave wraps around matched terms. */
+function stripTags(s: string): string {
+  return s.replace(/<\/?strong>/g, "").trim();
+}
+
+/**
+ * Brave Search API — real recent web results (title, snippet, date) for the
+ * company. Free tier; key in BRAVE_API_KEY. Returns null if no key or on error
+ * so the caller can fall back.
+ */
+async function fetchViaBrave(
+  companyName: string,
+  sinceDate?: string
+): Promise<CompanySearchResult | null> {
+  const key = process.env.BRAVE_API_KEY;
+  if (!key) return null;
+
+  const year = new Date().getFullYear();
+  const query = `${companyName} recent news funding leadership strategy ${sinceDate ? `since ${sinceDate}` : year}`;
+
+  try {
+    const res = await fetch(
+      `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=8&freshness=py`,
+      { headers: { "X-Subscription-Token": key, Accept: "application/json" } }
+    );
+
+    if (!res.ok) {
+      console.warn(`Brave search returned ${res.status} for "${companyName}"`);
+      return null;
+    }
+
+    const data = (await res.json()) as {
+      web?: {
+        results?: Array<{
+          title?: string;
+          description?: string;
+          url?: string;
+          page_age?: string;
+          age?: string;
+        }>;
+      };
+    };
+    const results = data.web?.results ?? [];
+    if (results.length === 0) return null;
+
+    const snippets = results.slice(0, 8).map((r) => ({
+      title: stripTags(r.title ?? ""),
+      body: stripTags(r.description ?? ""),
+      published_date: (r.page_age ?? r.age ?? "").slice(0, 10) || undefined,
+    }));
+
+    const raw_context = snippets
+      .map(
+        (s, i) =>
+          `${i + 1}. ${s.title}${s.published_date ? ` (${s.published_date})` : ""}: ${s.body}`
+      )
+      .join("\n");
+
+    return {
+      company_name: companyName,
+      snippets,
+      raw_context,
+      cached_at: Date.now(),
+    };
+  } catch (err) {
+    console.error(`Brave search error for "${companyName}":`, err);
+    return null;
   }
+}
+
+/**
+ * Perplexity fallback (legacy). Returns null if no key or on error so the
+ * caller can degrade gracefully.
+ */
+async function fetchViaPerplexity(
+  companyName: string,
+  sinceDate?: string
+): Promise<CompanySearchResult | null> {
+  const perplexityApiKey = process.env.PERPLEXITY_API_KEY;
+  if (!perplexityApiKey) return null;
 
   const year = new Date().getFullYear();
   const query = `${companyName} recent news funding leadership strategy ${sinceDate ? `since ${sinceDate}` : year}`;
@@ -90,10 +175,7 @@ async function fetchCompanyIntel(
             content:
               "You are a research assistant. Provide a concise summary of recent company news, funding, leadership changes, and strategic priorities. Be factual and cite dates when available.",
           },
-          {
-            role: "user",
-            content: query,
-          },
+          { role: "user", content: query },
         ],
         max_tokens: 800,
         temperature: 0.1,
@@ -102,15 +184,16 @@ async function fetchCompanyIntel(
 
     if (!response.ok) {
       console.warn(`Perplexity search returned ${response.status} for "${companyName}"`);
-      return buildEmptyResult(companyName);
+      return null;
     }
 
     const data = (await response.json()) as {
       choices: Array<{ message: { content: string } }>;
     };
     const content = data.choices[0]?.message?.content ?? "";
+    if (!content) return null;
 
-    const result: CompanySearchResult = {
+    return {
       company_name: companyName,
       snippets: [
         {
@@ -122,11 +205,9 @@ async function fetchCompanyIntel(
       raw_context: content,
       cached_at: Date.now(),
     };
-
-    return result;
   } catch (err) {
     console.error(`Company search error for "${companyName}":`, err);
-    return buildEmptyResult(companyName);
+    return null;
   }
 }
 
