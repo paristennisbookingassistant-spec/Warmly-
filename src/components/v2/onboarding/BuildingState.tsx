@@ -20,10 +20,13 @@ export function BuildingState() {
   const [activeIdx, setActiveIdx] = useState(0);
 
   useEffect(() => {
+    // Paced to the real ~22s profile build so the last stage doesn't sit
+    // "done-looking" for 10s (which reads as stuck). The final stage holds if
+    // the build runs longer.
     const timers: ReturnType<typeof setTimeout>[] = [];
-    timers.push(setTimeout(() => setActiveIdx(1), 600));
-    timers.push(setTimeout(() => setActiveIdx(2), 5000));
-    timers.push(setTimeout(() => setActiveIdx(3), 12000));
+    timers.push(setTimeout(() => setActiveIdx(1), 1500));
+    timers.push(setTimeout(() => setActiveIdx(2), 8000));
+    timers.push(setTimeout(() => setActiveIdx(3), 16000));
     return () => timers.forEach(clearTimeout);
   }, []);
 
