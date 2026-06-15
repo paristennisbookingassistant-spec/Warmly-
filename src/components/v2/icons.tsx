@@ -116,6 +116,7 @@ export const Icon = {
   ChevronRight: makeIcon(<path d="m9 18 6-6-6-6" />),
   ChevronLeft: makeIcon(<path d="m15 18-6-6 6-6" />),
   ChevronDown: makeIcon(<path d="m6 9 6 6 6-6" />),
+  ChevronUp: makeIcon(<path d="m18 15-6-6-6 6" />),
   ArrowRight: makeIcon(
     <>
       <path d="M5 12h14" />
@@ -219,6 +220,12 @@ export const Icon = {
     <>
       <rect x="2" y="7" width="20" height="14" rx="2" />
       <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+    </>
+  ),
+  GraduationCap: makeIcon(
+    <>
+      <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+      <path d="M6 12v5c3 3 9 3 12 0v-5" />
     </>
   ),
   MapPin: makeIcon(

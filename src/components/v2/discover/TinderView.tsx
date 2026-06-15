@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { CHANNELS, type ChannelKey } from "../palette";
 import { Icon } from "../icons";
 import { Avatar, Btn, InseadPill, TierBadge } from "../primitives";
+import type { LinkedInExperienceEntry, LinkedInEducationEntry } from "@/types/database";
 import type { DeckCard, ChatMsg, SearchHint } from "./types";
 
 // ---------- Chat seed messages ----------
@@ -137,7 +138,7 @@ export function TinderView({ channel, deck, scoring = false, onBack, onSave, onS
       >
         {/* Left: card stage */}
         <div
-          className="flex-1 flex flex-col relative min-w-0"
+          className="flex-1 flex flex-col relative min-w-0 overflow-hidden"
           style={{
             background:
               channel === "cv"
@@ -164,24 +165,27 @@ export function TinderView({ channel, deck, scoring = false, onBack, onSave, onS
             skippedIds={skippedIds}
           />
 
-          <div className="flex-1 flex flex-col items-center justify-center px-10 pb-8 relative z-10 min-h-0">
-            {done ? (
-              <EmptyDeck channel={channel} savedCount={savedIds.length} onBack={onBack} />
-            ) : (
-              <>
-                <CardStack
-                  deck={deck}
-                  idx={idx}
-                  channel={channel}
-                  swipe={swipe}
-                  searchHint={searchHint}
-                />
-                <div className="flex items-center gap-5 mt-7">
-                  <SwipeBtn variant="skip" onClick={handleSkip} />
-                  <SwipeBtn variant="save" channel={channel} onClick={handleSave} />
-                </div>
-              </>
-            )}
+          {/* Card stage — pt-28 (112px) keeps background cards (translateY up to -66px) below the 84px banner with a visible gap */}
+          <div className="flex-1 flex flex-col items-center px-10 relative z-10 min-h-0 overflow-hidden pt-28 pb-8">
+            <div className="flex-1 flex flex-col items-center justify-center w-full min-h-0">
+              {done ? (
+                <EmptyDeck channel={channel} savedCount={savedIds.length} onBack={onBack} />
+              ) : (
+                <>
+                  <CardStack
+                    deck={deck}
+                    idx={idx}
+                    channel={channel}
+                    swipe={swipe}
+                    searchHint={searchHint}
+                  />
+                  <div className="flex items-center gap-5 mt-7">
+                    <SwipeBtn variant="skip" onClick={handleSkip} />
+                    <SwipeBtn variant="save" channel={channel} onClick={handleSave} />
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -330,26 +334,25 @@ function QueueBanner({
               boxShadow = `0 0 0 3px ${c.tint}`;
             }
 
+            const thumbSize = isCurrent ? 30 : 24;
             return (
               <div
                 key={p.id}
-                className="rounded-full overflow-hidden flex-shrink-0 transition-all duration-300"
+                className="rounded-full flex-shrink-0 transition-all duration-300 overflow-hidden"
                 style={{
-                  width: isCurrent ? 30 : 24,
-                  height: isCurrent ? 30 : 24,
-                  background,
+                  width: thumbSize,
+                  height: thumbSize,
                   border: `2px solid ${borderColor}`,
                   boxShadow,
                   opacity,
                 }}
                 title={p.name}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={p.avatar ?? undefined}
-                  alt=""
-                  className="w-full h-full object-cover rounded-full"
-                  style={{ opacity: isSkipped ? 0.5 : 1 }}
+                <Avatar
+                  src={p.avatar}
+                  name={p.name}
+                  size={thumbSize}
+                  className={isSkipped ? "opacity-50" : ""}
                 />
               </div>
             );
@@ -460,6 +463,7 @@ function ProfileCard({
 }) {
   const c = CHANNELS[channel];
   const interactive = depth === 0;
+  const [fullProfileOpen, setFullProfileOpen] = useState(false);
 
   let style: React.CSSProperties = {
     borderColor: "#e5d8be",
@@ -476,176 +480,384 @@ function ProfileCard({
     style = { ...style, transform: "translateX(130%) rotate(9deg)", opacity: 0 };
   }
 
-  return (
-    <div
-      className="absolute inset-0 bg-white border rounded-3xl overflow-hidden flex flex-col"
-      style={style}
-    >
-      {/* Source ribbon */}
-      <div
-        className="flex items-center gap-2 px-5 py-2.5 border-b flex-shrink-0"
-        style={{ background: c.soft, borderColor: `${c.accent}33` }}
-      >
-        {channel === "linkedin" ? (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/v2/linkedin-logo.png" alt="LinkedIn" className="h-3 w-auto object-contain" />
-            <span className="text-ink-4">·</span>
-            <div className="text-[11.5px] leading-tight flex-1 min-w-0 truncate" style={{ color: c.ink }}>
-              <span className="font-semibold">1st-degree connection</span>
-            </div>
-            <span
-              className="text-[10px] font-medium px-1.5 h-[18px] inline-flex items-center rounded-md"
-              style={{
-                background: "#ffffff",
-                color: c.ink,
-                fontFamily: '"JetBrains Mono", monospace',
-              }}
-            >
-              1st
-            </span>
-          </>
-        ) : (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/v2/insead-logo.png" alt="INSEAD" className="h-4 w-auto object-contain" />
-            <span className="text-ink-4">·</span>
-            <Icon.Book size={12} style={{ color: c.accent }} />
-            <div className="text-[11.5px] leading-tight flex-1" style={{ color: c.ink }}>
-              <span className="font-semibold">INSEAD CV book</span> · indexed alumnus
-            </div>
-            <span
-              className="text-[10px] font-medium px-1.5 h-[18px] inline-flex items-center rounded-md"
-              style={{
-                background: "#ffffff",
-                color: c.ink,
-                fontFamily: '"JetBrains Mono", monospace',
-              }}
-            >
-              1st
-            </span>
-          </>
-        )}
-      </div>
+  const hasFullProfile =
+    interactive && ((p.experience && p.experience.length > 0) || (p.education && p.education.length > 0));
 
-      {/* Identity */}
-      <div className="px-6 pt-5 pb-3">
-        <div className="flex items-start gap-4">
-          <Avatar src={p.avatar} size={68} />
-          <div className="flex-1 min-w-0 pt-1">
-            <div
-              className="font-display text-[20px] text-ink leading-tight"
-              style={{ fontStyle: "italic" }}
-            >
-              {p.name}
-            </div>
-            {p.role && (
-              <div className="text-[13.5px] text-ink-2 mt-1 truncate">{p.role}</div>
-            )}
-            {(p.company || p.location) && (
-              <div className="text-[12.5px] text-ink-3 mt-0.5 truncate">
-                {p.company}
-                {p.company && p.location && " · "}
-                {p.location && (
-                  <span className="inline-flex items-baseline gap-1">
-                    <Icon.MapPin size={10} className="translate-y-[1px]" />
-                    {p.location}
-                  </span>
-                )}
+  return (
+    <>
+      <div
+        className="absolute inset-0 bg-white border rounded-3xl overflow-hidden flex flex-col"
+        style={style}
+      >
+        {/* Source ribbon */}
+        <div
+          className="flex items-center gap-2 px-5 py-2.5 border-b flex-shrink-0"
+          style={{ background: c.soft, borderColor: `${c.accent}33` }}
+        >
+          {channel === "linkedin" ? (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/v2/linkedin-logo.png" alt="LinkedIn" className="h-3 w-auto object-contain" />
+              <span className="text-ink-4">·</span>
+              <div className="text-[11.5px] leading-tight flex-1 min-w-0 truncate" style={{ color: c.ink }}>
+                <span className="font-semibold">1st-degree connection</span>
               </div>
+              <span
+                className="text-[10px] font-medium px-1.5 h-[18px] inline-flex items-center rounded-md"
+                style={{
+                  background: "#ffffff",
+                  color: c.ink,
+                  fontFamily: '"JetBrains Mono", monospace',
+                }}
+              >
+                1st
+              </span>
+            </>
+          ) : (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/v2/insead-logo.png" alt="INSEAD" className="h-4 w-auto object-contain" />
+              <span className="text-ink-4">·</span>
+              <Icon.Book size={12} style={{ color: c.accent }} />
+              <div className="text-[11.5px] leading-tight flex-1" style={{ color: c.ink }}>
+                <span className="font-semibold">INSEAD CV book</span> · indexed alumnus
+              </div>
+              <span
+                className="text-[10px] font-medium px-1.5 h-[18px] inline-flex items-center rounded-md"
+                style={{
+                  background: "#ffffff",
+                  color: c.ink,
+                  fontFamily: '"JetBrains Mono", monospace',
+                }}
+              >
+                1st
+              </span>
+            </>
+          )}
+        </div>
+
+        {/* Identity */}
+        <div className="px-6 pt-5 pb-3">
+          <div className="flex items-start gap-4">
+            <Avatar src={p.avatar} name={p.name} size={68} />
+            <div className="flex-1 min-w-0 pt-1">
+              <div
+                className="font-display text-[20px] text-ink leading-tight"
+                style={{ fontStyle: "italic" }}
+              >
+                {p.name}
+              </div>
+              {p.role && (
+                <div className="text-[13.5px] text-ink-2 mt-1 truncate">{p.role}</div>
+              )}
+              {(p.company || p.location) && (
+                <div className="text-[12.5px] text-ink-3 mt-0.5 truncate">
+                  {p.company}
+                  {p.company && p.location && " · "}
+                  {p.location && (
+                    <span className="inline-flex items-baseline gap-1">
+                      <Icon.MapPin size={10} className="translate-y-[1px]" />
+                      {p.location}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+            {p.inseadShort && <InseadPill>{p.inseadShort}</InseadPill>}
+            {p.tier && <TierBadge tier={p.tier} />}
+            {searchHint && (
+              <span
+                className="inline-flex items-center gap-1.5 px-2 h-[22px] rounded-full text-[11px] font-medium"
+                style={{ background: "#f3e2cd", color: "#7a4a25" }}
+              >
+                <Icon.Sparkles size={10} />
+                {searchHint.label}
+              </span>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 mt-3 flex-wrap">
-          {p.inseadShort && <InseadPill>{p.inseadShort}</InseadPill>}
-          {p.tier && <TierBadge tier={p.tier} />}
-          {searchHint && (
-            <span
-              className="inline-flex items-center gap-1.5 px-2 h-[22px] rounded-full text-[11px] font-medium"
-              style={{ background: "#f3e2cd", color: "#7a4a25" }}
+        {/* Rationale */}
+        {p.rationale && (
+          <div className="px-6 py-2 flex-1 overflow-hidden">
+            <div className="font-mono-tag text-ink-4 mb-1.5" style={{ fontSize: 9.5 }}>
+              Why I&apos;m pushing them
+            </div>
+            <p className="text-[13px] text-ink-2 leading-relaxed">{p.rationale}</p>
+          </div>
+        )}
+
+        {/* About */}
+        {p.about.length > 0 && (
+          <div className="px-6 pb-3">
+            <div className="font-mono-tag text-ink-4 mb-1.5" style={{ fontSize: 9.5 }}>
+              About
+            </div>
+            <ul className="flex flex-col gap-1">
+              {p.about.map((a, i) => (
+                <li key={i} className="text-[12.5px] text-ink-2 flex items-baseline gap-2.5">
+                  <span
+                    className="inline-block w-[5px] h-[5px] rounded-full flex-shrink-0"
+                    style={{ background: c.accent }}
+                  />
+                  <span>{a}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div
+          className="px-5 py-2.5 border-t flex items-center justify-between gap-2 flex-shrink-0"
+          style={{ borderColor: "#ece2d0", background: "#fcf8ee" }}
+        >
+          {p.linkedinUrl ? (
+            <a
+              href={p.linkedinUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-md text-[12px] font-medium transition-colors"
+              style={{
+                background: "#ffffff",
+                color: "#0A66C2",
+                border: "1px solid #d9cdb4",
+                pointerEvents: interactive ? "auto" : "none",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#f0f6fc";
+                e.currentTarget.style.borderColor = "#0A66C2";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "#ffffff";
+                e.currentTarget.style.borderColor = "#d9cdb4";
+              }}
             >
-              <Icon.Sparkles size={10} />
-              {searchHint.label}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/v2/linkedin-logo.png" alt="" className="h-2.5 w-auto object-contain" />
+              View on LinkedIn
+              <Icon.ArrowRight size={11} />
+            </a>
+          ) : (
+            <span />
+          )}
+
+          {hasFullProfile ? (
+            <button
+              onClick={() => setFullProfileOpen(true)}
+              className="text-[12px] text-ink-3 hover:text-ink inline-flex items-center gap-1 transition-colors"
+            >
+              Full profile
+              <Icon.ChevronRight size={12} />
+            </button>
+          ) : (
+            <span className="text-[12px] text-ink-4 inline-flex items-center gap-1 cursor-default select-none">
+              Full profile
+              <Icon.ChevronRight size={12} />
             </span>
           )}
         </div>
       </div>
 
-      {/* Rationale */}
-      {p.rationale && (
-        <div className="px-6 py-2 flex-1 overflow-hidden">
-          <div className="font-mono-tag text-ink-4 mb-1.5" style={{ fontSize: 9.5 }}>
-            Why I&apos;m pushing them
-          </div>
-          <p className="text-[13px] text-ink-2 leading-relaxed">{p.rationale}</p>
-        </div>
+      {/* Full profile overlay — rendered outside the card to escape overflow:hidden */}
+      {fullProfileOpen && interactive && (
+        <FullProfileOverlay
+          card={p}
+          channel={channel}
+          onClose={() => setFullProfileOpen(false)}
+        />
       )}
+    </>
+  );
+}
 
-      {/* About */}
-      {p.about.length > 0 && (
-        <div className="px-6 pb-3">
-          <div className="font-mono-tag text-ink-4 mb-1.5" style={{ fontSize: 9.5 }}>
-            About
-          </div>
-          <ul className="flex flex-col gap-1">
-            {p.about.map((a, i) => (
-              <li key={i} className="text-[12.5px] text-ink-2 flex items-baseline gap-2.5">
-                <span
-                  className="inline-block w-[5px] h-[5px] rounded-full flex-shrink-0"
-                  style={{ background: c.accent }}
-                />
-                <span>{a}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+// ---------- FullProfileOverlay ----------
 
-      {/* Footer */}
+function FullProfileOverlay({
+  card: p,
+  channel,
+  onClose,
+}: {
+  card: DeckCard;
+  channel: ChannelKey;
+  onClose: () => void;
+}) {
+  const c = CHANNELS[channel];
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center"
+      style={{ background: "rgba(31,27,22,0.45)", backdropFilter: "blur(4px)" }}
+      onClick={onClose}
+    >
       <div
-        className="px-5 py-2.5 border-t flex items-center justify-between gap-2 flex-shrink-0"
-        style={{ borderColor: "#ece2d0", background: "#fcf8ee" }}
+        className="relative bg-white rounded-3xl overflow-hidden flex flex-col"
+        style={{
+          width: 480,
+          maxHeight: "80vh",
+          border: "1px solid #e5d8be",
+          boxShadow: "0 4px 6px rgba(31,27,22,0.04), 0 24px 64px rgba(31,27,22,0.18)",
+        }}
+        onClick={(e) => e.stopPropagation()}
       >
-        {p.linkedinUrl ? (
-          <a
-            href={p.linkedinUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-md text-[12px] font-medium transition-colors"
-            style={{
-              background: "#ffffff",
-              color: "#0A66C2",
-              border: "1px solid #d9cdb4",
-              pointerEvents: interactive ? "auto" : "none",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#f0f6fc";
-              e.currentTarget.style.borderColor = "#0A66C2";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#ffffff";
-              e.currentTarget.style.borderColor = "#d9cdb4";
-            }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/v2/linkedin-logo.png" alt="" className="h-2.5 w-auto object-contain" />
-            View on LinkedIn
-            <Icon.ArrowRight size={11} />
-          </a>
-        ) : (
-          <span />
-        )}
-
-        <button
-          disabled={!interactive}
-          className="text-[12px] text-ink-3 hover:text-ink inline-flex items-center gap-1 transition-colors"
+        {/* Header */}
+        <div
+          className="flex items-center gap-3 px-6 py-4 border-b flex-shrink-0"
+          style={{ background: c.soft, borderColor: `${c.accent}33` }}
         >
-          Full profile
-          <Icon.ChevronRight size={12} />
-        </button>
+          <Avatar src={p.avatar} name={p.name} size={44} />
+          <div className="flex-1 min-w-0">
+            <div className="text-[16px] font-semibold text-ink leading-tight truncate">{p.name}</div>
+            {p.role && <div className="text-[13px] text-ink-2 truncate mt-0.5">{p.role}</div>}
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full flex items-center justify-center transition-colors text-ink-3 hover:text-ink"
+            style={{ background: "rgba(31,27,22,0.06)" }}
+          >
+            <Icon.X size={14} />
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-6">
+          {p.experience && p.experience.length > 0 && (
+            <ExperienceSection entries={p.experience} accent={c.accent} />
+          )}
+          {p.education && p.education.length > 0 && (
+            <EducationSection entries={p.education} accent={c.accent} />
+          )}
+          {(!p.experience || p.experience.length === 0) && (!p.education || p.education.length === 0) && (
+            <div className="text-[13px] text-ink-4 text-center py-8">No additional profile data available.</div>
+          )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+// ---------- ExperienceSection ----------
+
+const PREVIEW_COUNT = 2;
+
+function ExperienceSection({
+  entries,
+  accent,
+}: {
+  entries: LinkedInExperienceEntry[];
+  accent: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? entries : entries.slice(0, PREVIEW_COUNT);
+  const hiddenCount = entries.length - PREVIEW_COUNT;
+
+  return (
+    <div>
+      <div className="font-mono-tag text-ink-4 mb-3" style={{ fontSize: 9.5 }}>
+        Experience
+      </div>
+      <ul className="flex flex-col gap-3">
+        {visible.map((e, i) => (
+          <li key={i} className="flex items-start gap-3">
+            <div
+              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+              style={{ background: `${accent}18` }}
+            >
+              <Icon.Briefcase size={12} style={{ color: accent }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-medium text-ink leading-snug">{e.title}</div>
+              <div className="text-[12px] text-ink-2 mt-0.5">{e.company}</div>
+              {(e.dateRange.start ?? e.dateRange.end) && (
+                <div className="text-[11px] text-ink-4 mt-0.5">
+                  {e.dateRange.start ?? ""}
+                  {e.dateRange.start && e.dateRange.end ? " – " : ""}
+                  {e.dateRange.end ?? (e.dateRange.start ? "present" : "")}
+                </div>
+              )}
+              {e.description && (
+                <p className="text-[12px] text-ink-3 mt-1 leading-relaxed line-clamp-3">{e.description}</p>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {entries.length > PREVIEW_COUNT && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-3 text-[12px] font-medium transition-colors inline-flex items-center gap-1"
+          style={{ color: accent }}
+        >
+          {expanded ? (
+            <>Show less <Icon.ChevronUp size={12} /></>
+          ) : (
+            <>Show {hiddenCount} more <Icon.ChevronDown size={12} /></>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---------- EducationSection ----------
+
+function EducationSection({
+  entries,
+  accent,
+}: {
+  entries: LinkedInEducationEntry[];
+  accent: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? entries : entries.slice(0, PREVIEW_COUNT);
+  const hiddenCount = entries.length - PREVIEW_COUNT;
+
+  return (
+    <div>
+      <div className="font-mono-tag text-ink-4 mb-3" style={{ fontSize: 9.5 }}>
+        Education
+      </div>
+      <ul className="flex flex-col gap-3">
+        {visible.map((e, i) => (
+          <li key={i} className="flex items-start gap-3">
+            <div
+              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
+              style={{ background: `${accent}18` }}
+            >
+              <Icon.GraduationCap size={12} style={{ color: accent }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-medium text-ink leading-snug">{e.school}</div>
+              {e.degree && <div className="text-[12px] text-ink-2 mt-0.5">{e.degree}</div>}
+              {e.fieldOfStudy && <div className="text-[12px] text-ink-3 mt-0.5">{e.fieldOfStudy}</div>}
+              {(e.dateRange.start ?? e.dateRange.end) && (
+                <div className="text-[11px] text-ink-4 mt-0.5">
+                  {e.dateRange.start ?? ""}
+                  {e.dateRange.start && e.dateRange.end ? " – " : ""}
+                  {e.dateRange.end ?? (e.dateRange.start ? "present" : "")}
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {entries.length > PREVIEW_COUNT && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-3 text-[12px] font-medium transition-colors inline-flex items-center gap-1"
+          style={{ color: accent }}
+        >
+          {expanded ? (
+            <>Show less <Icon.ChevronUp size={12} /></>
+          ) : (
+            <>Show {hiddenCount} more <Icon.ChevronDown size={12} /></>
+          )}
+        </button>
+      )}
     </div>
   );
 }
