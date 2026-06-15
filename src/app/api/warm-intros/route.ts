@@ -187,14 +187,21 @@ export async function GET(request: Request): Promise<NextResponse> {
       return NextResponse.json(response);
     }
 
-    // 6. Build goal filter from A's target_industries (and optionally target_geographies)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const goals = userA.goals as any;
-    const targetIndustries: string[] = goals?.target_industries ?? [];
-    const targetGeos: string[] = goals?.target_geographies ?? [];
-    // Normalise to lowercase for matching
-    const targetIndustriesLower = targetIndustries.map((s: string) => s.toLowerCase());
-    const targetGeosLower = targetGeos.map((s: string) => s.toLowerCase());
+    // 6. Build goal filter from A's goals. Industry values can be COMPOUND
+    //    strings (e.g. "AI/Technology; Private Equity & Venture Capital"), so
+    //    tokenize into keywords. A candidate matches on ANY industry keyword OR
+    //    any geo keyword — lenient by design: over-filtering warm intros to zero
+    //    is worse than surfacing a few softer matches.
+    const goals = userA.goals as Record<string, unknown> | null;
+    const rawIndustries = (goals?.target_industries as string[] | undefined) ?? [];
+    const rawGeos = (goals?.target_geographies as string[] | undefined) ?? [];
+    const tokenize = (arr: string[]): string[] =>
+      arr
+        .flatMap((s) => s.split(/[;,/&]+/))
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length >= 2);
+    const industryKeywords = tokenize(rawIndustries);
+    const geoKeywords = tokenize(rawGeos);
 
     // Goal-filter helper: returns a match_reason string or null if no match
     function goalMatchReason(
@@ -205,33 +212,27 @@ export async function GET(request: Request): Promise<NextResponse> {
         location: string | null;
       }
     ): string | null {
-      // If A has no goal configured, accept all candidates
-      if (targetIndustriesLower.length === 0 && targetGeosLower.length === 0) {
-        return `${candidate.current_title ?? "Professional"} at ${candidate.company ?? "their company"} — reachable via your network.`;
-      }
-
       const titleLower = (candidate.current_title ?? "").toLowerCase();
       const companyLower = (candidate.company ?? "").toLowerCase();
       const locationLower = (candidate.location ?? "").toLowerCase();
+      const where = candidate.company ?? "their company";
 
-      // Industry overlap check: any target industry keyword found in title or company
-      const industryMatch = targetIndustriesLower.find(
-        (ind) => titleLower.includes(ind) || companyLower.includes(ind)
-      );
-
-      // Geo overlap (optional — if A has geo targets, prefer matches but don't hard-exclude)
-      const geoMatch =
-        targetGeosLower.length === 0 ||
-        targetGeosLower.some((geo) => locationLower.includes(geo));
-
-      if (industryMatch && geoMatch) {
-        const geoNote = candidate.location ? ` in ${candidate.location}` : "";
-        return `${candidate.current_title ?? "Professional"} at ${candidate.company ?? "their company"}${geoNote} — matches your ${industryMatch} target.`;
+      // If A has no goal configured, accept all candidates
+      if (industryKeywords.length === 0 && geoKeywords.length === 0) {
+        return `${candidate.current_title ?? "Professional"} at ${where} — reachable via your network.`;
       }
 
-      // If no industry match and geo targets exist, check geo-only as a weaker signal
-      if (geoMatch && targetGeosLower.length > 0 && targetIndustriesLower.length === 0) {
-        return `${candidate.current_title ?? "Professional"} at ${candidate.company ?? "their company"} in your target location.`;
+      const industryHit = industryKeywords.find(
+        (k) => titleLower.includes(k) || companyLower.includes(k)
+      );
+      const geoHit = geoKeywords.find((k) => locationLower.includes(k));
+
+      if (industryHit) {
+        const geoNote = candidate.location ? ` in ${candidate.location}` : "";
+        return `${candidate.current_title ?? "Professional"} at ${where}${geoNote} — matches your ${industryHit} focus.`;
+      }
+      if (geoHit) {
+        return `${candidate.current_title ?? "Professional"} at ${where} in ${candidate.location} — in your target geography.`;
       }
 
       return null; // No match
