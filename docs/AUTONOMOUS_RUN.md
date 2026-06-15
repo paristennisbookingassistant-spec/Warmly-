@@ -71,6 +71,13 @@ User/extension-dependent (not autonomous): live company scrape + network sync (e
 real multi-user warm intros (need ≥2 real opted-in users), Google sign-in (Google OAuth client),
 INSEAD on-campus domain (Cato allowlist), rotate Brave+Vercel keys.
 Code TODOs noted: warm-intros targeted-query scaling; capture user's OWN urn at sync (extension).
+
+- **Phase 4 ask-for-intro draft VERIFIED:** clicking "Ask {peer} for an intro" → POST conversations
+  (201) → generate (200, 28s) → navigates to peer contact; draft is a real warm-intro request
+  naming the candidate (Sophie Marceau @ Mistral) grounded in A's profile. Full Phase 4 loop done.
+- **Run wind-down:** major vision gaps closed + verified. Remaining = user/extension-dependent
+  (see above) + documented follow-ups. Updating HANDOFF.md + writing URN-capture spec; not
+  manufacturing busywork. Loop at relaxed cadence for any further polish.
 - **Phase 4 spike DONE:** `docs/specs/V2_P4_WARM_INTROS.md` written (schema = 2 cols on `users`
   + index; server-side `/api/warm-intros` matching with consent; seed a 2nd user to validate).
   Ready to build as iter 2+.
