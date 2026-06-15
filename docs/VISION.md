@@ -51,7 +51,7 @@
 | 6. Proactive company discovery | ⚠️ Partial | The extension's **CDP_DISCOVER is fully functional** (company → live scrape) but driven from the **extension popup**, NOT wired to the V2 web chat. |
 | 7. Save → contacts → draft → log → voice | ✅ Built | Contacts/detail/draft (real MiniMax + voice loop); sent artifacts logged; `voice_md` + edit→`user_memory` loop. |
 | 8. Meeting prep → synthesis | ⚠️ Partial | Prep + live notes built; `meeting_notes` artifact type exists but the **synthesis step isn't wired** (notes save as raw text). |
-| 9. CRM / relationship maintenance | ❌ Missing | Only `status` + `last_interaction_at` + a hardcoded 30-day follow-up flag. No categories, cadence, reminders, or relationship timeline. |
+| 9. CRM / relationship maintenance | ✅ Built (MVP) | Phase 5b: 4 relationship categories (nurturing/keep_warm/inner_circle/dormant) with per-category cadence + per-contact override; `next_touch_at` recomputed at categorize/outreach-sent/meeting-logged; "Due to reconnect" surfaces in the V2 Contacts list + a brief V2 home strip; one-tap "Draft re-touch" reuses `follow_up_draft`. Deferred: AI auto-suggest, swipe-to-sort, inferred cadence. |
 | (cross-cutting) Custom domain | ⚠️ Partial | `thewarmly.com` resolves to Vercel + works off-INSEAD-network; login + extension still hardcode the old origin (env / Supabase redirect / extension manifest+auth-bridge need the new domain). INSEAD network blocks it (Cato filter, an IT allowlist request, not code). |
 
 ---
@@ -111,12 +111,20 @@ AI surface, draft editor + meeting prep both silent-retry once, and directory sc
 caches + degrades. Underlying cause (reasoning-model cold latency) remains but never
 reaches the user.
 
-**Phase 5b, CRM, proposal ready, awaiting approval.** (b) CRM/relationship
-maintenance, **research-first**: the proposal is written, see `docs/CRM_PROPOSAL.md`
-(6 job-search categories; cadence inherits from category, overridable; 3 schema columns
-`relationship_category`/`cadence_days`/`next_touch_at`; **AI-suggest + one-tap-confirm**
-classification, swipe-deck only as bulk-triage; reuse the Today/contacts surfaces + the
-`follow_up_draft` engine; capped daily "due" list). Build only after Liyang approves it.
+**Phase 5b, CRM MVP, ✅ DONE (2026-06-15).** Manual-first relationship maintenance, spec
+`docs/specs/V2_P5B_CRM_MVP.md`. Taxonomy revised with Liyang from the proposal's 6 to **4
+buckets** (nurturing 14d / keep_warm 30d / inner_circle 60d / dormant off; null =
+uncategorized), with the **inverted-cadence** insight (close ties get the *lightest* cadence;
+the maintenance budget goes to the warm-professional ties that decay silently). 3 schema
+columns (`relationship_category`/`cadence_days`/`next_touch_at`); `next_touch_at` recomputed
+at the 3 write points (categorize, outreach→sent, meeting-logged) so acting on someone
+auto-clears their reminder, no cron. Surfaces in BOTH the V2 Contacts list (filter pill +
+capped section, most-overdue first) AND a brief V2 home reminder strip; per-contact category
+dropdown + cadence override on the detail; one-tap "Draft re-touch" reuses the
+`follow_up_draft` engine. Shared logic in `src/lib/crm/cadence.ts` (19 unit tests).
+Tester-verified end to end on the live URL (categorize persists → due surfaces in list + home
+→ deep-link → re-touch draft generated; V1 clean). Deferred to a later round: AI auto-suggest
+category, swipe-to-sort bulk triage, automatic (inferred) cadence.
 
 **Cross-cutting (low effort):** domain wiring for `thewarmly.com`, env
 `NEXT_PUBLIC_APP_URL`, Supabase redirect URLs, extension manifest + `auth-bridge`
