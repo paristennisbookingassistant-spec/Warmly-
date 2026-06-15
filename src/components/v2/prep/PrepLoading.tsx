@@ -2,8 +2,10 @@
 
 /**
  * components/v2/prep/PrepLoading.tsx
- * Loading state shown while meeting_prep generation runs (5-15s).
- * A pulsing Sparkles icon + cycling message sequence + progress dots.
+ * Loading state shown while meeting_prep generation runs. The MiniMax reasoning
+ * model takes ~30-45s, so the message cadence is paced to that — NOT 12s — or
+ * the sequence ends on "almost ready" and sits there for 30s, reading as stuck.
+ * A pulsing Sparkles icon + cycling message sequence + progress dots + skeleton.
  */
 
 import { useEffect, useState } from "react";
@@ -11,10 +13,11 @@ import { Icon } from "@/components/v2/icons";
 
 const MESSAGES = [
   "Researching the company.",
-  "Pulling signals on your contact.",
-  "Drafting discussion themes.",
+  "Pulling recent signals and news.",
+  "Mapping how their background connects to yours.",
+  "Drafting the discussion themes.",
   "Building your coaching notes.",
-  "Almost ready.",
+  "Polishing the brief, worth the short wait.",
 ] as const;
 
 interface Props {
@@ -25,7 +28,10 @@ export function PrepLoading({ contactFirstName }: Props) {
   const [idx, setIdx] = useState(0);
 
   useEffect(() => {
-    const stepMs = 2400;
+    // ~7s per step × 6 = ~42s, matching the real reasoning-model duration so the
+    // sequence advances the whole time instead of dead-ending early. The final
+    // message holds (and the icon keeps pulsing) if generation runs longer.
+    const stepMs = 7000;
     const t = setInterval(
       () => setIdx((i) => Math.min(i + 1, MESSAGES.length - 1)),
       stepMs
