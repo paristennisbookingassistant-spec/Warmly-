@@ -149,3 +149,9 @@ renders content instantly (greeting + cards present, no skeleton, no 1-6s re-fet
 silently. Verified via sidebar-click nav. Pattern is ready to roll out to Contacts/other heavy
 pages next (decision: extend or stop) — each page's staleness profile differs (Contacts has
 search/filter state), so extend deliberately, not blanket.
+
+## Latency: contacts SWR cache (47737e7) — VERIFIED
+Same module-cache pattern on the default contacts list (searches bypass). Verified: Contacts→Home
+→Contacts client-side nav renders "All contacts" immediately with skeletonVisible=0 (no flash, no
+re-fetch wait), revalidates silently. Home + Contacts return-navigation now instant. Discover left
+uncached (async scoring). Nav-latency complaint addressed for the 2 most-visited screens.
