@@ -194,6 +194,7 @@ export function TinderView({ channel, deck, scoring = false, onBack, onSave, onS
                     channel={channel}
                     swipe={swipe}
                     searchHint={searchHint}
+                    scoring={scoring}
                   />
                   <div className="flex items-center gap-5 mt-7">
                     <SwipeBtn variant="skip" onClick={handleSkip} />
@@ -434,12 +435,14 @@ function CardStack({
   channel,
   swipe,
   searchHint,
+  scoring,
 }: {
   deck: DeckCard[];
   idx: number;
   channel: ChannelKey;
   swipe: { dir: "left" | "right" } | null;
   searchHint: SearchHint | null;
+  scoring: boolean;
 }) {
   const cards = [];
   for (let d = 3; d >= 0; d--) {
@@ -453,6 +456,7 @@ function CardStack({
         depth={d}
         swipe={d === 0 ? swipe : null}
         searchHint={d === 0 && searchHint && searchHint.idx === idx ? searchHint : null}
+        scoring={scoring}
       />
     );
   }
@@ -494,12 +498,14 @@ function ProfileCard({
   depth = 0,
   swipe,
   searchHint,
+  scoring = false,
 }: {
   card: DeckCard;
   channel: ChannelKey;
   depth?: number;
   swipe: { dir: "left" | "right" } | null;
   searchHint: SearchHint | null;
+  scoring?: boolean;
 }) {
   const c = CHANNELS[channel];
   const interactive = depth === 0;
@@ -652,10 +658,11 @@ function ProfileCard({
           </div>
         </div>
 
-        {/* Rationale — an unscored directory/LinkedIn card (tier null, not a
-            warm-intro) is still being scored: show a clear loading state rather
-            than the raw placeholder ribbon (which reads as a weak "done"). */}
-        {p.tier === null && !p.via ? (
+        {/* Rationale — show the "scoring" loading state ONLY while scoring is
+            actively running (not a warm-intro, no tier yet). Once scoring ends,
+            fall through to the rationale/ribbon so a slow/failed score never
+            leaves the card stuck on "Scoring…" forever. */}
+        {p.tier === null && !p.via && scoring ? (
           <div className="px-6 py-2 flex-1 overflow-hidden">
             <div className="font-mono-tag text-ink-4 mb-1.5" style={{ fontSize: 9.5 }}>
               Why I&apos;m pushing them

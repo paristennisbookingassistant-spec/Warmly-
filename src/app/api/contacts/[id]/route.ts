@@ -37,7 +37,9 @@ const UpdateContactSchema = z.object({
   status: z
     .enum(["discovered", "contacted", "connected", "met", "ongoing"])
     .optional(),
-  notes: z.string().max(2000).optional(),
+  // Holds free-text annotations AND the meeting live-notes panel, which can be
+  // long (full discussion guide + notes). 2000 was too small → "Save failed (400)".
+  notes: z.string().max(50_000).optional(),
   user_feedback: z.enum(["great_match", "not_relevant"]).optional(),
   /** CRM relationship category — null clears to uncategorized */
   relationship_category: z
