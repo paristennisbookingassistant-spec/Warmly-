@@ -34,20 +34,32 @@ interface HomeState {
   error: string | null;
 }
 
+// Module-level cache: serves the last home snapshot instantly on return
+// navigation (no skeleton flash / re-fetch wait), then revalidates silently in
+// the background and updates. Resets on a full page reload. Keeps the cache on
+// a revalidation failure (only surfaces an error on a cold load).
+let homeCache: HomeState | null = null;
+
+const EMPTY_HOME: HomeState = {
+  userName: null,
+  pendingCount: 0,
+  savedContacts: [],
+  reconnectContacts: [],
+  loading: true,
+  reconnectLoading: true,
+  error: null,
+};
+
 function useHomeData(): HomeState {
-  const [state, setState] = useState<HomeState>({
-    userName: null,
-    pendingCount: 0,
-    savedContacts: [],
-    reconnectContacts: [],
-    loading: true,
-    reconnectLoading: true,
-    error: null,
-  });
+  const [state, setState] = useState<HomeState>(homeCache ?? EMPTY_HOME);
 
   useEffect(() => {
     let cancelled = false;
-    setState((s) => ({ ...s, loading: true, reconnectLoading: true, error: null }));
+    const hadCache = homeCache !== null;
+    // Cold load only: show skeletons. With a cache we revalidate silently.
+    if (!hadCache) {
+      setState((s) => ({ ...s, loading: true, reconnectLoading: true, error: null }));
+    }
 
     // Primary fetch: user, pending count, recent contacts (6)
     Promise.all([
@@ -60,21 +72,28 @@ function useHomeData(): HomeState {
     ])
       .then(([me, count, contacts]) => {
         if (cancelled) return;
-        if (me.error) {
+        if (me.error && !hadCache) {
           setState((s) => ({ ...s, loading: false, error: me.error.message ?? "Could not load profile." }));
           return;
         }
-        setState((s) => ({
-          ...s,
-          userName: (me.data?.name as string | null | undefined) ?? null,
-          pendingCount: (count.data?.pending_count as number | undefined) ?? 0,
-          savedContacts: (contacts.data?.items as Contact[] | undefined) ?? [],
-          loading: false,
-          error: null,
-        }));
+        setState((s) => {
+          const next: HomeState = {
+            ...s,
+            userName: (me.data?.name as string | null | undefined) ?? s.userName,
+            pendingCount: (count.data?.pending_count as number | undefined) ?? s.pendingCount,
+            savedContacts: (contacts.data?.items as Contact[] | undefined) ?? s.savedContacts,
+            loading: false,
+            error: null,
+          };
+          homeCache = next;
+          return next;
+        });
       })
       .catch(() => {
-        if (!cancelled) setState((s) => ({ ...s, loading: false, error: "Network error. Try reloading." }));
+        // Keep the cache on a silent revalidation failure; only error cold.
+        if (!cancelled && !hadCache) {
+          setState((s) => ({ ...s, loading: false, error: "Network error. Try reloading." }));
+        }
       });
 
     // Reconnect fetch: broader set to compute due contacts client-side
@@ -93,7 +112,11 @@ function useHomeData(): HomeState {
             const bTime = b.next_touch_at ? new Date(b.next_touch_at).getTime() : 0;
             return aTime - bTime;
           });
-        setState((s) => ({ ...s, reconnectContacts: due, reconnectLoading: false }));
+        setState((s) => {
+          const next: HomeState = { ...s, reconnectContacts: due, reconnectLoading: false };
+          homeCache = next;
+          return next;
+        });
       })
       .catch(() => {
         if (!cancelled) setState((s) => ({ ...s, reconnectLoading: false }));
