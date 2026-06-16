@@ -142,3 +142,10 @@ event-driven. Queue from the user's overnight list is COMPLETE.
 Remaining = user-decision/extension-dependent: deep latency caching (refactor — flagged, not risked
 unattended); LinkedIn sync + live scrape (extension); Google OAuth; rotate keys. Dialing loop to a
 long monitoring cadence to avoid busywork.
+
+## Latency: home SWR cache (1793c3e) — VERIFIED
+Home now caches its snapshot at module level: client-side return-navigation (Home→Discover→Home)
+renders content instantly (greeting + cards present, no skeleton, no 1-6s re-fetch), revalidating
+silently. Verified via sidebar-click nav. Pattern is ready to roll out to Contacts/other heavy
+pages next (decision: extend or stop) — each page's staleness profile differs (Contacts has
+search/filter state), so extend deliberately, not blanket.
