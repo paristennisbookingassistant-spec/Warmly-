@@ -31,12 +31,17 @@ interface ApiListResponse {
   error?: string;
 }
 
+// Module-level cache of the DEFAULT (no-search) contacts list, so returning to
+// the page renders instantly and revalidates silently instead of a 1-6s
+// skeleton each visit. Searches bypass the cache. Resets on full page reload.
+let contactsCache: Contact[] | null = null;
+
 export function ContactsList() {
   const searchParams = useSearchParams();
   const initialFilter = (searchParams.get("filter") as FilterId | null) ?? "all";
 
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [contacts, setContacts] = useState<Contact[]>(contactsCache ?? []);
+  const [loading, setLoading] = useState(contactsCache === null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [searchInput, setSearchInput] = useState("");
@@ -44,7 +49,11 @@ export function ContactsList() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const fetchContacts = useCallback(async (q?: string) => {
-    setLoading(true);
+    const isDefault = !q;
+    // Default list with a cache → revalidate silently (keep showing cache, no
+    // skeleton). Search, or a cold default load, shows the skeleton.
+    const silent = isDefault && contactsCache !== null;
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({
@@ -59,9 +68,12 @@ export function ContactsList() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json: ApiListResponse = await res.json();
       if (json.error) throw new Error(json.error);
-      setContacts(json.data.items ?? []);
+      const items = json.data.items ?? [];
+      setContacts(items);
+      if (isDefault) contactsCache = items; // cache only the default list
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load contacts");
+      // Keep the cache on a silent revalidation failure; only surface cold.
+      if (!silent) setError(err instanceof Error ? err.message : "Failed to load contacts");
     } finally {
       setLoading(false);
     }
