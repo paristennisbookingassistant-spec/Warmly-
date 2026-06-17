@@ -199,8 +199,15 @@ export default function MeetingPrepPage({
           headers: { "Content-Type": "application/json" },
           body: genBody,
         });
-      let genRes = await callGen();
-      if (!genRes.ok) {
+      // A cold start can either return a non-ok status OR reject the fetch
+      // outright (connection dropped before the function warmed). Catch both
+      // so a transient first-call blip retries silently instead of throwing
+      // the user straight to the error screen.
+      let genRes: Response;
+      try {
+        genRes = await callGen();
+        if (!genRes.ok) throw new Error(`status ${genRes.status}`);
+      } catch {
         await new Promise((r) => setTimeout(r, 1500));
         genRes = await callGen();
       }

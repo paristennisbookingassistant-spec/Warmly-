@@ -21,11 +21,13 @@ import type { GenerateArtifactResponse } from "@/types/api";
 import type { Contact, User, ConversationMessage, Conversation } from "@/types/database";
 import type { ConversationSummary } from "@/types/ai";
 
-// Allow up to 60s for the (possibly cold-start) MiniMax generation call.
-// Without this, the default serverless function timeout fires on the first
-// cold invocation of a session before MiniMax responds, returning a platform
-// 500 ("first draft 500s, retry works"). See V2 P2 tester finding.
-export const maxDuration = 60;
+// Allow up to 300s for the (possibly cold-start) MiniMax generation call.
+// meeting_prep runs Brave company intel + a reasoning-model brief; the reasoning
+// model emits a long <think> block before the JSON, and a richer prep prompt
+// pushes the full chain past 60s — the old ceiling killed the function mid-
+// generation, surfacing to the client as "Failed to fetch". 300 gives ample
+// headroom. (Requires a Vercel plan that allows >60s; Hobby caps at 60.)
+export const maxDuration = 300;
 
 // ---------------------------------------------------------------------------
 // Validation schema
