@@ -14,8 +14,8 @@ import type { PrepTab, IntakeFormValues } from "./types";
 const TABS: { id: PrepTab; label: string; key: string }[] = [
   { id: "snapshot", label: "Snapshot", key: "1" },
   { id: "company",  label: "Company",  key: "2" },
-  { id: "questions", label: "Questions", key: "3" },
-  { id: "agenda",  label: "Agenda",   key: "4" },
+  { id: "agenda",  label: "Agenda",   key: "3" },
+  { id: "questions", label: "Questions", key: "4" },
 ];
 
 interface Props {

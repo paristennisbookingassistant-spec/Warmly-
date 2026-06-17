@@ -4,10 +4,15 @@
  * components/v2/prep/LiveNotesPanel.tsx
  * Persistent live-notes panel. Two actions:
  *   "Save notes"        → PUT /api/contacts/{id} { notes }  (persist raw text)
- *   "Save & synthesize" → POST /api/ai/generate { meeting_notes } → a structured
- *      summary (key takeaways + next steps) saved as an artifact on the contact's
- *      timeline, shown inline. Mirrors the /meeting-prep skill's synthesis step,
- *      kept deliberately simple.
+ *   "Save & log meeting" → synthesize the notes into a clean meeting record that
+ *      lands on the CONTACT'S PROFILE as a logged interaction:
+ *        1. POST /api/ai/generate { meeting_notes } → key_takeaways + next_steps
+ *        2. PUT  /api/artifacts/{id} { status:'sent' } → marks the contact 'met'
+ *           and stamps last_interaction_at (the artifacts route side-effect),
+ *           so it shows on the timeline as a real, logged interaction.
+ *        3. PUT  /api/contacts/{id} { notes } → writes a clean, human-readable
+ *           note into the profile ("The story so far") as the latest discussion.
+ *      No transient summary box — the result lives on the profile.
  */
 
 import { useState } from "react";
@@ -18,32 +23,70 @@ interface NextStep {
   description?: string;
   timing?: string;
 }
-interface Synthesis {
-  key_takeaways: string[];
-  next_steps: NextStep[];
-}
 
 interface Props {
   contactId: string;
   contactName: string;
   conversationId: string | null;
   existingNotes: string | null;
+  /** Called after a plain "Save notes". */
   onSaved: () => void;
+  /** Called after a successful synthesize → meeting logged on the profile. */
+  onLogged: () => void;
 }
 
-export function LiveNotesPanel({ contactId, contactName, conversationId, existingNotes, onSaved }: Props) {
+/** Compose a clean, readable note for the contact profile from the synthesis. */
+function composeProfileNote(
+  takeaways: string[],
+  steps: NextStep[],
+  rawNotes: string
+): string {
+  const dateLabel = new Date().toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  const lines: string[] = [`Meeting — ${dateLabel}`, ""];
+
+  if (takeaways.length > 0) {
+    lines.push("Key takeaways");
+    takeaways.forEach((t) => lines.push(`• ${t}`));
+    lines.push("");
+  }
+  if (steps.length > 0) {
+    lines.push("Next steps");
+    steps.forEach((s) => {
+      const timing = s.timing ? ` (${s.timing})` : "";
+      if (s.description) lines.push(`• ${s.description}${timing}`);
+    });
+    lines.push("");
+  }
+  if (rawNotes.trim()) {
+    lines.push("My raw notes");
+    lines.push(rawNotes.trim());
+  }
+  return lines.join("\n").trim();
+}
+
+export function LiveNotesPanel({
+  contactId,
+  contactName,
+  conversationId,
+  existingNotes,
+  onSaved,
+  onLogged,
+}: Props) {
   const [text, setText] = useState(existingNotes ?? "");
   const [saving, setSaving] = useState(false);
   const [synthesizing, setSynthesizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [synthesis, setSynthesis] = useState<Synthesis | null>(null);
   const [collapsed, setCollapsed] = useState(false);
 
-  async function persistRaw(): Promise<void> {
+  async function persistRaw(value: string): Promise<void> {
     const res = await fetch(`/api/contacts/${contactId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notes: text }),
+      body: JSON.stringify({ notes: value }),
     });
     if (!res.ok) throw new Error(`Save failed (${res.status})`);
   }
@@ -52,7 +95,7 @@ export function LiveNotesPanel({ contactId, contactName, conversationId, existin
     setSaving(true);
     setError(null);
     try {
-      await persistRaw();
+      await persistRaw(text);
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed.");
@@ -63,15 +106,12 @@ export function LiveNotesPanel({ contactId, contactName, conversationId, existin
 
   async function handleSynthesize() {
     if (!text.trim()) {
-      setError("Add some notes first, then synthesize.");
+      setError("Add some notes first, then log the meeting.");
       return;
     }
     setSynthesizing(true);
     setError(null);
     try {
-      // Persist the raw notes first, then synthesize.
-      await persistRaw();
-
       // Reuse the prep conversation, or create one if we don't have it.
       let convId = conversationId;
       if (!convId) {
@@ -83,8 +123,9 @@ export function LiveNotesPanel({ contactId, contactName, conversationId, existin
         const cj = (await cr.json()) as { data?: { id?: string } };
         convId = cj.data?.id ?? null;
       }
-      if (!convId) throw new Error("Could not start a conversation for synthesis.");
+      if (!convId) throw new Error("Could not start a conversation for this meeting.");
 
+      // 1. Generate the structured meeting_notes artifact.
       const res = await fetch("/api/ai/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -99,23 +140,42 @@ export function LiveNotesPanel({ contactId, contactName, conversationId, existin
       });
       if (!res.ok) throw new Error(`Synthesis failed (${res.status})`);
       const json = (await res.json()) as {
-        data?: { content?: { key_takeaways?: string[]; next_steps?: NextStep[] } };
+        data?: {
+          artifact_id?: string;
+          content?: { key_takeaways?: string[]; next_steps?: NextStep[] };
+        };
         error?: string;
       };
       if (json.error) throw new Error(json.error);
-      setSynthesis({
-        key_takeaways: json.data?.content?.key_takeaways ?? [],
-        next_steps: json.data?.content?.next_steps ?? [],
-      });
-      onSaved();
+
+      const takeaways = json.data?.content?.key_takeaways ?? [];
+      const steps = json.data?.content?.next_steps ?? [];
+      const artifactId = json.data?.artifact_id;
+
+      // 2. Mark the artifact 'sent' → artifacts route logs the interaction
+      //    (contact.status → 'met', last_interaction_at stamped).
+      if (artifactId) {
+        await fetch(`/api/artifacts/${artifactId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "sent" }),
+        });
+      }
+
+      // 3. Write a clean note onto the contact profile ("The story so far").
+      const profileNote = composeProfileNote(takeaways, steps, text);
+      await persistRaw(profileNote);
+
+      onLogged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Synthesis failed.");
+      setError(err instanceof Error ? err.message : "Could not log the meeting.");
     } finally {
       setSynthesizing(false);
     }
   }
 
   const busy = saving || synthesizing;
+  const firstName = contactName.split(" ")[0];
 
   return (
     <div
@@ -142,7 +202,7 @@ export function LiveNotesPanel({ contactId, contactName, conversationId, existin
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Jot notes during or after the meeting, then synthesize…"
+            placeholder="Jot notes during or after the meeting, then log it to the profile…"
             className="w-full rounded-lg border bg-white px-3.5 py-3 outline-none resize-none leading-[1.6]"
             style={{ borderColor: "#d9cdb4", color: "var(--ink-2)", fontSize: 13, minHeight: 120 }}
             rows={6}
@@ -150,49 +210,23 @@ export function LiveNotesPanel({ contactId, contactName, conversationId, existin
 
           {error && <p className="text-[12px]" style={{ color: "var(--bad)" }}>{error}</p>}
 
+          <p className="text-[11.5px] leading-snug" style={{ color: "var(--ink-4)" }}>
+            Logging a meeting writes a clean summary into {firstName}&rsquo;s profile and marks them as met.
+          </p>
+
           <div className="flex items-center justify-end gap-2">
             <Btn variant="secondary" size="sm" onClick={() => void handleSave()} disabled={busy} icon={Icon.Check}>
               {saving ? "Saving…" : "Save notes"}
             </Btn>
             <Btn variant="primary" size="sm" onClick={() => void handleSynthesize()} disabled={busy} icon={synthesizing ? undefined : Icon.Sparkles}>
-              {synthesizing ? "Synthesizing…" : "Save & synthesize"}
+              {synthesizing ? "Logging…" : "Save & log meeting"}
             </Btn>
           </div>
 
           {synthesizing && (
             <p className="text-[12px]" style={{ color: "var(--ink-3)" }}>
-              Synthesizing your notes into takeaways and next steps… (~20s)
+              Synthesizing and logging this meeting to {firstName}&rsquo;s profile… (~20s)
             </p>
-          )}
-
-          {synthesis && (
-            <div className="rounded-xl border p-4 mt-1" style={{ borderColor: "#e5d8be", background: "#fbf6ec" }}>
-              <div className="font-mono-tag mb-2" style={{ color: "#7a4a25" }}>
-                Synthesis · saved to {contactName.split(" ")[0]}&rsquo;s timeline
-              </div>
-              {synthesis.key_takeaways.length > 0 && (
-                <div className="mb-3">
-                  <div className="text-[12px] font-semibold text-ink mb-1">Key takeaways</div>
-                  <ul className="list-disc pl-4 space-y-1">
-                    {synthesis.key_takeaways.map((t, i) => (
-                      <li key={i} className="text-[12.5px] text-ink-2 leading-relaxed">{t}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {synthesis.next_steps.length > 0 && (
-                <div>
-                  <div className="text-[12px] font-semibold text-ink mb-1">Next steps</div>
-                  <ul className="space-y-1">
-                    {synthesis.next_steps.map((s, i) => (
-                      <li key={i} className="text-[12.5px] text-ink-2 leading-relaxed">
-                        {s.description}{s.timing ? <span className="text-ink-4"> · {s.timing}</span> : null}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
           )}
         </div>
       )}

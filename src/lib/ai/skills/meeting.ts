@@ -43,12 +43,20 @@ Anything beyond those three is fluff.`;
 export const RESEARCH_FRAMEWORK = `## Research framework — in priority order
 
 1. **Recipient's current role and tenure** — when did they take it, what was the move from
-2. **Recent company news (last 90 days)** — funding, launches, hires, strategic shifts. From the company_intel injection if available.
-3. **Strategic priorities** — what's the company actually building/focusing on right now? Not what's on their About page from 2 years ago.
+2. **Recent company news (last ~12 months)** — funding rounds (round + amount + lead investor + date), product launches, leadership hires/exits, M&A, market entries, strategic pivots. Pull these from the injected "Company intelligence" block — DO NOT invent. Each item must be a SPECIFIC event with a date or timeframe, not a category.
+3. **Strategic priorities** — what's the company actually betting on right now, inferred from the recent news above? Not the evergreen About-page mission. Phrase each as a concrete bet ("scaling EU go-to-market after the Series B", not "growth").
 4. **Recipient's published thinking** — recent posts, talks, podcasts. Reference SPECIFICALLY in questions, not generically.
 5. **The user's hooks into their world** — shared school, prior employer, parallel transition, geographic overlap, sector experience. Make these explicit in the "positioning advice" coaching block.
 
-When research is thin (no recent news, no published thinking), say so honestly in the coaching block: "Limited public signal — lean on universal good questions about the role itself rather than specific company moves."`;
+## Company section — specificity bar (this is what makes prep useful, not generic)
+
+The company_intel block is the most commonly weak part of a brief. Hold it to this bar:
+
+- **Ground every recent_news item in the injected Company intelligence.** If the injection names a funding round, a hire, a launch, a partnership — surface it with its date. If the injection is empty or thin, return fewer/zero items rather than padding with guesses.
+- **No boilerplate.** BANNED phrasings: "a leading company in its space", "innovative", "well-positioned", "at the forefront of", "disrupting the industry", anything that could be said about any company. Delete it.
+- **Each strategic_priority must connect to WHY IT MATTERS FOR THIS USER'S TRANSITION.** Append a short "→ why it matters" clause tying the priority to the user's goal/angle (from the User identity block). Example: "Doubling down on EU mid-market after the €40M Series B (Mar 2025) → an entry point to ask how they're building the commercial team you'd want to join."
+- **Dates are mandatory where available.** "Raised a Series B" is weak; "Raised €40M Series B led by Index Ventures, Mar 2025" is useful.
+- **When research is genuinely thin** (injection empty, no datable events), say so honestly in description and keep recent_news short, then note it in the coaching block: "Limited public signal — lean on universal good questions about the role itself rather than specific company moves." Do NOT manufacture news to fill the section.`;
 
 // ============================================================================
 // DISCUSSION TOPIC TAXONOMY — what to ask about
@@ -126,9 +134,9 @@ A free-text field for the user's actual messy notes. The agent should preserve t
 export const SCHEMA_MEETING_PREP = `{
   "person_summary": string (2-3 sentences capturing who they are right now),
   "company_intel": {
-    "description": string (1-2 sentence summary of what the company does + stage),
-    "recent_news": [{"headline": string, "date"?: string}],
-    "strategic_priorities": string[] (3-5 bullets — what they're actually focused on)
+    "description": string (1-2 sentences: what they do + stage/size. Concrete, no boilerplate adjectives),
+    "recent_news": [{"headline": string (a SPECIFIC datable event grounded in the Company intelligence injection — funding/hire/launch/pivot, never a generic category), "date"?: string (include whenever known)}],
+    "strategic_priorities": string[] (2-4 bullets, each a concrete current bet WITH a "→ why it matters" clause tying it to the user's transition goal)
   },
   "discussion_themes": [
     {

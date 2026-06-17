@@ -590,30 +590,47 @@ export function DiscoverScreen() {
   // ---------- INSEAD: refine chat ----------
 
   const handleCvRefine = useCallback(async (text: string): Promise<string | RefineResult> => {
-    // Check for "find people at <Company>" intent FIRST.
-    // If detected, skip the directory re-filter and offer a live LinkedIn search instead.
+    const params = parseInseadInstruction(text);
+
+    // Company mention → the directory now matches PAST employers (career
+    // history) in addition to current company, so always run the filter and
+    // show real alumni who worked there. We ALSO offer a live LinkedIn search
+    // for net-new people (current employees who aren't INSEAD alumni). The two
+    // coexist: directory matches in the deck + the live-search button in chat.
     const intent = parseCompanyIntent(text);
-    if (intent) {
-      const locationSuffix = intent.location ? ` in ${intent.location}` : "";
+    const companyTerm = intent?.company ?? params.company;
+    if (companyTerm) {
+      const location = intent?.location;
+      const locationSuffix = location ? ` in ${location}` : "";
+      const liveAction = {
+        type: "live_company_search" as const,
+        label: `Run live search at ${companyTerm} →`,
+        company: companyTerm,
+        location,
+      };
+      // Filter the directory by company (current OR past employer).
+      const n = await fetchAndScoreCvDeck({ company: companyTerm }, { refine: true });
+      if (n > 0) {
+        return {
+          text: `${n} INSEAD ${n === 1 ? "alum" : "alumni"} currently or previously at ${companyTerm} — strongest matches first. Want net-new people too? I can run a live LinkedIn search for current ${companyTerm}${locationSuffix} employees.`,
+          action: liveAction,
+        };
+      }
+      if (n < 0) {
+        return `Couldn't reach the directory just now — the queue is unchanged. Try again in a moment.`;
+      }
+      // No alumni in the directory worked there — offer the live search instead.
       return {
-        text: `The INSEAD directory is alumni-only — it won't show current employees at ${intent.company}. I can run a live LinkedIn search for INSEAD alumni at ${intent.company}${locationSuffix} via the extension instead.`,
-        action: {
-          type: "live_company_search",
-          label: `Run live search at ${intent.company} →`,
-          company: intent.company,
-          location: intent.location,
-        },
+        text: `No INSEAD alumni in the directory currently or previously worked at ${companyTerm}. I can run a live LinkedIn search for ${companyTerm}${locationSuffix} via the extension instead.`,
+        action: liveAction,
       };
     }
 
-    const params = parseInseadInstruction(text);
     const what = params.cohort
       ? `cohort ${params.cohort.toUpperCase()}`
       : params.industry
         ? params.industry.split(",")[0]
-        : params.company
-          ? params.company
-          : params.search ?? "that";
+        : params.search ?? "that";
 
     const n = await fetchAndScoreCvDeck(params, { refine: true });
     if (n === 0) return `No INSEAD alumni matched ${what}. Keeping the current queue — try another angle (e.g. "consulting", "VC", "Paris").`;

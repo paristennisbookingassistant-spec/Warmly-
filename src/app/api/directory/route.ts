@@ -9,7 +9,8 @@
  *   page         – page number (default 1)
  *   per_page     – results per page (default 24, max 100)
  *   cohort       – exact match on cohort (e.g. "mba26d")
- *   company      – ilike match on company
+ *   company      – matches CURRENT company (column) OR a PAST employer in the
+ *                  career-history experience JSONB (case-insensitive substring)
  *   industry     – array-contains on industries (e.g. "Consulting")
  *   function     – array-contains on functions
  *   geo          – array-contains on geography
@@ -31,6 +32,7 @@ import {
 } from "@/lib/api/helpers";
 import type { ListDirectoryResponse } from "@/types/directory";
 import type { DirectoryProfile } from "@/types/directory";
+import type { LinkedInExperienceEntry } from "@/types/database";
 
 // ---------------------------------------------------------------------------
 // Validation schema
@@ -87,41 +89,80 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const from = (page - 1) * per_page;
   const to = from + per_page - 1;
 
+  const ascending = sort_order === "asc";
+  const csv = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
+
+  // ---------------------------------------------------------------------------
+  // Company filter — match CURRENT company (column) OR a PAST employer in the
+  // career history (experience JSONB). PostgREST can't do a case-insensitive
+  // substring match inside a JSONB array of objects, so when a company term is
+  // present we broaden the DB query (all OTHER filters still applied at the DB),
+  // fetch a capped candidate set, then match current-or-past company in JS and
+  // paginate the filtered result. The directory is ~1k rows, so a single capped
+  // fetch is cheap and avoids a second round trip per page.
+  // ---------------------------------------------------------------------------
+  if (company) {
+    const needle = company.trim().toLowerCase();
+
+    // Broadened query: every filter EXCEPT company, capped + ordered, then
+    // matched current-or-past in JS. SCAN_CAP comfortably exceeds the directory.
+    const SCAN_CAP = 2000;
+    let scanQuery = supabase.from("directory_profiles").select("*");
+    if (cohort) scanQuery = scanQuery.eq("cohort", cohort);
+    if (industry) scanQuery = scanQuery.overlaps("industries", csv(industry));
+    if (fn) scanQuery = scanQuery.overlaps("functions", csv(fn));
+    if (geo) scanQuery = scanQuery.overlaps("geography", csv(geo));
+    if (search) {
+      scanQuery = scanQuery.or(
+        `name.ilike.%${search}%,company.ilike.%${search}%,current_title.ilike.%${search}%,location.ilike.%${search}%`
+      );
+    }
+    scanQuery = scanQuery
+      .order(sort_by, { ascending, nullsFirst: false })
+      .limit(SCAN_CAP);
+
+    const { data: scanned, error: scanErr } = await scanQuery;
+    if (scanErr) {
+      console.error("directory GET (company) error:", scanErr);
+      return internalError("Failed to fetch directory profiles");
+    }
+
+    const matchesCompany = (p: DirectoryProfile): boolean => {
+      if (p.company && p.company.toLowerCase().includes(needle)) return true;
+      const exp = (p.experience ?? []) as LinkedInExperienceEntry[];
+      return exp.some((e) => e.company?.toLowerCase().includes(needle));
+    };
+
+    const filtered = ((scanned ?? []) as DirectoryProfile[]).filter(matchesCompany);
+    const pageItems = filtered.slice(from, from + per_page);
+
+    const response: ListDirectoryResponse = {
+      data: buildPaginatedResponse(pageItems, filtered.length, page, per_page),
+      error: null,
+    };
+    return NextResponse.json(response);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Default path — DB-side pagination (no company filter).
+  // ---------------------------------------------------------------------------
   let query = supabase
     .from("directory_profiles")
     .select("*", { count: "exact" });
 
-  // Exact-match filters
   if (cohort) query = query.eq("cohort", cohort);
-
-  // ilike filters
-  if (company) query = query.ilike("company", `%${company}%`);
-
-  // Array-overlap filters. `industry`/`function`/`geo` accept a comma-separated
-  // list of canonical values (e.g. "Venture Capital,Private Equity"); a row
-  // matches if ANY of its array elements overlap. Values must match the stored
-  // casing — the client maps keywords → canonical DB strings before calling.
-  const csv = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
   if (industry) query = query.overlaps("industries", csv(industry));
   if (fn) query = query.overlaps("functions", csv(fn));
   if (geo) query = query.overlaps("geography", csv(geo));
-
-  // Free-text search across name, company, current_title, AND location — so
-  // city/geo terms (e.g. "Paris") match the free-text location field (the
-  // `geography` array is country-level and won't contain cities).
   if (search) {
     query = query.or(
       `name.ilike.%${search}%,company.ilike.%${search}%,current_title.ilike.%${search}%,location.ilike.%${search}%`
     );
   }
 
-  // Sorting
-  const ascending = sort_order === "asc";
-  query = query
+  const { data, error, count } = await query
     .order(sort_by, { ascending, nullsFirst: false })
     .range(from, to);
-
-  const { data, error, count } = await query;
 
   if (error) {
     console.error("directory GET error:", error);

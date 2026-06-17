@@ -75,8 +75,15 @@ function buildMeetingUserPrompt(
 
   if (context.company_intel_raw) {
     blocks.push(
-      `## Company intelligence (recent web search — use for company_intel + recent_news + strategic_priorities)
+      `## Company intelligence (recent web search — GROUND company_intel here)
+Use this raw search context as the factual basis for company_intel.recent_news and strategic_priorities. Surface only SPECIFIC, datable events (funding rounds with amount/lead/date, leadership moves, launches, pivots) found here — do NOT invent news, and do NOT pad with generic "leading company" boilerplate. For each strategic_priority, add a "→ why it matters" clause tying it to the user's transition goal above. If this context is thin, return fewer items and say so honestly rather than fabricating.
+
 ${context.company_intel_raw}`
+    );
+  } else {
+    blocks.push(
+      `## Company intelligence
+No recent web-search context was available for this company. Do NOT fabricate funding rounds, hires, or news. Keep company_intel.recent_news short or empty, base description only on what's known from the contact's profile, and note the limited signal in the coaching block.`
     );
   }
 

@@ -15,16 +15,43 @@ interface Props {
   content: MeetingPrepContent;
   notes: LiveNotes;
   onNoteChange: (key: string, value: string) => void;
+  /** Persist an inline question edit. */
+  onEditQuestion: (themeIdx: number, questionIdx: number, next: string) => void;
+  /** Delete a question from a theme. */
+  onDeleteQuestion: (themeIdx: number, questionIdx: number) => void;
+  /** Append a new (empty-ish) question to a theme. */
+  onAddQuestion: (themeIdx: number) => void;
+  /** True while a persist call is in flight (shows a subtle saving hint). */
+  savingQuestions?: boolean;
 }
 
-export function QuestionsTab({ content, notes, onNoteChange }: Props) {
+export function QuestionsTab({
+  content,
+  notes,
+  onNoteChange,
+  onEditQuestion,
+  onDeleteQuestion,
+  onAddQuestion,
+  savingQuestions,
+}: Props) {
   const themes = content.discussion_themes ?? [];
   const coaching = content.coaching;
 
   return (
     <div className="flex flex-col gap-8 fade-up">
-      <div className="font-mono-tag" style={{ color: "var(--ink-3)", letterSpacing: "0.12em" }}>
-        Questions
+      <div className="flex items-center gap-3">
+        <div className="font-mono-tag" style={{ color: "var(--ink-3)", letterSpacing: "0.12em" }}>
+          Questions
+        </div>
+        <span className="font-mono-tag" style={{ color: "var(--ink-4)", fontSize: 9.5 }}>
+          Edit, delete, or add — saved to this brief
+        </span>
+        {savingQuestions && (
+          <span className="font-mono-tag ml-auto flex items-center gap-1" style={{ color: "#b87a4a", fontSize: 9.5 }}>
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "#b87a4a" }} />
+            Saving…
+          </span>
+        )}
       </div>
 
       {/* Pre-meeting notes */}
@@ -65,8 +92,20 @@ export function QuestionsTab({ content, notes, onNoteChange }: Props) {
                   text={q}
                   value={notes[`theme-${ti}-q-${qi}`] ?? ""}
                   onChange={(v) => onNoteChange(`theme-${ti}-q-${qi}`, v)}
+                  onEditText={(next) => onEditQuestion(ti, qi, next)}
+                  onDelete={() => onDeleteQuestion(ti, qi)}
                 />
               ))}
+              <button
+                onClick={() => onAddQuestion(ti)}
+                className="self-start inline-flex items-center gap-1.5 text-[12.5px] font-medium transition-colors ml-[44px] mt-1"
+                style={{ color: "var(--ink-3)" }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#b87a4a")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--ink-3)")}
+              >
+                <Icon.Plus size={13} />
+                Add a question
+              </button>
             </div>
           </div>
         ))

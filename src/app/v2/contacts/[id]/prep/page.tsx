@@ -33,6 +33,7 @@ import type {
   GeneratedBrief,
   PrepTab,
   MeetingPrepContent,
+  DiscussionTheme,
 } from "@/components/v2/prep/types";
 
 // ---------------------------------------------------------------------------
@@ -112,6 +113,7 @@ export default function MeetingPrepPage({
   const [activeTab, setActiveTab] = useState<PrepTab>("snapshot");
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [savingQuestions, setSavingQuestions] = useState(false);
 
   // Live notes
   const [notes, setNote] = useLiveNotes(brief?.artifactId ?? null);
@@ -145,7 +147,7 @@ export default function MeetingPrepPage({
   useEffect(() => {
     if (phase !== "brief") return;
     const MAP: Record<string, PrepTab> = {
-      "1": "snapshot", "2": "company", "3": "questions", "4": "agenda",
+      "1": "snapshot", "2": "company", "3": "agenda", "4": "questions",
     };
     function handler(e: KeyboardEvent) {
       if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
@@ -228,6 +230,85 @@ export default function MeetingPrepPage({
   }, [brief, notes, contact, showToast]);
 
   // ------------------------------------------------------------------
+  // Editable questions — mutate discussion_themes + persist to the artifact
+  // ------------------------------------------------------------------
+  const persistThemes = useCallback(
+    async (nextThemes: DiscussionTheme[], prevThemes: DiscussionTheme[]) => {
+      if (!brief) return;
+      setSavingQuestions(true);
+      try {
+        const res = await fetch(`/api/artifacts/${brief.artifactId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: { ...brief.content, discussion_themes: nextThemes },
+          }),
+        });
+        if (!res.ok) throw new Error(`Save failed (${res.status})`);
+      } catch {
+        // Roll back the optimistic update.
+        setBrief((b) =>
+          b ? { ...b, content: { ...b.content, discussion_themes: prevThemes } } : b
+        );
+        showToast("Couldn't save your edit — reverted.");
+      } finally {
+        setSavingQuestions(false);
+      }
+    },
+    [brief, showToast]
+  );
+
+  const mutateThemes = useCallback(
+    (mutator: (themes: DiscussionTheme[]) => DiscussionTheme[]) => {
+      setBrief((b) => {
+        if (!b) return b;
+        const prev = b.content.discussion_themes ?? [];
+        const next = mutator(prev.map((t) => ({ ...t, questions: [...(t.questions ?? [])] })));
+        void persistThemes(next, prev);
+        return { ...b, content: { ...b.content, discussion_themes: next } };
+      });
+    },
+    [persistThemes]
+  );
+
+  const handleEditQuestion = useCallback(
+    (themeIdx: number, questionIdx: number, next: string) => {
+      mutateThemes((themes) => {
+        const t = themes[themeIdx];
+        if (!t) return themes;
+        t.questions = t.questions.map((q, i) => (i === questionIdx ? next : q));
+        return themes;
+      });
+    },
+    [mutateThemes]
+  );
+
+  const handleDeleteQuestion = useCallback(
+    (themeIdx: number, questionIdx: number) => {
+      mutateThemes((themes) => {
+        const t = themes[themeIdx];
+        if (!t) return themes;
+        t.questions = t.questions.filter((_, i) => i !== questionIdx);
+        return themes;
+      });
+      showToast("Question removed.");
+    },
+    [mutateThemes, showToast]
+  );
+
+  const handleAddQuestion = useCallback(
+    (themeIdx: number) => {
+      mutateThemes((themes) => {
+        const t = themes[themeIdx];
+        if (!t) return themes;
+        t.questions = [...t.questions, "New question — click to edit."];
+        return themes;
+      });
+    },
+    [mutateThemes]
+  );
+
+  // ------------------------------------------------------------------
   // Render
   // ------------------------------------------------------------------
   if (contactLoading) return <ContactLoadingSkeleton />;
@@ -288,10 +369,18 @@ export default function MeetingPrepPage({
         <div key={activeTab} className="flex-1 min-w-0 animate-fade-in">
           {activeTab === "snapshot"  && <SnapshotTab content={brief.content} />}
           {activeTab === "company"   && <CompanyTab  content={brief.content} />}
-          {activeTab === "questions" && (
-            <QuestionsTab content={brief.content} notes={notes} onNoteChange={setNote} />
-          )}
           {activeTab === "agenda"    && <AgendaTab duration={brief.intake.duration} />}
+          {activeTab === "questions" && (
+            <QuestionsTab
+              content={brief.content}
+              notes={notes}
+              onNoteChange={setNote}
+              onEditQuestion={handleEditQuestion}
+              onDeleteQuestion={handleDeleteQuestion}
+              onAddQuestion={handleAddQuestion}
+              savingQuestions={savingQuestions}
+            />
+          )}
         </div>
 
         <div className="w-72 flex-shrink-0">
@@ -306,6 +395,10 @@ export default function MeetingPrepPage({
                 `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
               );
               showToast("Notes saved to contact.");
+            }}
+            onLogged={() => {
+              showToast(`Meeting logged to ${firstName}'s profile.`);
+              router.push(`/v2/contacts/${contactId}`);
             }}
           />
         </div>

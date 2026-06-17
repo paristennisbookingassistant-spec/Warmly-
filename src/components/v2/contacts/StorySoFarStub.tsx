@@ -26,7 +26,7 @@ export function StorySoFarStub({ notes, contactFirstName }: StorySoFarStubProps)
           className="font-mono-tag text-ink-4"
           style={{ fontSize: 9.5, letterSpacing: "0.06em" }}
         >
-          STUB · AI narrative coming soon
+          {notes ? "Latest discussion" : "AI narrative coming soon"}
         </span>
       </div>
 

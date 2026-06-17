@@ -142,11 +142,11 @@ export function TinderView({ channel, deck, scoring = false, onBack, onSave, onS
   };
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 px-8 pt-6 pb-6 max-w-[1320px] mx-auto w-full">
+    <div className="flex flex-col flex-1 min-h-0 px-8 pt-5 pb-5 max-w-[1320px] mx-auto w-full">
       <TopStrip channel={channel} scoring={scoring} onBack={onBack} />
 
       <div
-        className="flex-1 mt-4 bg-white border rounded-3xl overflow-hidden flex min-h-0"
+        className="flex-1 mt-3 bg-white border rounded-3xl overflow-hidden flex min-h-0"
         style={{
           borderColor: "#e5d8be",
           boxShadow: "0 1px 0 rgba(31,27,22,0.04), 0 12px 32px rgba(31,27,22,0.06)",
@@ -181,9 +181,13 @@ export function TinderView({ channel, deck, scoring = false, onBack, onSave, onS
             skippedIds={skippedIds}
           />
 
-          {/* Card stage — pt-28 (112px) keeps background cards (translateY up to -66px) below the 84px banner with a visible gap */}
-          <div className="flex-1 flex flex-col items-center px-10 relative z-10 min-h-0 overflow-hidden pt-28 pb-8">
-            <div className="flex-1 flex flex-col items-center justify-center w-full min-h-0">
+          {/* Card stage — fills remaining height and fits within the viewport.
+              Modest top padding (pt-10) leaves room for the background cards
+              that translate up to -66px; the stage itself never grows taller
+              than its flex parent, so the workspace never pushes the page
+              taller than the screen. */}
+          <div className="flex-1 flex flex-col items-center px-10 relative z-10 min-h-0 overflow-hidden pt-10 pb-5">
+            <div className="flex-1 flex flex-col items-center justify-center w-full min-h-0 gap-4">
               {done ? (
                 <EmptyDeck channel={channel} savedCount={savedIds.length} onBack={onBack} />
               ) : (
@@ -196,7 +200,7 @@ export function TinderView({ channel, deck, scoring = false, onBack, onSave, onS
                     searchHint={searchHint}
                     scoring={scoring}
                   />
-                  <div className="flex items-center gap-5 mt-7">
+                  <div className="flex items-center gap-5 flex-shrink-0">
                     <SwipeBtn variant="skip" onClick={handleSkip} />
                     <SwipeBtn
                       variant="save"
@@ -461,7 +465,15 @@ function CardStack({
     );
   }
   return (
-    <div className="relative w-full max-w-[460px] z-10" style={{ height: 540 }}>
+    // Flex-fill the available vertical space instead of a fixed 540px height, so
+    // the deck fits within laptop viewports (≥700px) without page scroll. The
+    // max-height keeps the card from ballooning on tall screens; min-height
+    // keeps it usable on shorter ones. Cards are absolute-inset so they fill it,
+    // and the card's own content scrolls internally if it ever overflows.
+    <div
+      className="relative w-full max-w-[440px] z-10 flex-1 min-h-0"
+      style={{ maxHeight: 540, minHeight: 360 }}
+    >
       {cards}
     </div>
   );
@@ -614,6 +626,10 @@ function ProfileCard({
           </div>
         )}
 
+        {/* Scrollable body — ribbon and footer stay pinned; the middle scrolls
+            internally when the card is short (small viewports) so the workspace
+            never has to grow taller than the screen. */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
         {/* Identity */}
         <div className="px-6 pt-5 pb-3">
           <div className="flex items-start gap-4">
@@ -663,7 +679,7 @@ function ProfileCard({
             fall through to the rationale/ribbon so a slow/failed score never
             leaves the card stuck on "Scoring…" forever. */}
         {p.tier === null && !p.via && scoring ? (
-          <div className="px-6 py-2 flex-1 overflow-hidden">
+          <div className="px-6 py-2">
             <div className="font-mono-tag text-ink-4 mb-1.5" style={{ fontSize: 9.5 }}>
               Why I&apos;m pushing them
             </div>
@@ -680,7 +696,7 @@ function ProfileCard({
             </div>
           </div>
         ) : p.rationale ? (
-          <div className="px-6 py-2 flex-1 overflow-hidden">
+          <div className="px-6 py-2">
             <div className="font-mono-tag text-ink-4 mb-1.5" style={{ fontSize: 9.5 }}>
               Why I&apos;m pushing them
             </div>
@@ -707,6 +723,8 @@ function ProfileCard({
             </ul>
           </div>
         )}
+        </div>
+        {/* End scrollable body */}
 
         {/* Footer */}
         <div
