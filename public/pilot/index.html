@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Warmly, your AI networking coach</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root{
+    --bg:#FFFDFB; --tint:#FBF4EF; --card:#FFFFFF; --soft:#FCEEE6; --soft2:#FBF3EE; --line:#F0E4DC; --line2:#E7D6CB;
+    --ink:#241F1B; --tx:#332E2A; --mut:#6f655c; --soft-mut:#8a7f76; --ac:#E07A4F; --ac-dk:#9a4a28; --good:#2f6e50; --good-soft:#E1F5EE; --warn-soft:#FBEAE2; --warn-dk:#9b4427; --wa:#25955a;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--tx);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .band{width:100%}.band.tint{background:var(--tint)}
+  .inner{max-width:940px;margin:0 auto;padding:40px 24px}
+
+  .hero{position:relative;overflow:hidden;background:var(--ink);color:#fff;text-align:center;padding:60px 22px 50px}
+  .netbg{position:absolute;inset:0;width:100%;height:100%;opacity:.55;animation:drift 20s ease-in-out infinite alternate}
+  @keyframes drift{to{transform:translate3d(0,-14px,0) scale(1.04)}}
+  .heroin{position:relative;z-index:1;max-width:640px;margin:0 auto}
+  .badge{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:#F0997B;background:rgba(224,122,79,.18);border-radius:999px;padding:5px 13px;margin-bottom:18px}
+  .logo{font-size:44px;font-weight:700;letter-spacing:-.02em;margin:0 0 10px;color:#fff}.logo span{color:var(--ac)}
+  .htag{font-size:28px;font-weight:700;letter-spacing:-.015em;line-height:1.2;margin:0 0 12px;color:#fff}
+  .hlede{font-size:16px;color:#DCD3CB;margin:0 auto 24px;max-width:470px}
+  .cta{display:inline-block;background:var(--ac);color:#fff;font-size:15px;font-weight:600;text-decoration:none;padding:13px 28px;border-radius:11px;border:1px solid var(--ac);cursor:pointer}
+  .cta:hover{background:#c9663c}
+  .hnote{display:block;font-size:13px;color:#A99E95;margin-top:11px}
+  .loop{display:flex;align-items:center;justify-content:center;gap:9px;margin-top:34px;flex-wrap:wrap}
+  .ls{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.13);border-radius:12px;padding:14px 19px;min-width:134px;text-align:center}
+  .ls .ln{display:inline-flex;width:23px;height:23px;border-radius:50%;background:var(--ac);color:#fff;font-size:12px;font-weight:700;align-items:center;justify-content:center;margin-bottom:7px}
+  .ls b{display:block;font-size:16px;color:#fff}.ls span{font-size:13px;color:#B7ABA2}
+  .larr{color:var(--ac);font-size:18px;font-weight:700}
+  @media(max-width:600px){.larr{display:none}.ls{flex:1 1 40%;min-width:0}}
+
+  .frow{display:grid;grid-template-columns:0.92fr 1.08fr;gap:36px;align-items:center}
+  @media(max-width:760px){.frow{grid-template-columns:1fr;gap:18px}}
+  .frow.rev .ftext{order:2}
+  @media(max-width:760px){.frow.rev .ftext{order:0}}
+  .eyebrow{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ac-dk);margin-bottom:9px}
+  .fh{font-size:25px;letter-spacing:-.015em;margin:0 0 10px;line-height:1.18}
+  .fp{font-size:16px;color:var(--mut);margin:0;line-height:1.65}
+
+  .win{background:#fff;border:1px solid var(--line2);border-radius:13px;overflow:hidden;box-shadow:0 8px 26px rgba(43,37,33,.07)}
+  .bar{display:flex;align-items:center;gap:7px;padding:9px 13px;background:var(--soft2);border-bottom:1px solid var(--line)}
+  .dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+  .dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+  .bar .t{font-size:11.5px;color:var(--soft-mut);margin-left:7px}
+  .bar .sched{margin-left:auto;font-size:10.5px;font-weight:600;color:var(--ac-dk);background:var(--soft);border:1px solid var(--line2);border-radius:999px;padding:3px 9px}
+  .body{padding:14px 15px;background:var(--bg)}
+
+  .umsg{display:flex;justify-content:flex-end;margin-bottom:11px}
+  .umsg .b{background:var(--ac);color:#fff;font-size:13px;border-radius:12px 12px 3px 12px;padding:9px 13px;max-width:82%;min-height:18px}
+  .caret{display:inline-block;width:1px;height:14px;background:#fff;vertical-align:-2px;margin-left:1px;animation:bl 1s steps(1) infinite}@keyframes bl{50%{opacity:0}}
+  .think{font-size:12.5px;color:var(--soft-mut);margin:0 0 12px;opacity:0;transition:opacity .3s}.think.on{opacity:1}
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:9px}@media(max-width:440px){.cards{grid-template-columns:1fr}}
+  .cd{background:#fff;border:1px solid var(--line);border-radius:11px;padding:11px 12px;opacity:0;transform:translateY(10px);transition:opacity .4s,transform .4s}.cd.in{opacity:1;transform:none}
+  .cd .top{display:flex;align-items:center;gap:9px}
+  .av{width:30px;height:30px;border-radius:50%;background:var(--soft);color:var(--ac-dk);font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .cd .nm{font-size:13px;font-weight:600;line-height:1.2}.cd .ro{font-size:11px;color:var(--soft-mut)}
+  .path{font-size:11px;color:var(--good);background:var(--good-soft);border-radius:7px;padding:3px 7px;margin-top:8px;display:inline-block}
+  .replay{margin-top:10px}.replay button{font-size:12px;background:#fff;border:1px solid var(--line2);color:var(--tx);border-radius:8px;padding:6px 12px;cursor:pointer}
+  .chips{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}
+  .chip2{display:flex;align-items:center;gap:8px;background:var(--soft);border:1px solid var(--line2);border-radius:10px;padding:8px 12px;font-size:12.5px;font-weight:500;color:var(--tx)}
+  .chip2{font-weight:500}.logo-insead{background:#0A7150;color:#fff;font-family:Georgia,"Times New Roman",serif;font-weight:600;letter-spacing:.10em;font-size:11px;padding:5px 9px;border-radius:5px;line-height:1}.logo-li{display:inline-flex;line-height:0}
+
+  .chanbar{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px}
+  .chan{font-size:12px;padding:6px 11px;border-radius:999px;border:1px solid var(--line2);background:#fff;color:var(--soft-mut);cursor:pointer}
+  .chan.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+  .dpane{min-height:228px}
+  .dsub{font-size:11.5px;color:var(--ac-dk);font-weight:600;margin-bottom:7px}
+  .dtext{font-size:13px;color:#3c372f;line-height:1.62;opacity:1;transition:opacity .25s;white-space:pre-line}.dtext.fade{opacity:0}
+  .dctrl{display:flex;gap:8px;margin-top:12px;align-items:center}
+  .dctrl .send{font-size:12px;font-weight:600;background:var(--ac);color:#fff;border-radius:8px;padding:7px 14px}
+  .dctrl .note{font-size:11.5px;color:var(--soft-mut);margin-left:auto}
+
+  .prepwrap{max-width:980px;margin:16px auto 0}
+  .pmeta{margin-left:auto;font-size:11px;color:var(--soft-mut);font-family:var(--mono);text-align:right;line-height:1.6}
+  .ptabs{display:flex;gap:6px;padding:12px 15px 0;background:var(--bg);flex-wrap:wrap}
+  .ptab{font-size:11.5px;padding:6px 12px;border-radius:8px 8px 0 0;background:var(--soft2);color:var(--soft-mut);border:1px solid var(--line);border-bottom:none;cursor:pointer}
+  .ptab.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+  .psheet{border-top:1px solid var(--line);padding:18px 20px;min-height:300px}
+  .ppane{display:none}.ppane.on{display:block}
+  .pstats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}@media(max-width:560px){.pstats{grid-template-columns:1fr 1fr}}
+  .pstat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 13px}.pstat .l{font-size:11px;color:var(--soft-mut)}.pstat .b{font-size:18px;font-weight:700;letter-spacing:-.01em;margin-top:3px}
+  .pblock{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:15px 17px;margin-bottom:12px}
+  .pblock h4{margin:0 0 8px;font-size:15px;letter-spacing:-.01em}
+  .pblock p{margin:7px 0;color:#4a443d;font-size:14px;line-height:1.6}
+  .pblock ul{margin:7px 0;padding-left:19px}.pblock li{margin:6px 0;color:#4a443d;font-size:14px;line-height:1.55}.pblock li b{color:var(--ac-dk)}
+  .twobox{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}@media(max-width:560px){.twobox{grid-template-columns:1fr}}
+  .pbox{border-radius:11px;padding:14px 16px;font-size:13.5px;line-height:1.55}.pbox h4{margin:0 0 6px;font-size:14px}
+  .pbox.good{background:var(--good-soft);color:var(--good)}.pbox.good h4{color:var(--good)}
+  .pbox.warn{background:var(--warn-soft);color:var(--warn-dk)}.pbox.warn h4{color:var(--warn-dk)}
+  .agenda{display:grid;grid-template-columns:78px 1fr;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .agenda div{padding:10px 13px;border-bottom:1px solid var(--line);font-size:13px}.agenda div:nth-last-child(-n+2){border-bottom:none}
+  .agenda .t{font-family:var(--mono);font-size:11.5px;color:var(--ac-dk);background:var(--soft)}
+  .phase{font-size:11.5px;color:var(--ac-dk);font-weight:700;letter-spacing:.03em;margin:14px 0 7px}
+  .qb{border:1px solid var(--line);border-radius:10px;background:var(--card);padding:11px 14px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start}
+  .qnum{font-family:var(--mono);font-size:11px;color:var(--ac-dk);min-width:26px;padding-top:2px}
+  .qtx{font-size:13.5px;font-weight:500;color:#34302c;flex:1}
+  .ptool{display:flex;align-items:center;gap:9px;background:var(--soft);border:1px solid var(--line2);border-radius:10px;padding:10px 12px;margin-bottom:13px;flex-wrap:wrap}
+  .ptool .sv{font-size:12px;font-weight:600;background:var(--ac);color:#fff;border:none;border-radius:8px;padding:8px 13px;cursor:pointer}
+  .ptool .saved{font-size:11.5px;color:var(--good);opacity:0;transition:opacity .35s}.ptool .saved.on{opacity:1}
+  .ptool .hint{font-size:11.5px;color:var(--soft-mut)}
+
+  .dgoal{background:var(--soft);border:1px solid var(--line2);border-radius:11px;padding:12px 14px;margin-bottom:11px}
+  .dgoal .gl{font-size:11px;color:var(--ac-dk);font-weight:600}.dgoal .gc{font-size:20px;font-weight:700;letter-spacing:-.01em}.dgoal .gc small{font-size:12px;color:var(--soft-mut);font-weight:500}
+  .track{height:8px;background:#f3ddd0;border-radius:99px;margin-top:8px;overflow:hidden}.track i{display:block;height:100%;width:0;background:var(--ac);border-radius:99px;transition:width 1.1s ease}
+  .ccards{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:11px}@media(max-width:480px){.ccards{grid-template-columns:1fr 1fr}}
+  .cc{background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px;min-height:90px;display:flex;flex-direction:column;gap:6px}
+  .cc .nm{font-size:12.5px;font-weight:600;line-height:1.2}.cc .ro{font-size:11px;color:var(--soft-mut)}
+  .cc .tagc{font-size:10px;padding:2px 7px;border-radius:999px;background:var(--soft);color:var(--ac-dk);border:1px solid var(--line2);align-self:flex-start;margin-top:auto}
+  .cc .tagc.met{background:var(--good-soft);color:var(--good);border-color:#bfe0cd}
+  .tailor{background:var(--ink);color:#fff;border-radius:11px;padding:13px 15px}
+  .tailor .k{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#F0997B;margin-bottom:5px}
+  .tailor p{font-size:12.5px;color:#E6DDD6;margin:0;line-height:1.55}.tailor b{color:#fff}
+
+  .tl{position:relative;padding-left:20px}.tl:before{content:"";position:absolute;left:6px;top:4px;bottom:18px;width:2px;background:var(--line2)}
+  .tle{position:relative;opacity:0;transform:translateY(8px);transition:opacity .4s,transform .4s;margin-bottom:10px}.tle.in{opacity:1;transform:none}
+  .tle:before{content:"";position:absolute;left:-17px;top:3px;width:9px;height:9px;border-radius:50%;background:var(--ac);border:2px solid #fff;box-shadow:0 0 0 1px var(--line2)}
+  .tle .d{font-size:10.5px;color:var(--soft-mut);font-family:var(--mono)}.tle .x{font-size:12.5px;color:#3c372f}
+  .mdecide{background:var(--good-soft);border:1px solid #bfe0cd;border-radius:11px;padding:12px 14px;margin-top:6px;opacity:0;transform:translateY(8px);transition:opacity .45s,transform .45s}.mdecide.in{opacity:1;transform:none}
+  .mdecide .k{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--good);margin-bottom:4px}.mdecide p{font-size:12.5px;color:#2c4a3b;margin:0;line-height:1.5}.mdecide b{color:var(--good)}
+
+  .setup{background:var(--soft);border:1px solid var(--line2);border-radius:16px;padding:24px;text-align:center}
+  .setup h3{font-size:21px;margin:0 0 4px;letter-spacing:-.01em}.setup p{font-size:15px;color:var(--mut);margin:0 auto 16px;max-width:520px}
+  .ssteps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}@media(max-width:560px){.ssteps{grid-template-columns:1fr}}
+  .ss{background:#fff;border:1px solid var(--line);border-radius:11px;padding:14px 13px;text-align:left}
+  .ss .num{width:22px;height:22px;border-radius:50%;background:var(--ac);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-bottom:8px}.ss b{font-size:13px;display:block;margin-bottom:2px}.ss span{font-size:12px;color:var(--mut)}
+
+  .join{background:var(--ink);color:#fff;border-radius:18px;padding:30px 24px;text-align:center;position:relative;overflow:hidden}
+  .join .netbg{opacity:.4}
+  .join .ji{position:relative;z-index:1}
+  .join h3{font-size:23px;margin:0 0 7px;letter-spacing:-.01em;color:#fff}.join p{font-size:14.5px;color:#DCD3CB;margin:0 auto 18px;max-width:430px}
+  .qrbox{width:152px;height:152px;margin:0 auto 14px;background:#fff;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#8a7f76;font-size:12px;text-align:center;padding:10px}
+  .wabtn{display:inline-block;background:var(--wa);color:#fff;font-size:15px;font-weight:600;text-decoration:none;padding:13px 26px;border-radius:11px}.wabtn:hover{background:#1f7f4c}
+  .join small{display:block;color:#A99E95;font-size:12px;margin-top:11px}
+  .foot{text-align:center;padding:26px 22px 46px}.foot p{font-size:13px;color:var(--soft-mut);margin:0}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <svg class="netbg" viewBox="0 0 1200 560" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><line x1="430" y1="259" x2="500" y2="315" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="632" y1="531" x2="550" y2="342" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="411" y1="116" x2="352" y2="35" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="411" y1="116" x2="320" y2="112" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="419" y1="267" x2="91" y2="495" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="698" y1="471" x2="632" y2="531" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="956" y1="496" x2="944" y2="330" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="944" y1="330" x2="863" y2="105" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="956" y1="496" x2="841" y2="483" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="955" y1="540" x2="1078" y2="507" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="151" y1="56" x2="39" y2="107" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="91" y1="495" x2="39" y2="107" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="320" y1="112" x2="151" y2="56" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="1133" y1="62" x2="1112" y2="84" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="1133" y1="62" x2="863" y2="105" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="320" y1="112" x2="39" y2="107" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="966" y1="304" x2="863" y2="105" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="430" y1="259" x2="550" y2="342" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="419" y1="267" x2="430" y2="259" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="944" y1="330" x2="966" y2="304" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="956" y1="496" x2="955" y2="540" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="418" y1="209" x2="411" y2="116" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="841" y1="483" x2="698" y2="471" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="955" y1="540" x2="841" y2="483" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="550" y1="342" x2="500" y2="315" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="956" y1="496" x2="1078" y2="507" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="418" y1="209" x2="419" y2="267" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="1112" y1="84" x2="863" y2="105" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="956" y1="496" x2="966" y2="304" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="418" y1="209" x2="430" y2="259" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="320" y1="112" x2="352" y2="35" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><circle cx="956" cy="496" r="5" fill="rgba(224,122,79,0.55)"/><circle cx="955" cy="540" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="418" cy="209" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="1078" cy="507" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="411" cy="116" r="5" fill="rgba(224,122,79,0.55)"/><circle cx="944" cy="330" r="4" fill="rgba(255,255,255,0.16)"/><circle cx="320" cy="112" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="1133" cy="62" r="3" fill="rgba(255,255,255,0.16)"/><circle cx="841" cy="483" r="5" fill="rgba(224,122,79,0.55)"/><circle cx="352" cy="35" r="4" fill="rgba(255,255,255,0.16)"/><circle cx="1112" cy="84" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="151" cy="56" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="419" cy="267" r="5" fill="rgba(224,122,79,0.55)"/><circle cx="91" cy="495" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="698" cy="471" r="3" fill="rgba(255,255,255,0.16)"/><circle cx="430" cy="259" r="3" fill="rgba(255,255,255,0.16)"/><circle cx="632" cy="531" r="5" fill="rgba(224,122,79,0.55)"/><circle cx="39" cy="107" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="966" cy="304" r="4" fill="rgba(255,255,255,0.16)"/><circle cx="863" cy="105" r="4" fill="rgba(255,255,255,0.16)"/><circle cx="550" cy="342" r="5" fill="rgba(224,122,79,0.55)"/><circle cx="500" cy="315" r="4" fill="rgba(255,255,255,0.16)"/></svg>
+  <div class="heroin">
+    <span class="badge">Private pilot, INSEAD</span>
+    <h1 class="logo">Warmly<span>.</span></h1>
+    <div class="htag">Reach the right people, in your voice.</div>
+    <p class="hlede">Your AI networking coach. Warm intros first, in about 30 minutes a day.</p>
+    <a class="cta" href="#join">Join the pilot</a>
+    <span class="hnote">Runs on your own Claude account. Easy to set up.</span>
+    <div class="loop">
+      <div class="ls"><span class="ln">1</span><b>Discover</b><span>warm contacts</span></div>
+      <span class="larr">&rsaquo;</span>
+      <div class="ls"><span class="ln">2</span><b>Draft</b><span>in your voice</span></div>
+      <span class="larr">&rsaquo;</span>
+      <div class="ls"><span class="ln">3</span><b>Prepare</b><span>for the call</span></div>
+      <span class="larr">&rsaquo;</span>
+      <div class="ls"><span class="ln">4</span><b>Maintain</b><span>on cadence</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="band" data-anim="discovery"><div class="inner"><div class="frow">
+  <div class="ftext">
+    <div class="eyebrow">01 · Contact discovery</div>
+    <h3 class="fh">Find your warmest contacts, two ways</h3>
+    <p class="fp">Ask in plain language. Warmly searches the INSEAD CV book and LinkedIn, then ranks by who can actually introduce you.</p>
+    <div class="chips">
+      <div class="chip2"><span class="logo-insead">INSEAD</span> CV book, 960+ alumni</div>
+      <div class="chip2"><span class="logo-li"><svg viewBox="0 0 24 24" width="22" height="22" aria-label="LinkedIn"><rect width="24" height="24" rx="4" fill="#0A66C2"/><text x="12" y="16.5" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="11" fill="#ffffff" text-anchor="middle">in</text></svg></span> Automated discovery</div>
+    </div>
+  </div>
+  <div class="fvis"><div class="win">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">Warmly</span></div>
+    <div class="body">
+      <div class="umsg"><div class="b"><span id="typed"></span><span class="caret" id="caret"></span></div></div>
+      <p class="think" id="think">Searching Anthropic in Paris, ranking by your warmest path...</p>
+      <div class="cards" id="cards">
+        <div class="cd"><div class="top"><div class="av">EP</div><div><div class="nm">Emma Paté</div><div class="ro">GTM, Anthropic · Paris</div></div></div><span class="path">via François Sockeel &amp; 3 others</span></div>
+        <div class="cd"><div class="top"><div class="av">AC</div><div><div class="nm">Antoine Castets</div><div class="ro">GTM, Anthropic · Paris</div></div></div><span class="path">via Yves Dufour &amp; 2 others</span></div>
+        <div class="cd"><div class="top"><div class="av">ML</div><div><div class="nm">Matthieu Leroux</div><div class="ro">GTM Retail/CPG · Paris</div></div></div><span class="path">via Mathieu Colas &amp; 1 other</span></div>
+        <div class="cd"><div class="top"><div class="av">RR</div><div><div class="nm">Romain Rodier</div><div class="ro">GTM France · Paris</div></div></div><span class="path">via Qihua Wang &amp; 2 others</span></div>
+      </div>
+      <div class="replay"><button id="rp">Replay &#8635;</button></div>
+    </div>
+  </div></div>
+</div></div></div>
+
+<div class="band tint" data-anim="drafts"><div class="inner"><div class="frow rev">
+  <div class="ftext">
+    <div class="eyebrow">02 · Messages in your voice</div>
+    <h3 class="fh">One person, the right message for each channel</h3>
+    <p class="fp">Pick the channel. Warmly drafts in your voice, sized and toned for that format, a tight LinkedIn note, a fuller email or InMail, a casual WhatsApp. You review and send.</p>
+  </div>
+  <div class="fvis"><div class="win">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">Draft to Emma Paté</span></div>
+    <div class="body">
+      <div class="chanbar" id="chanbar"></div>
+      <div class="dpane"><div class="dsub" id="dsub"></div><div class="dtext" id="dtext"></div></div>
+      <div class="dctrl"><span class="send">Send</span><span class="note">matched to your voice · you hit send</span></div>
+    </div>
+  </div></div>
+</div></div></div>
+
+<div class="band" data-anim="prep"><div class="inner">
+  <div class="eyebrow">03 · Meeting preparation</div>
+  <h3 class="fh">Walk in ready, then capture it</h3>
+  <p class="fp" style="max-width:640px">A brief on the person and company, an agenda, and phased questions to ask. Your notes save straight back into the contact's history.</p>
+  <div class="prepwrap"><div class="win">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">Liyang GUO x Romain Rodier, meeting brief</span><span class="pmeta">30 min · 2nd degree, 3 shared · via Qihua Wang</span></div>
+    <div class="ptabs" id="ptabs">
+      <span class="ptab on" data-p="0">Snapshot</span><span class="ptab" data-p="1">Person</span><span class="ptab" data-p="2">Company</span><span class="ptab" data-p="3">Questions</span>
+    </div>
+    <div class="psheet">
+      <div class="ppane on" data-p="0">
+        <div class="pstats">
+          <div class="pstat"><div class="l">Shared connections</div><div class="b">3</div></div>
+          <div class="pstat"><div class="l">Warm path</div><div class="b">via Qihua</div></div>
+          <div class="pstat"><div class="l">Connection</div><div class="b">2nd</div></div>
+          <div class="pstat"><div class="l">Meeting</div><div class="b">30 min</div></div>
+        </div>
+        <div class="pblock"><h4>Executive read</h4><p>Romain ran GTM for Life Sciences and CPG at Google Cloud, your Monitor Deloitte world, and is now a founding member of Anthropic's Paris office. He accepted your outreach but does not know you yet, so the goal is simple: learn how GTM actually works at Anthropic France, peer to peer.</p></div>
+        <div class="twobox">
+          <div class="pbox good"><h4>Why this meeting matters</h4>A rare contact who holds both your old life-sciences world and your target AI world in one career, and the Paris office is hiring.</div>
+          <div class="pbox warn"><h4>What not to do</h4>Do not pitch yourself in the first 25 minutes. Lead with the shared life-sciences ground and curiosity about the build, not your CV.</div>
+        </div>
+        <div class="pblock"><h4>Suggested flow, 30 min</h4>
+          <div class="agenda">
+            <div class="t">0 to 6</div><div>Warm open on the shared network and the founding-office moment, then let him tell his story.</div>
+            <div class="t">6 to 20</div><div>Core: how GTM works at Anthropic France, and selling frontier AI into regulated industries like pharma.</div>
+            <div class="t">20 to 27</div><div>Profile fit and candid advice.</div>
+            <div class="t">27 to 30</div><div>Light close: stay on the radar, one pointer if it is flowing.</div>
+          </div>
+        </div>
+      </div>
+      <div class="ppane" data-p="1">
+        <div class="pblock"><h4>Who he is</h4>
+          <ul>
+            <li><b>Now.</b> GTM France at Anthropic since Feb 2026, founding member of the Paris office, Sales Manager for Enterprise Industries.</li>
+            <li><b>Before.</b> 13 years at Google Cloud, most recently Head of Sales CELS in France, 150M+ in bookings in FY24.</li>
+            <li><b>The real common ground.</b> He led Life Sciences GTM at Google Cloud, exactly your Monitor Deloitte world. You both know how pharma buys, prices and launches.</li>
+          </ul>
+        </div>
+        <div class="pblock"><h4>His likely posture</h4><p>In build mode, hiring, and visible. He responds well to specific, informed questions about the GTM build and to someone who clearly understands enterprise pharma.</p></div>
+      </div>
+      <div class="ppane" data-p="2">
+        <div class="pblock"><h4>Anthropic in France, quick orientation</h4>
+          <p>Anthropic opened its Paris office in late 2025 as a regional hub for commercial growth and partnerships. French customers cited publicly include L'Oreal, BMW, SAP and Sanofi, plus digital natives like Qonto and Doctolib. Note Sanofi, a life-sciences account directly in your wheelhouse.</p>
+          <p>Romain sits under Thomas Remy, Head of EMEA South, also ex-Google Cloud. The 2026 picture: a big partner-enablement push and a clear vertical strategy with pre-built agents for industries like financial services.</p>
+        </div>
+      </div>
+      <div class="ppane" data-p="3">
+        <div class="ptool"><button class="sv" id="savebtn">Save to Warmly</button><span class="saved" id="savedpill">Added to Romain's history &#10003;</span><span class="hint">Every question is editable, and your notes sync back to the contact's timeline.</span></div>
+        <div class="phase">Phase 1, warm-up and his path</div>
+        <div class="qb"><span class="qnum">Q1</span><span class="qtx">We have a few people in common, Qihua among them. Five months into standing up the Paris office, how is it feeling so far?</span></div>
+        <div class="qb"><span class="qnum">Q2</span><span class="qtx">Thirteen years at Google Cloud, then a founding seat at Anthropic France. What made the jump feel right when it did?</span></div>
+        <div class="phase">Phase 2, how GTM actually works</div>
+        <div class="qb"><span class="qnum">Q3</span><span class="qtx">From the outside, GTM at a frontier lab looks very different from selling Google Cloud. What does a real week look like for you now?</span></div>
+        <div class="qb"><span class="qnum">Q4</span><span class="qtx">You ran Life Sciences at Google Cloud, which was my world at Monitor Deloitte. How is selling frontier AI into pharma different from selling cloud?</span></div>
+        <div class="phase">Phase 3, profile fit and advice</div>
+        <div class="qb"><span class="qnum">Q5</span><span class="qtx">Given my background, ex-Monitor in life sciences plus hands-on AI building, where would and would not you bet on me for a GTM or strategy role?</span></div>
+        <div class="qb"><span class="qnum">Q6</span><span class="qtx">If you were me and wanted to land in AI GTM or product in the next 12 months, what would you actually target?</span></div>
+      </div>
+    </div>
+  </div></div>
+</div></div>
+
+<div class="band tint" data-anim="dash"><div class="inner"><div class="frow">
+  <div class="ftext">
+    <div class="eyebrow">04 · Network dashboard</div>
+    <h3 class="fh">Your whole network, and the next move for each</h3>
+    <p class="fp">Pipeline and progress at a glance. Because Warmly keeps every exchange, each follow-up is tailored to your history with that person, not generic.</p>
+  </div>
+  <div class="fvis"><div class="win">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">Warmly for Liyang</span></div>
+    <div class="body">
+      <div class="dgoal"><div class="gl">This week's outreach</div><div class="gc">7 <small>/ 15 sent</small></div><div class="track"><i id="gbar" data-w="47%"></i></div></div>
+      <div class="ccards">
+        <div class="cc"><div class="nm">Davide Bonapersona</div><div class="ro">Product, Anthropic</div><span class="tagc met">met</span></div>
+        <div class="cc"><div class="nm">Romain Rodier</div><div class="ro">GTM France, Anthropic</div><span class="tagc">reached out</span></div>
+        <div class="cc"><div class="nm">Emma Paté</div><div class="ro">GTM, Anthropic</div><span class="tagc">surfaced</span></div>
+        <div class="cc"><div class="nm">Antoine Castets</div><div class="ro">GTM, Anthropic</div><span class="tagc">surfaced</span></div>
+        <div class="cc"><div class="nm">Celine Blanc</div><div class="ro">GTM Media, Anthropic</div><span class="tagc">surfaced</span></div>
+        <div class="cc"><div class="nm">Matthieu Leroux</div><div class="ro">GTM Retail, Anthropic</div><span class="tagc">surfaced</span></div>
+      </div>
+      <div class="tailor"><div class="k">Tailored follow-up</div><p>Davide offered a founder intro when you met on May 18. <b>Your next step: follow up and take him up on it, due in 3 days.</b></p></div>
+    </div>
+  </div></div>
+</div></div></div>
+
+<div class="band" data-anim="brief"><div class="inner"><div class="frow rev">
+  <div class="ftext">
+    <div class="eyebrow">05 · Daily briefing</div>
+    <h3 class="fh">It comes to you, every morning</h3>
+    <p class="fp">A scheduled task runs on its own and hands you a two-minute plan, who is due and your next best move. No app to remember to open.</p>
+  </div>
+  <div class="fvis"><div class="win">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">Daily briefing</span><span class="sched">Scheduled · every day 10:00</span></div>
+    <div class="body">
+      <p style="font-size:13.5px;color:var(--tx);font-weight:600;margin:0 0 3px">Good morning. 7 contacts in play, 7 of 15 sent this week.</p>
+      <p class="think on" style="margin:0 0 11px">A few things worth doing today:</p>
+      <div id="briefitems"></div>
+    </div>
+  </div></div>
+</div></div></div>
+
+<div class="band tint" data-anim="mem"><div class="inner"><div class="frow">
+  <div class="ftext">
+    <div class="eyebrow">06 · A memory that works for you</div>
+    <h3 class="fh">It remembers every exchange, and decides your next move</h3>
+    <p class="fp">Warmly keeps a living timeline for each contact. That memory is what makes every suggestion sharp instead of generic.</p>
+  </div>
+  <div class="fvis"><div class="win">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="t">Davide Bonapersona, history</span></div>
+    <div class="body">
+      <div class="tl" id="memtl">
+        <div class="tle"><div class="d">May 8</div><div class="x">LinkedIn note sent, opened on a shared Paris and builder angle.</div></div>
+        <div class="tle"><div class="d">May 10</div><div class="x">Connection accepted.</div></div>
+        <div class="tle"><div class="d">May 18</div><div class="x">30-minute call. Offered to introduce you to a founder.</div></div>
+        <div class="tle"><div class="d">Jun 18</div><div class="x">Note: revisit the founder intro after his launch.</div></div>
+        <div class="tle"><div class="d">Jun 21</div><div class="x">His launch shipped. The founder intro is still open.</div></div>
+      </div>
+      <div class="mdecide" id="memdecide"><div class="k">Warmly's read</div><p>His launch is done and the intro was never followed up. <b>Best next move: a short, specific nudge about the founder intro, today.</b></p></div>
+    </div>
+  </div></div>
+</div></div></div>
+
+<div class="band"><div class="inner" style="padding-top:32px;padding-bottom:32px">
+  <p style="text-align:center;font-size:15px;color:var(--mut);margin:0 auto;max-width:660px"><b style="color:var(--tx);font-weight:600">You stay in control.</b> Read-only on LinkedIn, you approve every send &middot; Bilingual EN/FR &middot; Your data stays in your own files.</p>
+</div></div>
+
+<div class="band tint"><div class="inner">
+  <div class="join" id="join">
+    <svg class="netbg" viewBox="0 0 1200 560" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><line x1="430" y1="259" x2="500" y2="315" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="632" y1="531" x2="550" y2="342" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="411" y1="116" x2="352" y2="35" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="411" y1="116" x2="320" y2="112" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="419" y1="267" x2="91" y2="495" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="698" y1="471" x2="632" y2="531" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="956" y1="496" x2="944" y2="330" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="944" y1="330" x2="863" y2="105" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="956" y1="496" x2="841" y2="483" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="955" y1="540" x2="1078" y2="507" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="151" y1="56" x2="39" y2="107" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="91" y1="495" x2="39" y2="107" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="320" y1="112" x2="151" y2="56" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="1133" y1="62" x2="1112" y2="84" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="1133" y1="62" x2="863" y2="105" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="320" y1="112" x2="39" y2="107" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="966" y1="304" x2="863" y2="105" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="430" y1="259" x2="550" y2="342" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="419" y1="267" x2="430" y2="259" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="944" y1="330" x2="966" y2="304" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="956" y1="496" x2="955" y2="540" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="418" y1="209" x2="411" y2="116" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="841" y1="483" x2="698" y2="471" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="955" y1="540" x2="841" y2="483" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="550" y1="342" x2="500" y2="315" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="956" y1="496" x2="1078" y2="507" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="418" y1="209" x2="419" y2="267" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="1112" y1="84" x2="863" y2="105" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="956" y1="496" x2="966" y2="304" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="418" y1="209" x2="430" y2="259" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><line x1="320" y1="112" x2="352" y2="35" stroke="rgba(224,122,79,0.20)" stroke-width="1"/><circle cx="956" cy="496" r="5" fill="rgba(224,122,79,0.55)"/><circle cx="955" cy="540" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="418" cy="209" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="1078" cy="507" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="411" cy="116" r="5" fill="rgba(224,122,79,0.55)"/><circle cx="944" cy="330" r="4" fill="rgba(255,255,255,0.16)"/><circle cx="320" cy="112" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="1133" cy="62" r="3" fill="rgba(255,255,255,0.16)"/><circle cx="841" cy="483" r="5" fill="rgba(224,122,79,0.55)"/><circle cx="352" cy="35" r="4" fill="rgba(255,255,255,0.16)"/><circle cx="1112" cy="84" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="151" cy="56" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="419" cy="267" r="5" fill="rgba(224,122,79,0.55)"/><circle cx="91" cy="495" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="698" cy="471" r="3" fill="rgba(255,255,255,0.16)"/><circle cx="430" cy="259" r="3" fill="rgba(255,255,255,0.16)"/><circle cx="632" cy="531" r="5" fill="rgba(224,122,79,0.55)"/><circle cx="39" cy="107" r="2" fill="rgba(255,255,255,0.16)"/><circle cx="966" cy="304" r="4" fill="rgba(255,255,255,0.16)"/><circle cx="863" cy="105" r="4" fill="rgba(255,255,255,0.16)"/><circle cx="550" cy="342" r="5" fill="rgba(224,122,79,0.55)"/><circle cx="500" cy="315" r="4" fill="rgba(255,255,255,0.16)"/></svg>
+    <div class="ji">
+      <h3>Want in?</h3>
+      <p>We are opening a small WhatsApp group for the pilot. Scan or tap to join and get setup details and updates.</p>
+      <div class="qrbox" id="qrbox"><img alt="Scan to join the Warmly WhatsApp group" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAXIAAAFyCAIAAABnRsZeAAAHsklEQVR4nO3dMW4lRRhGUYy8DAIS9r8gEgL20aQjMWqNXLf0V7fPyf2mXxtfVfCp+Liu6zeAzu/TDwC8jawAMVkBYrICxGQFiMkKEJMVICYrQExWgJisADFZAWKyAsRkBYjJChCTFSAmK0BMVoCYrAAxWQFinys//Neff1TPcYi///n3yz97/zbuP3nfm9z3jfbxrk6w8jacVoCYrAAxWQFisgLEZAWIyQoQkxUgJitATFaA2NLK9t7KSm+fqY3m1AZ35Wf3faN9pnbS977b34LTChCTFSAmK0BMVoCYrAAxWQFisgLEZAWIyQoQ27iyvXfmjaT3pnalZ+537029q32r4n2e+Ldwz2kFiMkKEJMVICYrQExWgJisADFZAWKyAsRkBYiNrWzfZ9+Ns/dbyakN7plr5qnfAj9yWgFisgLEZAWIyQoQkxUgJitATFaAmKwAMVkBYla2mTNXp2feg7vvmVfY0VacVoCYrAAxWQFisgLEZAWIyQoQkxUgJitATFaA2NjK1qLx1628q313u97b98zvu7v3fX8LTitATFaAmKwAMVkBYrICxGQFiMkKEJMVICYrQGzjynbfnaNPdOb6832L1TN9t78FpxUgJitATFaAmKwAMVkBYrICxGQFiMkKEJMVILa0sv1uW8kV79vR7rPyzFP8LfzIaQWIyQoQkxUgJitATFaAmKwAMVkBYrICxGQFiH1c1/XlH9531+mUla3kyjeaulN2n31vcur7nvme701tf51WgJisADFZAWKyAsRkBYjJChCTFSAmK0BMVoDYxrts961Oz/S+Zz5z7XrmU63Y98xTdxU7rQAxWQFisgLEZAWIyQoQkxUgJitATFaAmKwAsaWV7YqpTeoT7zpdeVdnrk6nfvtn/o7etxt2WgFisgLEZAWIyQoQkxUgJitATFaAmKwAMVkBYh/XdU0/w0/s2x0+8fbWfQvOFWfupPc91b5/98zl98o3cloBYrICxGQFiMkKEJMVICYrQExWgJisADFZAWJLK9upTeoT7w1939s485PvPfH3u+/f3bdIdloBYrICxGQFiMkKEJMVICYrQExWgJisADFZAWKHrmzP3HeuOPMG1hVn3hp75m9/xb7f4D132QIHkRUgJitATFaAmKwAMVkBYrICxGQFiMkKEPucfoCfO/Mm1H2mtqFnvskzd7RT9w2vfLK7bIGXkBUgJitATFaAmKwAMVkBYrICxGQFiMkKEDt0Zbuy/3vfznJlK3nmrcD3n7xvv3vmxnrFmXf3Oq0AMVkBYrICxGQFiMkKEJMVICYrQExWgJisALGlle3KPZr3pvadU+veM7eSZ96TOvVUK5+8b5995l+Z0woQkxUgJitATFaAmKwAMVkBYrICxGQFiMkKEPu4ruvLP7xvdzi1K10xddPtPmfe/HrmmvnMHe0KK1vgILICxGQFiMkKEJMVICYrQExWgJisADFZAWJLK9sp+3aHZ+4dp5x5a+y9qb3yE/+b3PeunFaAmKwAMVkBYrICxGQFiMkKEJMVICYrQExWgNjYXbYrpvadU588teC8N7XvnLo1duqZV0x9X6cVICYrQExWgJisADFZAWKyAsRkBYjJChCTFSB26Mr2ibfGvm+De29qRb3iiQvse1M72ntOK0BMVoCYrAAxWQFisgLEZAWIyQoQkxUgJitA7HPfR08t/L7b2vXevhXmvm3omcvRqbdxb99v0F22wEFkBYjJChCTFSAmK0BMVoCYrAAxWQFisgLENq5sV1Z6T7wn9X3OXI6eaWqBfeYi2WkFiMkKEJMVICYrQExWgJisADFZAWKyAsRkBYhtXNneO/MW1Sme6tf/3fvf/hNvI57a4O7jtALEZAWIyQoQkxUgJitATFaAmKwAMVkBYrICxMZWtiumVpgr3rcbfuKbfN8tuWdyWgFisgLEZAWIyQoQkxUgJitATFaAmKwAMVkBYh/XdU0/w2Ps25W+b/05dT/rvrts961d33evs9MKEJMVICYrQExWgJisADFZAWKyAsRkBYjJChBbusv2idvQe/e7w6kd7dSedZ+pbzT1yU+8j3aF0woQkxUgJitATFaAmKwAMVkBYrICxGQFiMkKEFta2d47c1m4srNcWVKeedPt1D2pU7e37jN10+29qbt7nVaAmKwAMVkBYrICxGQFiMkKEJMVICYrQExWgNjGle29qeXoPvuWo1PfaN8yeN832vfM323du8JpBYjJChCTFSAmK0BMVoCYrAAxWQFisgLEZAWIja1s+dGZN6GuOPPu3n3OXCRPvUmnFSAmK0BMVoCYrAAxWQFisgLEZAWIyQoQkxUgZmWbWbmtdsr77v1d+eSpPeuZC90VTitATFaAmKwAMVkBYrICxGQFiMkKEJMVICYrQGxsZXvm/+n+3tQzT60/pxac+xar+77RE2+c3cdpBYjJChCTFSAmK0BMVoCYrAAxWQFisgLEZAWIfVzX9eUfft86cGqjOfUm3/fM+55q37975jda4bQCxGQFiMkKEJMVICYrQExWgJisADFZAWKyAsSWVrYA/+e0AsRkBYjJChCTFSAmK0BMVoCYrAAxWQFisgLEZAWIyQoQkxUgJitATFaAmKwAMVkBYrICxGQFiMkKEPsPw7UF+MWg128AAAAASUVORK5CYII=" style="width:100%;height:100%;object-fit:contain"></div>
+      <a class="wabtn" id="wabtn" href="https://chat.whatsapp.com/BexdZVvWBhX5aHbySHarYO" target="_blank" rel="noopener">Join the WhatsApp group</a>
+      <small>Or message Liyang or Sanket</small>
+    </div>
+  </div>
+</div></div>
+
+<div class="foot"><p>Warmly is in private pilot with a small INSEAD group.</p></div>
+
+<script>
+(function(){
+  function onView(sel,fn){var el=document.querySelector(sel);if(!el)return;if(!('IntersectionObserver' in window)){fn();return;}
+    var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){fn();io.disconnect();}});},{threshold:.25});io.observe(el);}
+
+  (function(){
+    var txt="Find people to reach at Anthropic in Paris",typed=document.getElementById("typed"),caret=document.getElementById("caret"),
+      think=document.getElementById("think"),cards=document.querySelectorAll("#cards .cd"),rp=document.getElementById("rp"),timers=[];
+    function clr(){timers.forEach(clearTimeout);timers=[];}
+    function run(){clr();typed.textContent="";think.classList.remove("on");caret.style.display="";cards.forEach(function(c){c.classList.remove("in");});
+      var i=0;(function t(){if(i<=txt.length){typed.textContent=txt.slice(0,i);i++;timers.push(setTimeout(t,40));}
+        else{timers.push(setTimeout(function(){caret.style.display="none";think.classList.add("on");},340));
+          cards.forEach(function(c,k){timers.push(setTimeout(function(){c.classList.add("in");},950+k*360));});}})();}
+    rp.addEventListener("click",run);onView('[data-anim="discovery"]',run);
+  })();
+
+  (function(){
+    var data=[
+      {c:"LinkedIn note",s:"Connection note, under 300 characters",t:"Emma, congrats on the move to Anthropic. INSEAD MBA from strategy consulting here, exploring how people with my background help GTM teams in AI. Would love 15 minutes on how you are building the France side."},
+      {c:"Email / InMail",s:"Longer, for a first email or InMail",t:"Hi Emma,\n\nCongratulations on joining Anthropic, your post about building the France and Europe presence is exactly what caught my attention.\n\nI am an INSEAD MBA finishing this year, with seven years in strategy consulting at Monitor Deloitte before this. I am mapping how non-engineering profiles, strategy and GTM people, add value inside frontier AI companies, and your move into Anthropic France is one of the clearest examples I have found.\n\nI am not reaching out about a role. I would simply value 15 to 20 minutes to hear how you are thinking about the France build, and where someone with a consulting and GTM background fits. Happy to work around your calendar.\n\nBest,\nLiyang"},
+      {c:"WhatsApp",s:"Casual, for contacts you already know",t:"Hey Emma, congrats on Anthropic! Quick one, would love your read on how non-eng folks add value on the France GTM team. 15 min sometime this week?"}
+    ];
+    var bar=document.getElementById("chanbar"),sub=document.getElementById("dsub"),txt=document.getElementById("dtext"),idx=0,timer=null;
+    data.forEach(function(d,i){var b=document.createElement("span");b.className="chan"+(i===0?" on":"");b.textContent=d.c;b.addEventListener("click",function(){set(i,true);});bar.appendChild(b);});
+    function paint(){bar.querySelectorAll(".chan").forEach(function(c,i){c.classList.toggle("on",i===idx);});
+      txt.classList.add("fade");setTimeout(function(){sub.textContent=data[idx].s;txt.textContent=data[idx].t;txt.classList.remove("fade");},220);}
+    function set(i,m){idx=i;paint();if(m&&timer){clearInterval(timer);timer=null;}}
+    sub.textContent=data[0].s;txt.textContent=data[0].t;
+    onView('[data-anim="drafts"]',function(){timer=setInterval(function(){idx=(idx+1)%data.length;paint();},3600);});
+  })();
+
+  (function(){
+    var tabs=document.querySelectorAll("#ptabs .ptab"),panes=document.querySelectorAll('[data-anim="prep"] .ppane'),timer=null,idx=0;
+    function show(i,m){idx=i;tabs.forEach(function(t,k){t.classList.toggle("on",k===i);});panes.forEach(function(p,k){p.classList.toggle("on",k===i);});if(m&&timer){clearInterval(timer);timer=null;}}
+    tabs.forEach(function(t,i){t.addEventListener("click",function(){show(i,true);});});
+    var sb=document.getElementById("savebtn"),pill=document.getElementById("savedpill");
+    if(sb)sb.addEventListener("click",function(){pill.classList.add("on");});
+    onView('[data-anim="prep"]',function(){timer=setInterval(function(){idx=(idx+1)%tabs.length;show(idx);},4200);});
+  })();
+
+  (function(){onView('[data-anim="dash"]',function(){var b=document.getElementById("gbar");setTimeout(function(){b.style.width=b.getAttribute("data-w");},250);});})();
+
+  (function(){
+    var items=[{d:"due",b:"Davide Bonapersona",s:", follow up and take the founder intro (due in 3 days)."},{d:"soon",b:"Romain Rodier",s:", send the call invite, he accepted."},{d:"soon",b:"Emma Pate",s:", draft a first note while she is fresh from the latest batch."}];
+    var box=document.getElementById("briefitems");
+    onView('[data-anim="brief"]',function(){items.forEach(function(it,k){setTimeout(function(){
+      var el=document.createElement("div");el.style.cssText="display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:6px;font-size:12.5px;opacity:0;transform:translateY(8px);transition:opacity .4s,transform .4s";
+      el.innerHTML='<span style="width:8px;height:8px;border-radius:50%;margin-top:5px;flex:0 0 auto;background:'+(it.d==="due"?"#d8452a":"var(--ac)")+'"></span><div><b>'+it.b+'</b><span style="color:var(--soft-mut)">'+it.s+'</span></div>';
+      box.appendChild(el);requestAnimationFrame(function(){requestAnimationFrame(function(){el.style.opacity=1;el.style.transform="none";});});
+    },300+k*500);});});
+  })();
+
+  (function(){
+    var es=document.querySelectorAll("#memtl .tle"),dec=document.getElementById("memdecide");
+    onView('[data-anim="mem"]',function(){es.forEach(function(e,k){setTimeout(function(){e.classList.add("in");},250+k*420);});setTimeout(function(){dec.classList.add("in");},250+es.length*420+200);});
+  })();
+})();
+</script>
+</body>
+</html>

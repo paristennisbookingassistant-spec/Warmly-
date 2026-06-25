@@ -13,6 +13,7 @@ import { NextResponse, type NextRequest } from "next/server";
 /** Routes that are publicly accessible without authentication */
 const PUBLIC_ROUTES = [
   "/",
+  "/pilot",
   "/login",
   "/signup",
   "/forgot-password",
