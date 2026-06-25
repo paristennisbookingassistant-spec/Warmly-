@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 
 /**
- * Root page — redirects authenticated users to the V2 app.
- * Unauthenticated users are redirected to login by middleware.ts.
+ * Root page — sends every visitor to the public /pilot flyer.
+ * Logged-in users reach the app directly at /v2.
  */
 export default function RootPage() {
-  redirect("/v2");
+  redirect("/pilot");
 }
